@@ -7,3 +7,4 @@ export const repoRoot = resolve(serverRoot, "../..");
 export const migrationsDir = resolve(serverRoot, "drizzle");
 export const webDist = resolve(repoRoot, "apps/web/dist");
 export const snapshotFile = resolve(repoRoot, "data/players.json");
+export const localDbDir = resolve(repoRoot, ".data/pglite");

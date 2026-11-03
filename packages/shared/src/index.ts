@@ -48,10 +48,13 @@ export interface TeamDetail extends MlbTeam {
 
 export interface HealthStatus {
   ok: boolean;
-  database: "connected" | "not configured" | "error";
+  /** "local" = embedded dev database (PGlite) instead of Railway Postgres. */
+  database: "connected" | "local" | "error";
   version: string;
   /** When player data was last refreshed from MLB (ISO time), if known. */
   dataRefreshedAt: string | null;
 }
 
 export * from "./ratings.ts";
+export * from "./draft.ts";
+export * from "./api.ts";

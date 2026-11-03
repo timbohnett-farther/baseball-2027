@@ -88,10 +88,37 @@ The draft pool is everyone on a 40-man roster plus unsigned players with real
 
 ## Draft
 
-- New player gets a **salary cap** (budget) and drafts a 26-man team: 13 hitters,
-  13 pitchers, with position minimums (1 C, all infield spots, 3 OF, 5 SP).
-- Higher Overall costs more. Snake draft vs. CPU teams is a later mode.
-- Real-world trades don't touch your drafted team; you keep who you picked.
+Built (`packages/shared/src/draft.ts`, `apps/server/src/team.ts`):
+
+- Each account drafts **one 12-player arcade team**: a 9-man lineup (C, 1B,
+  2B, 3B, SS, three outfielders, DH) plus 3 pitchers (1 starter, 2 relievers).
+- **$60M salary cap.** Salary grows about 9% per rating point: 70 ≈ $3M,
+  80 ≈ $7M, 90 ≈ $17M, 99 ≈ $36.5M. One superstar fits; two don't.
+- Salary is **locked when drafted**, so a later ratings refresh doesn't break
+  your budget. Players who leave the MLB pool stay on your team.
+- The server refuses picks that would bust the cap, overfill the lineup or
+  staff, or leave too little money for the remaining spots.
+- "Finish draft" marks the team **ready**; dropping a player reopens it.
+- Two-way players (Ohtani) fill DH and the starting pitcher spot.
+- Everyone can draft the same real player; teams play the CPU, not a shared league.
+
+## Game format (arcade)
+
+- **3 innings, 3–4 minutes a game.** Pace over simulation detail.
+- **Two-button controls.** Pitching: aim location, hold to charge velocity
+  and movement. Batting: tap for timing, hold for power. Fielding: point or
+  direction. No pitch menus or defensive shifts.
+- **Heated up.** A meter fills with hits and strikeouts; when it's full the bat
+  glows, contact goes farther, and special swings and pitches unlock
+  (this is the same Power meter that Super Power Bats and power-ups use).
+  Turbo pitches leave a visible trail.
+- **Announcer calls** tied to events players chase: heated up ("He's on
+  FIRE!"), grand slams, monster homers ("into the stratosphere!"), record
+  pitch speeds. Our own lines and voice.
+- **Ratings, exaggerated.** Real ratings drive the sim, then arcade boosts sit
+  on top, so stars feel like superstars.
+- **2-player head-to-head on one device** (later): one bats while the other
+  pitches and fields, swapping each half-inning.
 
 ## Rewards and items
 
@@ -165,6 +192,43 @@ Special bats bought with coins and **activated at big moments**, not always on.
   Legendary bats only drop from milestones, never sold.
 - Boosts are applied inside the `sim` on the server, so they can't be faked.
 
+### Power-ups
+
+Arcade power-ups on top of the real-player sim. Rules that keep them fun:
+
+- **Earned in play**, not just bought: strikeouts, double plays, homers and
+  clutch hits fill a **Power meter**. Each power-up costs meter to use, so
+  using one is a decision. Super Power Bats draw from the same meter.
+- **Tiers**: cheap/weak and expensive/strong, so players can mix and match.
+- **Readable chaos**: every power-up has a clear look and sound, so you always
+  know what just happened.
+- Like bats, effects are resolved by the server-side `sim`; the browser just
+  shows them.
+
+| Role | Power-up | What happens | Tier |
+|---|---|---|---|
+| Batting | Aluminum Bat | any contact is a home run (the rarest drop) | Legendary |
+| Batting | Undergrounder | ball sinks into the field and pops up elsewhere: ground-rule double | Rare |
+| Batting | Crazy Bunt | bunt bounces wildly around the infield; very hard to field | Common |
+| Batting | Meteor Swing | ball becomes a flaming meteor; a fielder who catches it is dazed | Rare |
+| Batting | Leaf Hit | ball floats down like a leaf; outfielders misjudge it | Common |
+| Pitching | Fireball | blazing fast pitch, nearly unhittable | Rare |
+| Pitching | Big Freeze | looks slow, freezes before the plate; batter swings early | Rare |
+| Pitching | Ninja Ball | splits into several balls; only one is real | Rare |
+| Pitching | Corkscrew | spirals toward the plate, hard to track | Common |
+| Pitching | Elevator Pitch | rises sharply, then drops | Common |
+| Pitching | Dizzy Ball | if put in play, the fielding team's controls flip for a few seconds | Rare |
+| Fielding/special | Earthquake | on a hard hit, all runners freeze for a few seconds | Rare |
+| Fielding/special | Invisible Ball | ball vanishes mid-flight; fielders guess | Rare |
+| Fielding/special | Hyper-Run | runner gets super speed to first base | Common |
+| Fielding/special | Bomb Hit | ball explodes on the glove or ground, knocking the fielder down | Rare |
+| Fielding/special | Orbit Hit | ball circles a fielder 2–3 times before settling | Common |
+
+- Since the sim decides outcomes, each power-up becomes a probability change
+  (Fireball: much lower contact chance; Leaf Hit: higher chance of a dropped
+  fly). Controls-based effects (Dizzy Ball) apply in the moments where the
+  player makes choices.
+
 ## Graphics and big moments
 
 Target look: dramatic, close-up, slow motion, with flying dirt and motion blur.
@@ -190,13 +254,13 @@ Target look: dramatic, close-up, slow motion, with flying dirt and motion blur.
 
 | Table | Holds |
 |---|---|
-| `users` | login, display name, coin balance cache |
 | `mlb_teams` | 30 teams, league, division (built) |
 | `players` | MLB id, bio, position, current team, status, in draft pool (built) |
 | `player_ratings` | ratings per player per season (built) |
 | `data_refreshes` | each MLB refresh: when, season, player count, errors (built) |
-| `user_teams` | a user's drafted team (name, colors, budget) |
-| `user_team_players` | drafted player, lineup slot, equipped items |
+| `users`, `sessions` | accounts (scrypt passwords) and sign-in sessions (built) |
+| `user_teams` | a user's team: name, color, drafting or ready (built) |
+| `user_team_players` | drafted players with their locked salary (built) |
 | `games` | seed, opponent, score, status, box score JSON |
 | `items` / `user_items` | item catalog and what each user owns |
 | `ledger` | every coin earned or spent, with reason |
@@ -241,7 +305,7 @@ One Railway project (`incredible-perception`, to be renamed `baseball-2027`), wi
 
 1. ✅ Scaffold the monorepo; deploy to Railway with Postgres.
 2. ✅ Data refresh: teams, players, stats, Statcast; compute ratings; player board.
-3. Accounts and the draft screen.
+3. ✅ Accounts and the draft screen (12-man arcade team, $60M cap).
 4. `sim` package with tests; text play-by-play game.
 5. 3D field view (Three.js) on top of the sim.
 6. Coins, store, items (Super Power Bats), ledger.
