@@ -1,0 +1,19 @@
+{
+  "name": "baseball-2027",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @bb/server & npm run dev --workspace @bb/web",
+    "build": "npm run build --workspace @bb/web && npm run build --workspace @bb/server",
+    "start": "node apps/server/dist/index.js",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
