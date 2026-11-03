@@ -1,7 +1,7 @@
 # baseball-2027
 Baseball by Micah. Draft real MLB players, win games, earn gear.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/VISUAL_DESIGN.md](docs/VISUAL_DESIGN.md) for the look.
 
 ## Run it locally
 

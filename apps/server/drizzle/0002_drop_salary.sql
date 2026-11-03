@@ -1,0 +1,1 @@
+ALTER TABLE "user_team_players" DROP COLUMN "salary";

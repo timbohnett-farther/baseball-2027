@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
 import { AuthPanel } from "./auth.tsx";
@@ -31,13 +31,14 @@ export function App() {
   );
 
   return (
+    <>
+    <Atmosphere />
     <div className="page">
       <header className="hero">
         <div className="userbar">
           {me ? <>Hi, <b>{me.displayName}</b> · <button className="link" onClick={signOut}>Sign out</button></>
             : me === null && <button className="link" onClick={() => setView({ kind: "sign-in" })}>Sign in</button>}
         </div>
-        <div className="ball" aria-hidden>⚾</div>
         <h1>Baseball 2027</h1>
         <p className="tag">Draft real big-leaguers. Win games. Earn gear.</p>
         <div className="status">
@@ -80,6 +81,21 @@ export function App() {
           ))}
         </main>
       )}
+    </div>
+    </>
+  );
+}
+
+/** Slow dust drifting through the warm key light (quiet menu version of the big-play burst). */
+function Atmosphere() {
+  const motes = useMemo(() => Array.from({ length: 14 }, (_, i) => ({
+    top: `${(i * 37) % 100}%`, size: 2 + ((i * 7) % 4), duration: 18 + ((i * 11) % 14), delay: -((i * 13) % 30), opacity: 0.25 + ((i * 3) % 5) / 10,
+  })), []);
+  return (
+    <div className="atmosphere" aria-hidden>
+      {motes.map((m, i) => (
+        <span key={i} className="mote" style={{ top: m.top, width: m.size, height: m.size, opacity: m.opacity, animationDuration: `${m.duration}s`, animationDelay: `${m.delay}s` }} />
+      ))}
     </div>
   );
 }

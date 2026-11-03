@@ -58,3 +58,4 @@ export interface HealthStatus {
 export * from "./ratings.ts";
 export * from "./draft.ts";
 export * from "./api.ts";
+export * from "./chemistry.ts";

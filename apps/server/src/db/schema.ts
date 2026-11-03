@@ -73,8 +73,6 @@ export const userTeams = pgTable("user_teams", {
 export const userTeamPlayers = pgTable("user_team_players", {
   teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
   playerId: integer("player_id").notNull().references(() => players.id),
-  // Locked when drafted (tenths of $M), so later rating changes don't break your budget.
-  salary: integer("salary").notNull(),
   addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.teamId, t.playerId] })]);
 

@@ -2,6 +2,7 @@
 
 import type { Player } from "./index.ts";
 import type { DraftStatus } from "./draft.ts";
+import type { ChemistryReport } from "./chemistry.ts";
 
 export interface Me {
   id: number;
@@ -13,22 +14,20 @@ export interface Me {
 export interface SignupRequest { username: string; password: string; displayName?: string }
 export interface LoginRequest { username: string; password: string }
 
-export const TEAM_COLORS = ["#c8102e", "#0c2340", "#1f6f43", "#fd5a1e", "#4b2e83", "#b8860b", "#00a3e0", "#111111"] as const;
+/** Team accent colors: bright enough to read as a stripe on the dark UI (never a panel fill). */
+export const TEAM_COLORS = ["#c8322f", "#3a6fd8", "#2e9e5b", "#fd5a1e", "#8a5cd6", "#d4af37", "#00a3e0", "#b8bcc6"] as const;
 
 export interface CreateTeamRequest { name: string; color: string }
-
-export interface DraftedPlayer extends Player {
-  /** Salary locked when drafted, in tenths of $M. */
-  salary: number;
-}
 
 export interface MyTeam {
   id: number;
   name: string;
   color: string;
   status: "drafting" | "ready";
-  players: DraftedPlayer[];
+  players: Player[];
   draft: DraftStatus;
+  /** How the players affect each other: effects, per-player boosts, team power. */
+  chemistry: ChemistryReport;
 }
 
 export interface ApiError { error: string }

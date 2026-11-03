@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { salaryFor, slotsFor, type MyTeam, type Player } from "@bb/shared";
+import { slotsFor, type MyTeam, type Player } from "@bb/shared";
 import { buildApp } from "./app.ts";
 import { closeDb, initDb } from "./db/index.ts";
 import { pool, startStore } from "./store.ts";
@@ -25,9 +25,9 @@ async function signup(username: string, password = "secret123") {
   return { res, cookie: cookieOf(res) };
 }
 
-/** Cheapest legal team from the real pool: one per position, three OF, a DH, an SP and two RPs. */
-function cheapTeam(): Player[] {
-  const byCost = [...pool().players].sort((a, b) => salaryFor(a.ratings.overall) - salaryFor(b.ratings.overall));
+/** A legal team from the real pool (best available at each spot): one per position, three OF, a DH, an SP and two RPs. */
+function legalTeam(): Player[] {
+  const byCost = pool().players; // sorted best-first
   const chosen: Player[] = [];
   const need: [string, number][] = [["C", 1], ["1B", 1], ["2B", 1], ["3B", 1], ["SS", 1], ["OF", 3], ["DH", 1], ["SP", 1], ["RP", 2]];
   for (const [slot, n] of need) {
@@ -75,10 +75,10 @@ test("create a team, draft a legal roster, finish", async () => {
   const headers = { cookie };
   assert.equal((await app.inject({ url: "/api/my-team", headers })).statusCode, 404);
   assert.equal((await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Sluggers", color: "#bad" } })).statusCode, 400);
-  const created = await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Sluggers", color: "#c8102e" } });
+  const created = await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Sluggers", color: "#c8322f" } });
   assert.equal(created.statusCode, 201);
 
-  const team = cheapTeam();
+  const team = legalTeam();
   assert.equal(team.length, 12);
   let last: MyTeam | null = null;
   for (const p of team) {
@@ -103,15 +103,16 @@ test("create a team, draft a legal roster, finish", async () => {
   assert.equal((await app.inject({ method: "POST", url: "/api/my-team/finish", headers })).statusCode, 400);
 });
 
-test("the salary cap is enforced on the server", async () => {
-  const { cookie } = await signup("bigspender");
+test("your team comes back with chemistry: rivals feud", async () => {
+  const { cookie } = await signup("rivals");
   const headers = { cookie };
-  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Stars", color: "#0c2340" } });
-  // The top hitters cost far more than $60M together; adding stops before the cap.
-  const stars = pool().players.filter((p) => p.ratings.role === "H").slice(0, 6);
-  const results = [];
-  for (const p of stars) results.push((await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers })).statusCode);
-  assert.ok(results.includes(400), `expected a budget refusal, got ${results}`);
-  const team = (await app.inject({ url: "/api/my-team", headers })).json() as MyTeam;
-  assert.ok(team.draft.payroll <= 600);
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Frenemies", color: "#3a6fd8" } });
+  const yankee = pool().players.find((p) => p.teamAbbr === "NYY" && p.ratings.role === "H")!;
+  const redSox = pool().players.find((p) => p.teamAbbr === "BOS" && p.ratings.role === "H")!;
+  await app.inject({ method: "POST", url: `/api/my-team/players/${yankee.id}`, headers });
+  const res = await app.inject({ method: "POST", url: `/api/my-team/players/${redSox.id}`, headers });
+  const team = res.json() as MyTeam;
+  const feud = team.chemistry.effects.find((e) => e.name.startsWith("Bad Blood"));
+  assert.ok(feud, JSON.stringify(team.chemistry.effects.map((e) => e.name)));
+  assert.ok(team.chemistry.players.find((p) => p.playerId === yankee.id)!.delta < 0);
 });

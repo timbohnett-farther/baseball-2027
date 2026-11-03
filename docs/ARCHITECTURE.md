@@ -91,16 +91,49 @@ The draft pool is everyone on a 40-man roster plus unsigned players with real
 Built (`packages/shared/src/draft.ts`, `apps/server/src/team.ts`):
 
 - Each account drafts **one 12-player arcade team**: a 9-man lineup (C, 1B,
-  2B, 3B, SS, three outfielders, DH) plus 3 pitchers (1 starter, 2 relievers).
-- **$60M salary cap.** Salary grows about 9% per rating point: 70 ≈ $3M,
-  80 ≈ $7M, 90 ≈ $17M, 99 ≈ $36.5M. One superstar fits; two don't.
-- Salary is **locked when drafted**, so a later ratings refresh doesn't break
-  your budget. Players who leave the MLB pool stay on your team.
-- The server refuses picks that would bust the cap, overfill the lineup or
-  staff, or leave too little money for the remaining spots.
+  2B, 3B, SS, three outfielders, DH) plus 3 pitchers (1 starter + any 2 more).
+- **No salary cap.** Pick anyone. Balance comes from **team chemistry** (below).
+- The server refuses picks that overfill the lineup (9 hitters) or staff (3 pitchers).
 - "Finish draft" marks the team **ready**; dropping a player reopens it.
 - Two-way players (Ohtani) fill DH and the starting pitcher spot.
+- Players who leave the MLB pool stay on your team.
 - Everyone can draft the same real player; teams play the CPU, not a shared league.
+
+## Team chemistry
+
+Built (`packages/shared/src/chemistry.ts`). Who you put together changes how
+they play. Every effect is a set of rating changes on specific players, so the
+game engine uses them directly, and the draft screen explains each one in a
+sentence. **Team Power** = average rating after chemistry.
+
+| Effect | When | Change |
+|---|---|---|
+| Bad Blood | Players from rival MLB teams (18 real rivalries: Yankees/Red Sox, Dodgers/Giants, Cubs/Cardinals, Subway Series...) | −3 to all per rival teammate (max −9) |
+| Crossed Signals | Your catcher and a pitcher come from rival teams | pitcher −6 Control |
+| Veteran Presence | A 34+ veteran who isn't in the feud | Bad Blood cut in half |
+| Clubhouse Chemistry | 3+ players from the same MLB team (5+ = more) | +2 (or +4) to all of them |
+| Battery Mates | A pitcher and his real-life catcher | pitcher +3 Control, +2 Movement |
+| Spotlight Overload | Star power over 6 (90–94 = 1, 95–98 = 2, 99 = 3) | −2 per point over to every star (max −16) |
+| Overshadowed | Pitching star power beats hitting star power | star hitters −2 Power per point of gap |
+| Forgotten Arms | Hitting star power beats pitching by 5+ | pitchers lose Control and Stamina |
+| Showtime | Exactly one big personality (power 95+ or a 99 hitter) | +3 Power |
+| Clash of Personalities | Two or more big personalities | each −3 Contact per extra ego |
+| Glue Guy | A steady 72–84 hitter with 80+ contact and fielding | +1 to every teammate |
+| Hungry Free Agents | Unsigned players | +2 to all |
+| Country Pride | 3+ players from the same country (outside the USA) | +2 Contact or Control |
+| Mentors / Rookie Jitters | Rookies with a 34+ veteran / without one | +3 / −3 to all for rookies |
+| Old Legs | 4+ players aged 33+ | hitters −4 Speed |
+| Predictable Lineup / Lefty-Righty Mix | 7+ hitters bat the same side / a real mix | −2 / +1 Contact |
+| Strength Up the Middle | 80+ gloves at C, SS and CF | pitchers +3 Movement |
+
+Measured on real players (2026 ratings): best player at every spot = 93.2 base
+→ **77.9** Team Power; a team of solid 80–89s → 88.6; two superstars with a
+good supporting cast → 90.2; a chemistry-smart mix → 91.8. Stars matter, how
+you combine them matters more. The draft board previews every pick's
+chemistry impact (for example, "−31").
+
+Personalities are inferred from stats (huge power = showboat), never claims
+about real people's character.
 
 ## Game format (arcade)
 
@@ -260,7 +293,7 @@ Target look: dramatic, close-up, slow motion, with flying dirt and motion blur.
 | `data_refreshes` | each MLB refresh: when, season, player count, errors (built) |
 | `users`, `sessions` | accounts (scrypt passwords) and sign-in sessions (built) |
 | `user_teams` | a user's team: name, color, drafting or ready (built) |
-| `user_team_players` | drafted players with their locked salary (built) |
+| `user_team_players` | drafted players (built) |
 | `games` | seed, opponent, score, status, box score JSON |
 | `items` / `user_items` | item catalog and what each user owns |
 | `ledger` | every coin earned or spent, with reason |
@@ -305,7 +338,7 @@ One Railway project (`incredible-perception`, to be renamed `baseball-2027`), wi
 
 1. ✅ Scaffold the monorepo; deploy to Railway with Postgres.
 2. ✅ Data refresh: teams, players, stats, Statcast; compute ratings; player board.
-3. ✅ Accounts and the draft screen (12-man arcade team, $60M cap).
+3. ✅ Accounts, the draft (12-man arcade team, no cap) and team chemistry.
 4. `sim` package with tests; text play-by-play game.
 5. 3D field view (Three.js) on top of the sim.
 6. Coins, store, items (Super Power Bats), ledger.

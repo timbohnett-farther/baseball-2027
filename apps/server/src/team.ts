@@ -1,13 +1,13 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
-  canAdd, draftStatus, salaryFor, TEAM_COLORS,
-  type CreateTeamRequest, type DraftedPlayer, type DraftPick, type Me, type MyTeam, type Player,
+  canAdd, chemistry, draftStatus, TEAM_COLORS,
+  type CreateTeamRequest, type DraftPick, type Me, type MyTeam, type Player,
 } from "@bb/shared";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { playerRatings, players, userTeamPlayers, userTeams } from "./db/schema.ts";
-import { findPlayer } from "./store.ts";
+import { findPlayer, pool } from "./store.ts";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -24,23 +24,26 @@ async function playerFromDb(db: Db | Tx, id: number): Promise<Player | null> {
   };
 }
 
-async function teamPlayers(db: Db | Tx, teamId: number): Promise<DraftedPlayer[]> {
+async function teamPlayers(db: Db | Tx, teamId: number): Promise<Player[]> {
   const rows = await db.select().from(userTeamPlayers).where(eq(userTeamPlayers.teamId, teamId)).orderBy(userTeamPlayers.addedAt);
-  const out: DraftedPlayer[] = [];
+  const out: Player[] = [];
   for (const r of rows) {
     const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
-    if (p) out.push({ ...p, salary: r.salary });
+    if (p) out.push(p);
   }
   return out;
 }
 
-const toPick = (p: DraftedPlayer): DraftPick => ({ playerId: p.id, position: p.position, role: p.ratings.role, salary: p.salary });
+const toPick = (p: Player): DraftPick => ({ playerId: p.id, position: p.position, role: p.ratings.role });
 
 async function myTeam(db: Db | Tx, user: Me): Promise<MyTeam | null> {
   const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, user.id));
   if (!team) return null;
   const roster = await teamPlayers(db, team.id);
-  return { id: team.id, name: team.name, color: team.color, status: team.status, players: roster, draft: draftStatus(roster.map(toPick)) };
+  return {
+    id: team.id, name: team.name, color: team.color, status: team.status, players: roster,
+    draft: draftStatus(roster.map(toPick)), chemistry: chemistry(roster, pool().statsSeason || undefined),
+  };
 }
 
 function cleanTeam(body: Partial<CreateTeamRequest> | undefined): { name?: string; color?: string; error?: string } {
@@ -76,14 +79,13 @@ export async function teamRoutes(app: FastifyInstance) {
     const player = findPlayer(Number(req.params.playerId));
     if (!player) return reply.code(404).send({ error: "Player not found in the draft pool." });
     return getDb().transaction(async (tx) => {
-      // Lock the team row so two quick clicks can't both spend the same budget.
+      // Lock the team row so two quick clicks can't both take the last roster spot.
       const [team] = await tx.select().from(userTeams).where(eq(userTeams.userId, req.user!.id)).for("update");
       if (!team) return reply.code(404).send({ error: "Create your team first." });
       const roster = await teamPlayers(tx, team.id);
-      const salary = salaryFor(player.ratings.overall);
-      const problem = canAdd(roster.map(toPick), { playerId: player.id, position: player.position, role: player.ratings.role, salary });
+      const problem = canAdd(roster.map(toPick), toPick(player));
       if (problem) return reply.code(400).send({ error: problem });
-      await tx.insert(userTeamPlayers).values({ teamId: team.id, playerId: player.id, salary });
+      await tx.insert(userTeamPlayers).values({ teamId: team.id, playerId: player.id });
       await tx.update(userTeams).set({ status: "drafting", updatedAt: new Date() }).where(eq(userTeams.id, team.id));
       return myTeam(tx, req.user!);
     });

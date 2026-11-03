@@ -4,11 +4,10 @@ import type { Player, TeamSummary } from "@bb/shared";
 export const POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "DH", "P"];
 
 /** Searchable, filterable list of the draft pool. `action` adds a button column (e.g. Draft). */
-export function PlayerBoard({ teams, action, extraHeader, salary }: {
+export function PlayerBoard({ teams, action, extraHeader }: {
   teams: TeamSummary[];
   action?: (p: Player) => ReactNode;
   extraHeader?: ReactNode;
-  salary?: (p: Player) => string;
 }) {
   const [position, setPosition] = useState("");
   const [team, setTeam] = useState("");
@@ -41,16 +40,15 @@ export function PlayerBoard({ teams, action, extraHeader, salary }: {
         </select>
       </div>
       <p className="muted">{result ? `${result.total} players${result.total > 150 ? ", showing top 150" : ""}` : "Loading…"}</p>
-      {result && <PlayerTable players={result.players} showTeam action={action} salary={salary} />}
+      {result && <PlayerTable players={result.players} showTeam action={action} />}
     </section>
   );
 }
 
-export function PlayerTable({ players, showTeam, action, salary }: {
+export function PlayerTable({ players, showTeam, action }: {
   players: Player[];
   showTeam: boolean;
   action?: (p: Player) => ReactNode;
-  salary?: (p: Player) => string;
 }) {
   return (
     <div className="table-wrap">
@@ -59,9 +57,8 @@ export function PlayerTable({ players, showTeam, action, salary }: {
           <tr>
             {action && <th />}
             <th>OVR</th><th>Name</th><th>Pos</th>{showTeam && <th>Team</th>}
-            {salary && <th>Salary</th>}
             <th title="Hitters: Contact · Power · Eye · Speed · Fielding. Pitchers: Stuff · Control · Movement · Stamina">Ratings</th>
-            <th>Age</th><th>Status</th>
+            <th className="num">Age</th><th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -72,9 +69,8 @@ export function PlayerTable({ players, showTeam, action, salary }: {
               <td>{p.name}</td>
               <td>{positionLabel(p)}</td>
               {showTeam && <td>{p.teamAbbr ?? "FA"}</td>}
-              {salary && <td>{salary(p)}</td>}
               <td className="skills"><Skills player={p} /></td>
-              <td>{p.age}</td>
+              <td className="num">{p.age}</td>
               <td className={p.status === "Active" ? "" : "muted"}>{p.status}</td>
             </tr>
           ))}
