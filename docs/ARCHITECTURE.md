@@ -17,7 +17,7 @@ rewards (coins and special items) for winning. Hosted on Railway.
 |---|---|---|
 | Language | TypeScript everywhere | Game rules are shared by the server and the browser |
 | Browser app | React + Vite | Menus, draft board, roster, store, inventory |
-| Game field | Phaser 3 inside a React page | 2D field, pitches, hits and runners animated on a canvas |
+| Game field | Three.js inside a React page | 3D ballpark; slow-motion replays and particle effects for big moments |
 | Server | Node + Fastify | Small, fast API; also serves the built browser app |
 | Database | Railway Postgres + Drizzle ORM | Typed queries, migrations kept in the repo |
 | Login | Username + password, cookie sessions | Simple; parent can create the accounts |
@@ -27,13 +27,12 @@ rewards (coins and special items) for winning. Hosted on Railway.
 
 ```
 apps/
-  web/        React + Vite + Phaser (what the player sees)
-  server/     Fastify API, auth, reward logic, serves web/dist
-  jobs/       Roster + stats refresh (runs on a schedule)
+  web/        React + Vite + Three.js (what the player sees)
+  server/     Fastify API, auth, rewards, daily MLB refresh, serves web/dist
 packages/
   sim/        Game engine: at-bat outcomes, innings, box score. Pure TS, seeded RNG
   shared/     Types, rating formulas, item definitions, constants
-data/         Snapshot JSON from MLB (seed data for local dev)
+data/         players.json: rated draft pool snapshot (fallback + local dev)
 docs/
 ```
 
@@ -45,7 +44,7 @@ Browser                         Server                        Postgres
   | <------------------------- game id + seed + lineups
   | each pitch / swing choice ->  packages/sim resolves it
   | <------------------------- result (ball, strike, single...)
-  | Phaser animates it
+  | 3D field animates it
   | ... final out ...
   |                              compute rewards ---------->  coins, items, stats
   | <------------------------- "You won! +150 coins, Gold Bat unlocked"
@@ -58,17 +57,34 @@ Browser                         Server                        Postgres
 
 ## Player ratings
 
-Ratings are 40–99, built from MLB stats as percentiles against all MLB players
-at that position group, so they stay balanced year to year.
+Ratings are 40–99. **70 = an average MLB regular**, each standard deviation
+is 10 points (8.5 for Overall, so a 99 overall stays rare: about 6 players).
 
-- **Hitters:** Contact (AVG, K%), Power (ISO, HR rate), Eye (BB%), Speed
-  (sprint speed / SB), Fielding (position + fielding stats)
-- **Pitchers:** Stuff (K%), Control (BB%), Movement (HR/9, GB%), Stamina (IP/GS)
-- **Overall** = weighted mix of the above. Drives draft cost and card rarity.
-- Players with few at-bats/innings are blended toward career numbers so a
-  rookie with 10 at-bats doesn't rate 99.
+How they're built (`packages/shared/src/ratings.ts`):
 
-Formulas live in `packages/shared` so the draft screen and the sim agree.
+1. **Combine recent seasons**: MLB 2026 ×1.0, 2025 ×0.8, 2024 ×0.6; Triple-A
+   counted at half weight and translated to MLB level (more strikeouts,
+   fewer homers).
+2. **Regress small samples** toward a "fringe big-leaguer" baseline, so 20 hot
+   at-bats can't make a star and an unproven prospect lands around 50–65.
+3. **Score against MLB regulars** and clamp to 40–99.
+
+| Rating | Built from |
+|---|---|
+| Contact | strikeout rate, batting average |
+| Power | isolated power, home-run rate |
+| Eye | walk rate (no intentional walks) |
+| Speed | Statcast sprint speed, stolen-base attempts |
+| Fielding | Statcast outs above average; catchers: caught-stealing rate; DH = 45 |
+| Stuff | strikeout rate, fastball velocity |
+| Control | walk rate |
+| Movement | home-run rate allowed, ground-ball rate |
+| Stamina | outs per appearance |
+| **Overall (hitter)** | weighted on-base value + fielding + speed + position (C/SS up, 1B/DH down) |
+| **Overall (pitcher)** | FIP + stamina; role SP or RP from games started |
+
+The draft pool is everyone on a 40-man roster plus unsigned players with real
+2026 playing time (50+ PA or 15+ IP), currently about 1,380 players.
 
 ## Draft
 
@@ -86,6 +102,85 @@ Formulas live in `packages/shared` so the draft screen and the sim agree.
     Rosin bag (+Control), plus jerseys, stadiums, celebrations.
 - Item definitions are data (a table in `shared`), so adding items needs no
   new code paths.
+
+### Standard wood bats (free, everyone starts here)
+
+Every hitter swings a pro-style wood bat by default. You pick its specs, and
+they nudge ratings slightly (always on, at most ±2) with no Super Swing:
+
+| Choice | Options | Effect |
+|---|---|---|
+| Wood | Maple or Ash | Maple: harder, +1 Power. Ash: more flex, +1 Contact |
+| Length | 33" or 34" | 34": +1 Power, −1 Contact |
+| Weight | 31 oz or 32 oz | 32 oz: +1 Power, −1 Contact |
+| Drop (length − weight) | −1 to −3, from the two above | shown on the bat card |
+
+- Barrel stays at the pro maximum, 2.61". Bats are named by our own makers
+  (inspired by Marucci, Victus, Louisville Slugger and Old Hickory, the most
+  used in MLB in 2026), purely cosmetic.
+
+### Super Power Bats
+
+Special bats bought with coins and **activated at big moments**, not always on.
+
+- Each bat has a few **charges per game**. Using one turns the next swing into
+  a Super Swing: a large boost for that one swing, with its own effect
+  (glowing barrel, sparks, shockwave on contact).
+- Charges can only be used in **clutch spots**: runners in scoring position,
+  7th inning or later, or two strikes. They're a choice, not an autopilot.
+- Every bat is defined by **real bat properties**, and the game turns those into
+  its Super Swing. Same specs, same behavior, so adding a bat is just data:
+
+| Property | Game effect |
+|---|---|
+| Swing weight: **balanced** | +Contact; easier to square up |
+| Swing weight: **mid-loaded** | some +Contact and +Power |
+| Swing weight: **end-loaded** | big +Power, slightly more strikeouts |
+| Build: **one-piece alloy** | stiff and durable: +1 charge per game, steady results |
+| Build: **two-piece composite** | bigger sweet spot (more solid hits), vibration control |
+| Build: **hybrid** (alloy barrel, composite handle) | between the two |
+| Class: **Youth (USSSA)** | starter bats, smaller boosts |
+| Class: **BBCOR** (high school/college) | stronger bats, bigger boosts, unlocked later |
+
+- **The bat list.** Names are our own, since real brand names are trademarks
+  (the same issue as team logos). The "inspired by" column is design notes only.
+
+| Class | Inspired by | Swing weight | Build | Plays like |
+|---|---|---|---|---|
+| Youth | Louisville Slugger Supra | balanced | two-piece composite | best all-rounder |
+| Youth | DeMarini Zen | balanced | two-piece composite | top contact |
+| Youth | Easton Hype Fire | mid-loaded | two-piece composite | big barrel, all-around |
+| Youth | Rawlings Icon / Easton The Dub | end-loaded | two-piece composite | power |
+| Youth | Marucci CAT X2 | balanced | one-piece alloy | control, durable |
+| BBCOR | 2027 Easton Hype Fire | mid-loaded | two-piece composite | big barrel, all-around power |
+| BBCOR | 2027 Marucci Rckless Gen 2 Alloy | balanced | one-piece alloy | stiff, durable, steady |
+| BBCOR | 2027 Rawlings Icon | balanced, slight end-load | two-piece composite | consistent contact and power |
+| BBCOR | 2027 Louisville Slugger Atlas 2.0 | balanced | one-piece alloy | contact and gap hitter (doubles) |
+| BBCOR | 2027 Marucci Rckless Gen 2 Hybrid | end-loaded | hybrid | power hitter's bat |
+
+- Tiers: Common, Rare, Legendary (more charges, bigger boost, flashier effect).
+  Youth bats are Common/Rare; BBCOR bats are Rare/Legendary. Legendary bats
+  only drop from milestones, never sold.
+- Boosts are applied inside the `sim` on the server, so they can't be faked.
+
+## Graphics and big moments
+
+Target look: dramatic, close-up, slow motion, with flying dirt and motion blur.
+
+- **Live play in 3D (Three.js)**: a stylized ballpark and players, camera
+  behind the plate, so every pitch and swing is fast and readable.
+- **Big-moment replays**: after a home run, strikeout to end an inning, diving
+  catch or Super Swing, the game cuts to a **slow-motion close-up**: bat
+  smashing the ball, dust and dirt bursting, sparks from a Super Power Bat.
+  - Built from short cinematic clips and stills (generated once, stored in the
+    `baseball-assets` bucket), layered with live effects: particles for dirt
+    and dust, slow-mo ramp, camera shake, motion blur, flash on contact.
+  - The player's name, number and team colors are overlaid, so every replay
+    feels like it's your player.
+- Generated art shows **generic players, never real players' faces**. Real
+  likenesses, like logos, need licenses.
+- Full photo-realism in real time isn't practical in a browser. The mix of
+  stylized live play and cinematic replays gets the look where it matters.
 - All coin changes go through one server function and are logged in a
   `ledger` table. Balance = sum of the ledger, so it can always be audited.
 
@@ -94,9 +189,10 @@ Formulas live in `packages/shared` so the draft screen and the sim agree.
 | Table | Holds |
 |---|---|
 | `users` | login, display name, coin balance cache |
-| `mlb_teams` | 30 teams, league, division |
-| `mlb_players` | MLB id, bio, position, current team, status |
-| `player_ratings` | ratings per player per season |
+| `mlb_teams` | 30 teams, league, division (built) |
+| `players` | MLB id, bio, position, current team, status, in draft pool (built) |
+| `player_ratings` | ratings per player per season (built) |
+| `data_refreshes` | each MLB refresh: when, season, player count, errors (built) |
 | `user_teams` | a user's drafted team (name, colors, budget) |
 | `user_team_players` | drafted player, lineup slot, equipped items |
 | `games` | seed, opponent, score, status, box score JSON |
@@ -105,15 +201,21 @@ Formulas live in `packages/shared` so the draft screen and the sim agree.
 
 ## Railway setup
 
-One Railway project, `baseball-2027`, with:
+One Railway project (`incredible-perception`, to be renamed `baseball-2027`), with:
 
 | Service | What it runs | Notes |
 |---|---|---|
-| `web` | `apps/server` (also serves the built `apps/web`) | Deploys on every push to `main`; health check at `/health` |
-| `Postgres` | Railway Postgres | `DATABASE_URL` shared to `web` and `jobs` |
-| `refresh-rosters` | `apps/jobs` | Railway cron, daily at 09:00 UTC; upserts teams, players, stats, ratings |
+| `baseball-2027` | `apps/server` (also serves the built `apps/web`) | Deploys on every push to `main`; health check at `/health` |
+| `Postgres` | Railway Postgres | `DATABASE_URL` referenced by the app |
+| `baseball-assets` bucket | S3-compatible storage | Replay clips, art, sounds; `BUCKET_*` variables on the app |
 
-- Database migrations run on deploy, before the server starts.
+- Database migrations run when the server starts.
+- **Daily data refresh runs inside the server**: every hour it checks, and if
+  the last good refresh is over 20 hours old it pulls rosters and stats,
+  re-rates everyone (about 6 seconds), saves to Postgres and swaps the new
+  pool into memory. No separate cron service needed.
+- If the database is empty (first deploy), the server serves the committed
+  snapshot `data/players.json` until its first refresh finishes.
 - Secrets (`SESSION_SECRET`, `DATABASE_URL`) live in Railway variables, never
   in the repo.
 - A `staging` environment can be added later so changes are tested before
@@ -122,24 +224,27 @@ One Railway project, `baseball-2027`, with:
 
 ## Data from MLB
 
-- Source: the public MLB Stats API (`statsapi.mlb.com`). No key needed.
-- The Python script in `scripts/fetch_rosters.py` proves the data; it will be
-  ported to TypeScript in `apps/jobs` so everything shares one toolchain.
-- Free agents are pulled as a separate pool so stars between teams are
-  still draftable.
+- Sources: the public MLB Stats API (`statsapi.mlb.com`: rosters, MLB and
+  Triple-A season stats) and Baseball Savant (Statcast sprint speed, outs above
+  average, fastball velocity). No keys needed. If Savant is down, ratings fall
+  back to box-score stats.
+- Code: `apps/server/src/mlb/`. Run by hand with `npm run refresh`, which also
+  rewrites `data/players.json`.
+- Free agents (not on any 40-man roster) stay in the pool, marked "Free Agent".
 - **No MLB or team logos.** Teams use city names and our own colors. Player
   names are fine for a private family game; selling it would need MLB and
   MLBPA licenses.
 
 ## Build order
 
-1. Scaffold the monorepo; deploy a "hello" page to Railway with Postgres.
-2. Data job: load teams, players, 2026 stats; compute ratings.
+1. ✅ Scaffold the monorepo; deploy to Railway with Postgres.
+2. ✅ Data refresh: teams, players, stats, Statcast; compute ratings; player board.
 3. Accounts and the draft screen.
 4. `sim` package with tests; text play-by-play game.
-5. Phaser field view on top of the sim.
-6. Coins, store, items, ledger.
-7. Polish: sounds, celebrations, season mode, leaderboards.
+5. 3D field view (Three.js) on top of the sim.
+6. Coins, store, items (Super Power Bats), ledger.
+7. Big-moment replays: slow-motion close-ups, dust and spark effects.
+8. Polish: sounds, celebrations, season mode, leaderboards.
 
 ## Local setup needed
 

@@ -46,10 +46,39 @@ body { margin: 0; }
 .name { flex: 1; }
 .count { font-size: 13px; color: var(--muted); }
 
-.roster { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
-.roster h2 { margin: 8px 0 2px; }
+
+
 .back { border: 1px solid var(--line); background: var(--chalk); border-radius: 999px; padding: 6px 14px; font: inherit; cursor: pointer; }
 .muted { color: var(--muted); }
 table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 15px; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { font-size: 12px; text-transform: uppercase; color: var(--muted); }
+
+.tabs { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+.tabs button { font: inherit; font-weight: 700; border: 2px solid rgba(255,255,255,0.6); background: transparent; color: var(--chalk);
+  padding: 6px 18px; border-radius: 999px; cursor: pointer; }
+.tabs button.on { background: var(--chalk); color: var(--grass-dark); }
+
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.panel h2 { margin: 8px 0 2px; }
+.table-wrap { overflow-x: auto; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters input, .filters select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--chalk); }
+.filters input { flex: 1 1 200px; }
+
+.ovr { display: inline-block; min-width: 34px; text-align: center; font-weight: 800; padding: 2px 6px; border-radius: 6px; color: #fff; }
+.ovr.elite { background: #b8860b; }
+.ovr.great { background: #1f6f43; }
+.ovr.good { background: #2f7fb5; }
+.ovr.ok { background: #7a8580; }
+.ovr.low { background: #a9b0ac; }
+
+.skills { display: flex; gap: 10px; }
+.skill { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.skill small { font-size: 10px; color: var(--muted); letter-spacing: 0.5px; }
+.skill b.elite { color: #b8860b; }
+.skill b.great { color: #1f6f43; }
+.skill b.good { color: #2f7fb5; }
+.skill b.ok { color: var(--ink); }
+.skill b.low { color: var(--muted); font-weight: 500; }

@@ -18,8 +18,16 @@ Production build (what Railway runs):
 npm run build && npm start   # http://localhost:3000
 ```
 
-## Refresh MLB rosters
+## Refresh MLB data and ratings
+
+Runs automatically once a day on the server. To run it by hand (also rewrites `data/players.json`):
 
 ```bash
-python3 scripts/fetch_rosters.py
+npm run refresh
+```
+
+## Tests
+
+```bash
+npm test
 ```
