@@ -139,19 +139,20 @@ Special bats bought with coins and **activated at big moments**, not always on.
 | Build: **one-piece alloy** | stiff and durable: +1 charge per game, steady results |
 | Build: **two-piece composite** | bigger sweet spot (more solid hits), vibration control |
 | Build: **hybrid** (alloy barrel, composite handle) | between the two |
-| Class: **Youth (USSSA)** | starter bats, smaller boosts |
-| Class: **BBCOR** (high school/college) | stronger bats, bigger boosts, unlocked later |
+| Class: **Wood** (pro, standard bat) | baseline: no pop bonus, 2.61" barrel |
+| Class: **BBCOR** (high school/college) | wood-like pop (BPF .50); regulation **−3 drop** and **2⅝" barrel**, so heavier and slower to swing than USSSA; steadier, fewer weak hits |
+| Class: **USSSA** (travel ball) | most pop: BPF 1.15 trampoline barrel, so higher exit velocity; biggest barrel (2¾") = biggest sweet spot; light drops (−12 to −5) = faster swing |
 
 - **The bat list.** Names are our own, since real brand names are trademarks
   (the same issue as team logos). The "inspired by" column is design notes only.
 
 | Class | Inspired by | Swing weight | Build | Plays like |
 |---|---|---|---|---|
-| Youth | Louisville Slugger Supra | balanced | two-piece composite | best all-rounder |
-| Youth | DeMarini Zen | balanced | two-piece composite | top contact |
-| Youth | Easton Hype Fire | mid-loaded | two-piece composite | big barrel, all-around |
-| Youth | Rawlings Icon / Easton The Dub | end-loaded | two-piece composite | power |
-| Youth | Marucci CAT X2 | balanced | one-piece alloy | control, durable |
+| USSSA | Louisville Slugger Supra | balanced | two-piece composite | best all-rounder |
+| USSSA | DeMarini Zen | balanced | two-piece composite | top contact |
+| USSSA | Easton Hype Fire | mid-loaded | two-piece composite | big barrel, all-around |
+| USSSA | Rawlings Icon / Easton The Dub | end-loaded | two-piece composite | power |
+| USSSA | Marucci CAT X2 | balanced | one-piece alloy | control, durable |
 | BBCOR | 2027 Easton Hype Fire | mid-loaded | two-piece composite | big barrel, all-around power |
 | BBCOR | 2027 Marucci Rckless Gen 2 Alloy | balanced | one-piece alloy | stiff, durable, steady |
 | BBCOR | 2027 Rawlings Icon | balanced, slight end-load | two-piece composite | consistent contact and power |
@@ -159,8 +160,9 @@ Special bats bought with coins and **activated at big moments**, not always on.
 | BBCOR | 2027 Marucci Rckless Gen 2 Hybrid | end-loaded | hybrid | power hitter's bat |
 
 - Tiers: Common, Rare, Legendary (more charges, bigger boost, flashier effect).
-  Youth bats are Common/Rare; BBCOR bats are Rare/Legendary. Legendary bats
-  only drop from milestones, never sold.
+  Tier sets how big the Super Swing is; class and specs set its *shape*
+  (pop vs. contact vs. steadiness). Any class can come in any tier.
+  Legendary bats only drop from milestones, never sold.
 - Boosts are applied inside the `sim` on the server, so they can't be faked.
 
 ## Graphics and big moments
