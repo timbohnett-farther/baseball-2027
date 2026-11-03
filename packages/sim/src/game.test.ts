@@ -1,0 +1,114 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { autoLineup, simulateGame } from "./game.ts";
+import type { GameResult, SimPlayer, SimTeam } from "./types.ts";
+
+let nextId = 1;
+const hitter = (r: number, name = `H${nextId}`): SimPlayer => ({
+  id: nextId++, name, lastName: name, position: "LF", bats: "R",
+  batting: { contact: r, power: r, eye: r, speed: r, fielding: r }, pitching: null,
+});
+const pitcher = (r: number, stamina = r): SimPlayer => ({
+  id: nextId++, name: `P${nextId}`, lastName: `P${nextId}`, position: "P", bats: "R",
+  batting: null, pitching: { stuff: r, control: r, movement: r, stamina },
+});
+const team = (r: number, name: string): SimTeam => ({
+  name, abbr: name.slice(0, 3).toUpperCase(), color: "#e0a458",
+  lineup: Array.from({ length: 9 }, () => hitter(r)),
+  pitchers: [pitcher(r, 90), pitcher(r, 60), pitcher(r, 60)],
+});
+
+const avg = team(70, "Average"), avg2 = team(70, "Other");
+
+test("same seed, same game; different seed, different game", () => {
+  const a = simulateGame({ away: avg, home: avg2, seed: 42 });
+  const b = simulateGame({ away: avg, home: avg2, seed: 42 });
+  assert.deepEqual(a, b);
+  const games = Array.from({ length: 20 }, (_, i) => simulateGame({ away: avg, home: avg2, seed: i }));
+  assert.ok(new Set(games.map((g) => JSON.stringify(g.final) + g.events.length)).size > 5);
+});
+
+function checkConsistency(g: GameResult) {
+  // Line score adds up to the final score, box score runs match too.
+  assert.equal(g.box.linescore.away.reduce((s, x) => s + x, 0), g.final.away);
+  assert.equal(g.box.linescore.home.reduce((s, x) => s + x, 0), g.final.home);
+  assert.equal(g.box.batting.away.reduce((s, b) => s + b.r, 0), g.final.away);
+  assert.equal(g.box.pitching.home.reduce((s, p) => s + p.r, 0), g.final.away);
+  // Every half-inning that wasn't a walk-off ends with exactly three outs.
+  const plays = g.events.filter((e) => e.type === "play");
+  for (let i = 0; i < plays.length - 1; i++) {
+    const cur = plays[i].state, nxt = plays[i + 1].state;
+    if (cur.inning !== nxt.inning || cur.half !== nxt.half) assert.equal(cur.outs, 3, `half ${cur.inning} ${cur.half} ended with ${cur.outs} outs`);
+  }
+  // Counts never go past 3 balls / 2 strikes before the plate appearance ends.
+  for (const e of g.events) if (e.type === "pitch") assert.ok(e.state.balls <= 4 && e.state.strikes <= 3);
+  // Exactly one final event, and the winner matches it.
+  assert.equal(g.events.filter((e) => e.type === "final").length, 1);
+  if (g.winner) assert.ok(g.final[g.winner] > g.final[g.winner === "home" ? "away" : "home"]);
+}
+
+test("scores, outs and box scores always add up", () => {
+  for (let seed = 0; seed < 300; seed++) checkConsistency(simulateGame({ away: avg, home: avg2, seed }));
+});
+
+test("average teams score like real baseball, sped up to 3 innings", () => {
+  const games = Array.from({ length: 400 }, (_, seed) => simulateGame({ away: avg, home: avg2, seed }));
+  const runs = games.reduce((s, g) => s + g.final.away + g.final.home, 0) / games.length / 2;
+  // MLB is about 4.5 runs per team per 9 innings (1.5 per 3); a little more action is fine.
+  assert.ok(runs > 1.0 && runs < 3.0, `runs per team: ${runs}`);
+  const pitches = games.reduce((s, g) => s + g.events.filter((e) => e.type === "pitch").length, 0) / games.length;
+  assert.ok(pitches > 70 && pitches < 160, `pitches per game: ${pitches}`);
+  const ties = games.filter((g) => g.winner === null).length;
+  assert.ok(ties < games.length * 0.03, `ties: ${ties}`);
+});
+
+test("better teams win much more often", () => {
+  const strong = team(90, "Strong"), weak = team(55, "Weak");
+  let wins = 0;
+  for (let seed = 0; seed < 300; seed++) {
+    const g = simulateGame({ away: strong, home: weak, seed });
+    if (g.winner === "away") wins++;
+  }
+  assert.ok(wins / 300 > 0.75, `strong team won ${wins}/300`);
+  assert.ok(wins / 300 < 0.99, "upsets still happen");
+});
+
+test("walk-offs end the game immediately and are tier 1", () => {
+  let found = 0;
+  for (let seed = 0; seed < 400 && found < 5; seed++) {
+    const g = simulateGame({ away: avg, home: avg2, seed });
+    const plays = g.events.filter((e) => e.type === "play");
+    const last = plays[plays.length - 1];
+    if (last.type === "play" && last.state.half === "bottom" && g.winner === "home" && last.state.outs < 3 && last.runs > 0) {
+      found++;
+      assert.equal(last.tier, 1);
+      assert.ok(last.card?.startsWith("WALK-OFF"));
+    }
+  }
+  assert.ok(found > 0, "expected at least one walk-off in 400 games");
+});
+
+test("home runs are highlight cards with a distance", () => {
+  const g = Array.from({ length: 50 }, (_, seed) => simulateGame({ away: team(85, "Bash"), home: avg2, seed }))
+    .flatMap((x) => x.events).find((e) => e.type === "play" && e.outcome === "home_run");
+  assert.ok(g && g.type === "play");
+  assert.ok(g.tier === 1 || g.tier === 2);
+  assert.match(g.stat ?? "", /ft$/);
+  assert.ok(g.call);
+});
+
+test("tired starters come out for the bullpen", () => {
+  const short = { ...avg2, pitchers: [pitcher(70, 40), pitcher(70, 60), pitcher(70, 60)] };
+  const changes = Array.from({ length: 30 }, (_, seed) => simulateGame({ away: avg, home: short, seed }))
+    .filter((g) => g.events.some((e) => e.type === "pitching_change")).length;
+  assert.ok(changes > 10, `pitching changes in ${changes}/30 games`);
+});
+
+test("auto lineup: speedy contact leads off, biggest power bats cleanup", () => {
+  const speedy = { ...hitter(60, "Speedy"), batting: { contact: 90, power: 50, eye: 70, speed: 95, fielding: 70 } };
+  const slugger = { ...hitter(60, "Slugger"), batting: { contact: 60, power: 99, eye: 60, speed: 50, fielding: 60 } };
+  const lineup = autoLineup([hitter(60), hitter(60), slugger, hitter(60), speedy, hitter(60), hitter(60), hitter(60), hitter(60)]);
+  assert.equal(lineup.length, 9);
+  assert.equal(lineup[0].name, "Speedy");
+  assert.ok(lineup.slice(2, 4).some((p) => p.name === "Slugger"));
+});

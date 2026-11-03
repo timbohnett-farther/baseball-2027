@@ -55,6 +55,39 @@ Browser                         Server                        Postgres
 - Every game has a **seed**, so any game can be replayed exactly (useful for
   fixing bugs and for "watch the replay").
 
+### Built so far (step 4): server-simulated games with play-by-play
+
+Today the server plays the whole game at once and the browser plays it back;
+the interactive pitch/swing loop above arrives with the 3D field.
+
+- `POST /api/games {opponentTeamId}` builds both teams, picks a random seed,
+  runs `simulateGame`, and stores only the seed and a snapshot of both teams'
+  ratings. `GET /api/games/:id` re-creates the identical play-by-play from them.
+- **Your team** uses ratings after chemistry, an automatic batting order
+  (contact + speed leads off, best hitter 3rd, most power cleanup) and your
+  best starter first. You're the home team, so you bat last.
+- **The opponent** is a real MLB team's best healthy lineup (one per infield
+  spot, three outfielders, a DH, a starter and two arms), without anyone you
+  drafted.
+- **Engine** (`packages/sim/src/game.ts`), pitch by pitch: Control decides the
+  zone, Eye the swing, Contact vs. Stuff the whiff, then balls in play become
+  hits or outs from Power/Contact vs. Movement and team defense; Speed moves
+  runners. Pitchers tire after about `15 + 0.35 × Stamina` pitches and the
+  bullpen takes over. 3 innings; ties go to extra innings with a runner on
+  second (a tie stands after 9).
+- **Calibrated** on 400-1,000 simulated games: average teams strike out 21%,
+  walk 8%, homer 3.6% of plate appearances (close to MLB). Rating gaps count at
+  55% strength (`TALENT`) so upsets stay alive: an 80 team beats a 70 team
+  about 69% of the time; a 99 team still loses 1 in 10.
+- **Big plays** carry the visual design tiers (walk-offs, grand slams,
+  game-ending strikeouts = Tier 1; homers, triples, double plays,
+  inning-ending strikeouts with runners on = Tier 2), a card title, a stat
+  (home run distance, strikeout velocity) and an announcer call.
+- **Play screen**: opponent picker with team strength, scorebug (score, inning,
+  outs, count, runners), at-bat/pitcher/velocity line, play-by-play grouped by
+  half-inning, big-play lower-third cards, 1x/2x/4x and skip, final band, box
+  score, win-loss record and replays of past games.
+
 ## Player ratings
 
 Ratings are 40–99. **70 = an average MLB regular**, each standard deviation
@@ -294,7 +327,7 @@ Target look: dramatic, close-up, slow motion, with flying dirt and motion blur.
 | `users`, `sessions` | accounts (scrypt passwords) and sign-in sessions (built) |
 | `user_teams` | a user's team: name, color, drafting or ready (built) |
 | `user_team_players` | drafted players (built) |
-| `games` | seed, opponent, score, status, box score JSON |
+| `games` | seed, opponent, both teams' rating snapshot, score, W/L/T (built) |
 | `items` / `user_items` | item catalog and what each user owns |
 | `ledger` | every coin earned or spent, with reason |
 
@@ -339,7 +372,7 @@ One Railway project (`incredible-perception`, to be renamed `baseball-2027`), wi
 1. ✅ Scaffold the monorepo; deploy to Railway with Postgres.
 2. ✅ Data refresh: teams, players, stats, Statcast; compute ratings; player board.
 3. ✅ Accounts, the draft (12-man arcade team, no cap) and team chemistry.
-4. `sim` package with tests; text play-by-play game.
+4. ✅ `sim` game engine with tests; games vs. MLB teams with text play-by-play.
 5. 3D field view (Three.js) on top of the sim.
 6. Coins, store, items (Super Power Bats), ledger.
 7. Big-moment replays: slow-motion close-ups, dust and spark effects.

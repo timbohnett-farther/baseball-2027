@@ -193,3 +193,77 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 .chem.down { color: var(--bad); }
 
 :focus-visible { outline: 2px solid var(--rim); outline-offset: 2px; }
+
+/* --- Play: opponent picker ------------------------------------------------------- */
+.opponents { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; margin: 14px 0; }
+.opponent { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 4px; background: var(--surface-raised);
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background var(--t-state), box-shadow var(--t-state); }
+.opponent:hover { box-shadow: inset 0 1px 0 var(--rim); }
+.opponent.on { box-shadow: inset 0 0 0 1px var(--amber), 0 0 14px rgba(224, 164, 88, 0.2); }
+.result { font-family: var(--display); font-size: 16px; }
+.result.W { color: var(--amber); }
+.result.L { color: var(--bad); }
+
+/* --- Game ---------------------------------------------------------------------------- */
+.game { min-height: 520px; overflow: hidden; }
+.game-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.game-controls { display: flex; gap: 8px; align-items: center; }
+.speed { font-family: var(--display); background: var(--surface-raised); color: var(--text-2); border: 0; border-radius: 3px; padding: 5px 10px; cursor: pointer; }
+.speed.on { color: #1a1206; background: var(--amber); }
+
+/* Scorebug: dark glass, warm top edge, team color only as a 3px stripe. */
+.scorebug { display: flex; background: rgba(11, 13, 18, 0.85); border-top: 1px solid var(--rim); border-radius: 4px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5); font-variant-numeric: tabular-nums; min-width: 230px; max-width: 18vw; min-width: min(260px, 100%); }
+.bug-teams { display: flex; flex-direction: column; border-right: 1px solid rgba(242, 227, 198, 0.12); }
+.bug-row { display: flex; align-items: center; gap: 12px; padding: 6px 12px 6px 10px; border-left: 3px solid var(--team); }
+.bug-abbr { font-family: var(--display); font-size: 18px; letter-spacing: 0.06em; width: 42px; }
+.bug-score { font-family: var(--display); font-size: 24px; width: 26px; text-align: right; }
+.bug-score.flash { animation: flash 400ms ease-out; }
+@keyframes flash { from { color: #fff; text-shadow: 0 0 14px #fff; } to { color: var(--text); text-shadow: none; } }
+.bug-state { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; align-items: center; gap: 4px 10px; padding: 6px 10px; }
+.bug-inning { font-family: var(--display); font-size: 18px; color: var(--text); }
+.bug-diamond { width: 30px; height: 22px; }
+.bug-diamond rect { fill: none; stroke: var(--text-2); stroke-width: 1.2; }
+.bug-diamond rect.on { fill: var(--amber); stroke: var(--amber); }
+.bug-outs { display: flex; gap: 4px; }
+.bug-outs i { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--text-2); display: inline-block; }
+.bug-outs i.on { background: var(--amber); border-color: var(--amber); }
+.bug-count { font-family: var(--display); font-size: 16px; color: var(--text-2); text-align: right; }
+
+.matchup { display: flex; gap: 20px; flex-wrap: wrap; margin: 16px 0 4px; font-size: 15px; }
+.matchup small { font-family: var(--display); letter-spacing: 0.08em; color: var(--text-2); margin-right: 6px; }
+
+/* Big-play card: a lower-third on dark glass; team accent only as an edge stripe; wipes in. */
+.big-play { position: relative; margin: 14px 0; padding: 14px 18px 14px 22px; background: rgba(11, 13, 18, 0.94); border-top: 1px solid var(--rim);
+  border-radius: 4px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 40px rgba(224, 164, 88, 0.12); animation: wipe 300ms var(--ease-in); }
+.big-play::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--amber); }
+.big-play.tier-1::before { background: var(--red); }
+.big-play-title { font-family: var(--display); font-size: clamp(34px, 6vw, 56px); line-height: 1; letter-spacing: 0.04em; color: var(--text);
+  text-shadow: 0 0 24px rgba(242, 227, 198, 0.35); }
+.big-play-name { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em; font-size: 22px; color: var(--amber); margin-top: 4px; }
+.big-play-stat { font-size: 15px; color: var(--text-2); margin-top: 2px; }
+@keyframes wipe { from { clip-path: inset(0 100% 0 0); filter: blur(4px); } to { clip-path: inset(0 0 0 0); filter: none; } }
+
+.final-band { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 16px 0 6px; padding: 12px 16px; background: var(--surface-raised);
+  border-radius: 4px; border-left: 4px solid var(--text-2); }
+.final-band .display { font-size: 32px; }
+.final-band.win { border-left-color: var(--amber); }
+.final-band.win .display { color: var(--amber); }
+.final-band.loss { border-left-color: var(--bad); }
+
+.feed { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 420px; overflow-y: auto; }
+.feed li { padding: 7px 10px; border-radius: 3px; animation: feedIn 300ms var(--ease-in); }
+@keyframes feedIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.feed-inning { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); font-size: 14px; margin-top: 8px; }
+.feed-change { color: var(--text-2); font-size: 14px; font-style: italic; }
+.feed-final { font-family: var(--display); text-transform: uppercase; color: var(--amber); }
+.feed-play { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; background: rgba(28, 33, 48, 0.5); }
+.feed-play.tier-2, .feed-play.tier-1 { background: var(--surface-raised); box-shadow: inset 3px 0 0 var(--amber); }
+.feed-play.tier-1 { box-shadow: inset 3px 0 0 var(--red), 0 0 20px rgba(224, 164, 88, 0.1); }
+.feed-text { flex: 1 1 260px; }
+.feed-call { color: var(--amber); font-style: italic; font-weight: 600; }
+.feed-score { font-family: var(--display); color: var(--rim); }
+.box { margin-top: 20px; }
+.box table { margin-bottom: 14px; }
+.linescore td, .linescore th { padding: 6px 10px; }
+@media (prefers-reduced-motion: reduce) { .feed li, .big-play, .bug-score.flash { animation: none; } }

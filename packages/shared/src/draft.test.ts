@@ -54,3 +54,12 @@ test("two starters and a reliever is a legal staff", () => {
   const roster = [...legalRoster().slice(0, 9), pick("P", "SP"), pick("P", "SP"), pick("P", "RP")];
   assert.ok(draftStatus(roster).ready, draftStatus(roster).problems.join(" "));
 });
+
+test("team abbreviations use initials and never spell something bad", async () => {
+  const { teamAbbreviation } = await import("./names.ts");
+  assert.equal(teamAbbreviation("Night Owls"), "NOW");
+  assert.equal(teamAbbreviation("Thunder Sluggers"), "TSL");
+  assert.equal(teamAbbreviation("Bombers"), "BOM");
+  assert.equal(teamAbbreviation("Nightcrawlers"), "NGT"); // first three letters would be blocked
+  assert.equal(teamAbbreviation("!!!"), "YOU");
+});

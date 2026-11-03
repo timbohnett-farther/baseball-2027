@@ -7,6 +7,7 @@ import { attachUser, authRoutes } from "./auth.ts";
 import { databaseStatus } from "./db/index.ts";
 import { webDist } from "./paths.ts";
 import { dataRefreshedAt, pool, teamPlayers, teamSummaries } from "./store.ts";
+import { gameRoutes } from "./games.ts";
 import { teamRoutes } from "./team.ts";
 
 /** Build the HTTP app. The database and player store must already be started. */
@@ -49,6 +50,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
 
   await app.register(authRoutes);
   await app.register(teamRoutes);
+  await app.register(gameRoutes);
 
   // Serve the built browser app; unknown non-API paths fall back to index.html for client routing.
   if (existsSync(webDist)) {

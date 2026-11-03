@@ -3,6 +3,7 @@ import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
 import { AuthPanel } from "./auth.tsx";
 import { MyTeamView } from "./draft.tsx";
+import { PlayView } from "./game.tsx";
 import { Ovr, PlayerBoard, PlayerTable } from "./players.tsx";
 
 const DIVISION_ORDER = [
@@ -10,7 +11,7 @@ const DIVISION_ORDER = [
   "National League East", "National League Central", "National League West",
 ];
 
-type View = { kind: "teams" } | { kind: "team"; team: TeamDetail } | { kind: "players" } | { kind: "my-team" } | { kind: "sign-in" };
+type View = { kind: "teams" } | { kind: "team"; team: TeamDetail } | { kind: "players" } | { kind: "my-team" } | { kind: "play" } | { kind: "sign-in" };
 
 export function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -46,6 +47,7 @@ export function App() {
           {data && <><span className="sep">·</span> {data.season} stats</>}
         </div>
         <nav className="tabs">
+          {tab("play", "Play")}
           {tab("my-team", "My team")}
           {tab("players", "Player board")}
           {tab("teams", "MLB teams")}
@@ -53,6 +55,7 @@ export function App() {
       </header>
 
       {view.kind === "my-team" && (me ? <MyTeamView teams={data?.teams ?? []} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />)}
+      {view.kind === "play" && (me ? <PlayView teams={data?.teams ?? []} onDraft={() => setView({ kind: "my-team" })} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "play" }); }} />)}
       {view.kind === "sign-in" && <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />}
       {view.kind === "players" && <PlayerBoard teams={data?.teams ?? []} />}
 

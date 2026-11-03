@@ -7,8 +7,5 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "node --test --experimental-strip-types src/*.test.ts"
-  },
-  "dependencies": {
-    "@bb/shared": "*"
   }
 }

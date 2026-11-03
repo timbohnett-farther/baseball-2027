@@ -1,5 +1,6 @@
 import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
 import type { HittingRatings, PitchingRatings, Role } from "@bb/shared";
+import type { SimTeam } from "@bb/sim";
 
 export const mlbTeams = pgTable("mlb_teams", {
   id: integer("id").primaryKey(),
@@ -75,6 +76,23 @@ export const userTeamPlayers = pgTable("user_team_players", {
   playerId: integer("player_id").notNull().references(() => players.id),
   addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.teamId, t.playerId] })]);
+
+export const games = pgTable("games", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
+  opponentTeamId: integer("opponent_team_id").notNull().references(() => mlbTeams.id),
+  // The game is fully determined by the seed and the team snapshot (ratings at first pitch),
+  // so the play-by-play is re-created on demand instead of stored.
+  seed: integer("seed").notNull(),
+  innings: integer("innings").notNull(),
+  userSide: text("user_side").$type<"home" | "away">().notNull(),
+  teams: jsonb("teams").$type<Record<"home" | "away", SimTeam>>().notNull(),
+  userScore: integer("user_score").notNull(),
+  opponentScore: integer("opponent_score").notNull(),
+  result: text("result").$type<"W" | "L" | "T">().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const dataRefreshes = pgTable("data_refreshes", {
   id: serial("id").primaryKey(),

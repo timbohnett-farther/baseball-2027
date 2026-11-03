@@ -2,3 +2,6 @@
 // so the server and the browser always agree on what happened.
 
 export { createRng, type Rng } from "./rng.ts";
+export { autoLineup, DEFAULT_INNINGS, simulateGame } from "./game.ts";
+export { CALLS } from "./text.ts";
+export type * from "./types.ts";

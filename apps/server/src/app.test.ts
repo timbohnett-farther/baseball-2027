@@ -116,3 +116,53 @@ test("your team comes back with chemistry: rivals feud", async () => {
   assert.ok(feud, JSON.stringify(team.chemistry.effects.map((e) => e.name)));
   assert.ok(team.chemistry.players.find((p) => p.playerId === yankee.id)!.delta < 0);
 });
+
+test("every MLB team can field a full lineup and staff", async () => {
+  const { mlbSimTeam } = await import("./games.ts");
+  for (const t of pool().teams) {
+    const team = mlbSimTeam(t.id)!;
+    assert.equal(team.lineup.length, 9, `${t.abbreviation} lineup`);
+    assert.equal(team.pitchers.length, 3, `${t.abbreviation} staff`);
+  }
+});
+
+test("play a game against an MLB team, then see it in your history", async () => {
+  const { cookie } = await signup("gamer");
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Gamers", color: "#2e9e5b" } });
+  // Play the team whose players you drafted the most of, so the exclusion is actually exercised.
+  const counts = new Map<number, number>();
+  for (const p of legalTeam()) if (p.teamId) counts.set(p.teamId, (counts.get(p.teamId) ?? 0) + 1);
+  const busiest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const yankees = pool().teams.find((t) => t.id === busiest)!;
+
+  // Not ready yet: no games.
+  assert.equal((await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: yankees.id } })).statusCode, 400);
+
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  assert.equal((await app.inject({ method: "POST", url: "/api/my-team/finish", headers })).statusCode, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: 999999 } })).statusCode, 400);
+
+  const res = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: yankees.id } });
+  assert.equal(res.statusCode, 201, res.body);
+  const game = res.json();
+  assert.equal(game.userSide, "home");
+  assert.equal(game.opponent.abbr, yankees.abbreviation);
+  assert.ok(game.result.events.length > 50);
+  assert.equal(game.teams.home.lineup.length, 9);
+  // Nobody plays for both teams: your drafted players are off the opponent's roster.
+  const mine = new Set([...game.teams.home.lineup, ...game.teams.home.pitchers].map((p: { id: number }) => p.id));
+  for (const p of [...game.teams.away.lineup, ...game.teams.away.pitchers]) assert.ok(!mine.has(p.id), `${p.name} is on both teams`);
+
+  const history = (await app.inject({ url: "/api/games", headers })).json();
+  assert.equal(history.games.length, 1);
+  assert.equal(history.record.w + history.record.l + history.record.t, 1);
+
+  // Reloading the game re-creates exactly the same play-by-play from its seed.
+  const again = (await app.inject({ url: `/api/games/${game.id}`, headers })).json();
+  assert.deepEqual(again.result, game.result);
+
+  // Other people can't see your games.
+  const { cookie: other } = await signup("snooper");
+  assert.equal((await app.inject({ url: `/api/games/${game.id}`, headers: { cookie: other } })).statusCode, 404);
+});

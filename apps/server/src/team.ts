@@ -12,7 +12,7 @@ import { findPlayer, pool } from "./store.ts";
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** A drafted player who has since left the draft pool is still on your team: read him from the database. */
-async function playerFromDb(db: Db | Tx, id: number): Promise<Player | null> {
+export async function playerFromDb(db: Db | Tx, id: number): Promise<Player | null> {
   const [row] = await db.select().from(players)
     .innerJoin(playerRatings, eq(playerRatings.playerId, players.id))
     .where(eq(players.id, id)).orderBy(desc(playerRatings.season)).limit(1);
