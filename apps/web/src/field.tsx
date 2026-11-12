@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { GameEvent, PlayedGame, Side } from "@bb/sim";
+import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -82,6 +82,57 @@ function signTexture(text: string, bg: string, fg: string, w = 1024, h = 160): T
 const PLAYER_SCALE = 1;
 const SKIN = ["#f0c8a4", "#d9a77c", "#b97f57", "#8c5a3c", "#5e3b25"];
 const std = (color: string, roughness = 0.8) => new THREE.MeshStandardMaterial({ color, roughness });
+/** Fielder slot -> lineup position label (FIELD_POS order). */
+const SLOT_POS = ["P", "C", "1B", "2B", "SS", "3B", "LF", "CF", "RF"];
+/** Jersey numbers aren't in the data; derive a stable one from the player id. */
+const jerseyNumber = (p: SimPlayer) => 2 + ((p.id * 37) % 97);
+
+const jerseys = new Map<string, THREE.CanvasTexture>();
+/**
+ * Jersey texture for the torso capsule: team colour, pinstripes for every other club, a name arc over a big
+ * number on the back (drawn mirrored, since the capsule's u axis runs toward the player's left) and a small
+ * number on the left chest. u=0 is the chest, u=0.5 the spine; v runs bottom to top.
+ */
+function jerseyTexture(team: SimTeam, player: SimPlayer | null): THREE.CanvasTexture {
+  const key = `${team.abbr}|${player?.id ?? ""}`;
+  const hit = jerseys.get(key);
+  if (hit) return hit;
+  const w = 1024, h = 512;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d")!;
+  const base = new THREE.Color(team.color);
+  const light = base.r * 0.3 + base.g * 0.59 + base.b * 0.11 > 0.35;
+  const fg = light ? "#121418" : "#f4f1ea";
+  g.fillStyle = `#${base.getHexString()}`; g.fillRect(0, 0, w, h);
+  const pin = [...team.abbr].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 2 === 1;
+  if (pin) {
+    g.fillStyle = light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.28)";
+    for (let x = 6; x < w; x += 26) g.fillRect(x, 0, 3, h);
+  }
+  g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle";
+  if (player) {
+    const num = String(jerseyNumber(player));
+    g.save(); g.translate(w / 2, 0); g.scale(-1, 1); // back of the jersey reads correctly from behind
+    g.font = `700 150px Oswald, "Arial Narrow", sans-serif`;
+    g.fillText(num, 0, h * 0.5);
+    const name = player.lastName.toUpperCase(), r = 230, step = 0.085;
+    g.font = `600 44px Oswald, "Arial Narrow", sans-serif`;
+    let a = -step * (name.length - 1) / 2;
+    for (const ch of name) {
+      g.save(); g.translate(Math.sin(a) * r, h * 0.56 - Math.cos(a) * r); g.rotate(a); g.fillText(ch, 0, 0); g.restore();
+      a += step;
+    }
+    g.restore();
+    g.font = `700 56px Oswald, "Arial Narrow", sans-serif`;
+    g.fillText(num, w * 0.085, h * 0.3); // left chest
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  jerseys.set(key, t);
+  return t;
+}
 
 /** Tapered cylinder from one joint to the next (the whole rig is posed this way). */
 function limb(from: THREE.Vector3, to: THREE.Vector3, r: number, mat: THREE.Material, tip = r): THREE.Mesh {
@@ -98,17 +149,19 @@ function limb(from: THREE.Vector3, to: THREE.Vector3, r: number, mat: THREE.Mate
  * belt and cleats, posed limbs. Batters get a helmet, a bat held at the back shoulder and the frame turned to
  * face the plate (right-handed). Fielders get a glove. Generic faces only, no likenesses.
  */
-function makePlayer(color: THREE.Color, bat = false, seed = 0): THREE.Group {
+function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THREE.Group {
   const g = new THREE.Group();
   const rig = new THREE.Group();
   rig.name = "rig";
   const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+  const sleeveMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
   const capMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.55 });
-  const pants = std("#ecebe4"), skin = std(SKIN[seed % SKIN.length], 0.65), dark = std("#1a1a1e", 0.6);
+  const pants = std(ump ? "#7d8089" : "#ecebe4"), skin = std(SKIN[seed % SKIN.length], 0.65), dark = std("#1a1a1e", 0.6);
 
   for (const s of [-1, 1]) {
     const hip = V(s * 0.12, 0.96, 0), knee = V(s * 0.17, 0.52, bat ? 0.04 : 0.06), foot = V(s * (bat ? 0.3 : 0.19), 0.07, bat ? 0 : 0.04);
-    rig.add(limb(hip, knee, 0.085, pants, 0.072), limb(knee, foot, 0.072, pants, 0.055));
+    const ankle = foot.clone().lerp(knee, 0.3); // pants stop here, the stirrup sock runs to the cleat
+    rig.add(limb(hip, knee, 0.085, pants, 0.072), limb(knee, ankle, 0.072, pants, 0.06), limb(ankle, foot, 0.06, ump ? dark : capMat, 0.052));
     const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.29), dark);
     cleat.position.set(foot.x, 0.04, foot.z + 0.05); cleat.castShadow = true; rig.add(cleat);
   }
@@ -136,10 +189,10 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0): THREE.Group {
     const shoulder = V(s * 0.23, 1.47, 0);
     const elbow = bat ? V(s < 0 ? -0.4 : 0.12, 1.26, s < 0 ? -0.06 : 0.24) : V(s * 0.31, 1.17, 0.08);
     const hand = hands ? hands.clone().add(V(s * 0.03, 0, 0)) : V(s * 0.29, 0.92, 0.23);
-    rig.add(limb(shoulder, elbow, 0.062, bodyMat, 0.05), limb(elbow, hand, 0.05, skin, 0.04));
+    rig.add(limb(shoulder, elbow, 0.062, sleeveMat, 0.05), limb(elbow, hand, 0.05, skin, 0.04));
     const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), skin);
     palm.position.copy(hand); rig.add(palm);
-    if (!bat && s < 0) { const glove = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), std("#6d4327", 0.7)); glove.position.copy(hand).add(V(-0.03, -0.02, 0.05)); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; rig.add(glove); }
+    if (!bat && !ump && s < 0) { const glove = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), std("#6d4327", 0.7)); glove.position.copy(hand).add(V(-0.03, -0.02, 0.05)); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; rig.add(glove); }
   }
   if (hands) {
     const b = new THREE.Group();
@@ -154,14 +207,19 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0): THREE.Group {
     rig.rotation.y = Math.PI / 2; // local +z (chest) now faces +x, across the plate
   }
   g.add(rig);
-  g.userData = { bodyMat, capMat };
+  g.userData = { bodyMat, sleeveMat, capMat };
   g.scale.setScalar(PLAYER_SCALE);
   return g;
 }
 
-function recolor(g: THREE.Group, color: THREE.Color) {
-  (g.userData.capMat as THREE.MeshStandardMaterial).color.copy(color).multiplyScalar(0.8);
-  (g.userData.bodyMat as THREE.MeshStandardMaterial).color.copy(color);
+/** Put a rig in a team's uniform: jersey texture (with the player's name/number when known), sleeves, cap, socks. */
+function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
+  const u = g.userData as { bodyMat: THREE.MeshStandardMaterial; sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial };
+  u.bodyMat.map = jerseyTexture(team, player);
+  u.bodyMat.color.set("#ffffff"); // colour lives in the texture now
+  u.bodyMat.needsUpdate = true;
+  u.sleeveMat.color.set(team.color);
+  u.capMat.color.set(team.color).multiplyScalar(0.8);
 }
 
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
@@ -231,9 +289,13 @@ class Director {
   private fielders: THREE.Group[] = [];
   private batter: THREE.Group | null = null;
   private batterId: number | null = null;
+  private onDeck: THREE.Group;
+  private onDeckId: number | null = null;
+  private pitcherDressed: number | null = null;
   private runners = new Map<number, THREE.Group & { base?: number }>();
   private half: string | null = null;
   private colors: Record<Side, THREE.Color>;
+  private teams: PlayedGame["teams"];
   private burstDust: Dust; private drift: Dust;
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
   private shake = 0;
@@ -241,6 +303,7 @@ class Director {
 
   constructor(private canvas: HTMLCanvasElement, game: PlayedGame, private reduced: boolean) {
     this.colors = { away: new THREE.Color(game.teams.away.color), home: new THREE.Color(game.teams.home.color) };
+    this.teams = game.teams;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -275,9 +338,16 @@ class Director {
     FIELD_POS.forEach((p, i) => {
       const f = makePlayer(this.colors.home, false, i * 7 + 3);
       f.position.copy(p);
-      if (i === 1) f.scale.y = PLAYER_SCALE * 0.62; // catcher's crouch
+      if (i === 1) { f.scale.y = PLAYER_SCALE * 0.62; f.rotation.y = Math.PI; } // catcher's crouch, facing the mound
       this.fielders.push(f); this.scene.add(f);
     });
+    // Plate umpire in navy, set behind the catcher; on-deck hitter waiting in the circle on the first-base side.
+    const ump = makePlayer(new THREE.Color("#1b2236"), false, 2, true);
+    ump.position.set(0.35, 0, 3.4); ump.scale.y = PLAYER_SCALE * 0.78; ump.rotation.y = Math.PI;
+    this.scene.add(ump);
+    this.onDeck = makePlayer(this.colors.away, true, 4);
+    this.onDeck.position.set(5.4, 0, 4.2); this.onDeck.rotation.y = -0.6; this.onDeck.visible = false;
+    this.scene.add(this.onDeck);
     const dust = softSprite("rgba(255,255,255,1)");
     this.burstDust = new Dust(400, false, 0.9, dust);
     this.drift = new Dust(90, true, 0.55, dust);
@@ -450,6 +520,7 @@ class Director {
   handle(e: GameEvent, jumped: boolean) {
     this.flush();
     this.syncHalf(e);
+    this.syncPitcher(e);
     if (jumped) this.resync(e);
     this.fielders.forEach((f, i) => f.position.copy(FIELD_POS[i]));
     this.ball.visible = false;
@@ -464,20 +535,44 @@ class Director {
     this.half = key;
     const bat: Side = e.state.half === "top" ? "away" : "home";
     const def: Side = bat === "away" ? "home" : "away";
-    this.fielders.forEach((f) => recolor(f, this.colors[def]));
-    this.runners.forEach((r) => recolor(r, this.colors[bat]));
+    const team = this.teams[def];
+    this.fielders.forEach((f, i) => { if (i > 0) dress(f, team, team.lineup.find((p) => p.position === SLOT_POS[i]) ?? null); });
+    this.pitcherDressed = null;
+    this.runners.forEach((r, id) => dress(r, this.teams[bat], this.player(bat, id)));
     if (this.batter) { this.scene.remove(this.batter); this.batter = null; this.batterId = null; }
+    this.onDeck.visible = false; this.onDeckId = null;
   }
 
-  private battingColor(e: GameEvent) { return this.colors[e.state.half === "top" ? "away" : "home"]; }
+  private battingSide(e: GameEvent): Side { return e.state.half === "top" ? "away" : "home"; }
+  private battingColor(e: GameEvent) { return this.colors[this.battingSide(e)]; }
+  private player(side: Side, id: number): SimPlayer | null {
+    const t = this.teams[side];
+    return t.lineup.find((p) => p.id === id) ?? t.pitchers.find((p) => p.id === id) ?? null;
+  }
+
+  /** Keep the mound rig in the current pitcher's name and number (starter, then relievers). */
+  private syncPitcher(e: GameEvent) {
+    const id = "pitcherId" in e ? e.pitcherId : null;
+    if (id === null || id === this.pitcherDressed) return;
+    const def: Side = this.battingSide(e) === "away" ? "home" : "away";
+    dress(this.fielders[0], this.teams[def], this.player(def, id));
+    this.pitcherDressed = id;
+  }
 
   private ensureBatter(e: GameEvent, id: number) {
-    if (this.batterId === id && this.batter) { this.batter.rotation.y = 0; this.batter.scale.setScalar(PLAYER_SCALE); return; }
-    if (this.batter) this.scene.remove(this.batter);
-    this.batter = makePlayer(this.battingColor(e), true);
-    this.batter.position.set(-0.95, 0, 0.3);
-    this.batterId = id;
-    this.scene.add(this.batter);
+    const side = this.battingSide(e), team = this.teams[side];
+    if (this.batterId !== id || !this.batter) {
+      if (this.batter) this.scene.remove(this.batter);
+      this.batter = makePlayer(this.battingColor(e), true, id);
+      dress(this.batter, team, this.player(side, id));
+      this.batter.position.set(-0.95, 0, 0.3);
+      this.batterId = id;
+      this.scene.add(this.batter);
+    } else { this.batter.rotation.y = 0; this.batter.scale.setScalar(PLAYER_SCALE); }
+    const i = team.lineup.findIndex((p) => p.id === id);
+    const next = i >= 0 ? team.lineup[(i + 1) % team.lineup.length] : null;
+    if (next && next.id !== this.onDeckId) { dress(this.onDeck, team, next); this.onDeckId = next.id; }
+    this.onDeck.visible = !!next;
   }
 
   private clearRunners() { this.runners.forEach((r) => this.scene.remove(r)); this.runners.clear(); }
@@ -487,7 +582,8 @@ class Director {
     const { first, second, third } = e.state.bases;
     [first, second, third].forEach((id, i) => {
       if (id === null) return;
-      const r = makePlayer(this.battingColor(e)) as THREE.Group & { base?: number };
+      const r = makePlayer(this.battingColor(e), false, id) as THREE.Group & { base?: number };
+      dress(r, this.teams[this.battingSide(e)], this.player(this.battingSide(e), id));
       r.base = i + 1; r.position.copy(BASES[i + 1]); this.scene.add(r); this.runners.set(id, r);
     });
     if (this.batter) { this.scene.remove(this.batter); this.batter = null; this.batterId = null; }
