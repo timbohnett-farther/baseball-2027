@@ -316,6 +316,28 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 .duel-buttons button { font-family: var(--display); letter-spacing: 0.06em; background: var(--surface-raised); color: var(--text); border: 0; border-radius: 3px; padding: 10px 16px; cursor: pointer; }
 .duel-buttons button.primary { padding: 10px 18px; }
 .duel-buttons small { opacity: 0.6; margin-left: 6px; font-size: 11px; }
+.duel-buttons button { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.zone.pickable { touch-action: none; }
+.rotate-hint { display: none; }
+
+/* --- Touch / phone (W15): thumb-sized swing buttons, no keyboard hints, zone fills the width ---- */
+@media (hover: none) and (pointer: coarse) {
+  .key { display: none; }
+  .duel-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .duel-buttons button { min-height: 3.25rem; font-size: 17px; padding: 12px 14px; }
+  .duel-buttons button.primary { font-size: 19px; }
+  .duel-buttons button.super { grid-column: 1 / -1; }
+  .duel-type { min-height: 3.25rem; }
+  .play-buttons button { min-height: 2.75rem; }
+}
+@media (max-width: 640px) {
+  .zone { width: min(260px, 100%); }
+  .duel-zone-wrap { align-items: stretch; }
+  .duel-zone-wrap .zone { align-self: center; }
+}
+@media (max-width: 640px) and (orientation: portrait) and (hover: none) {
+  .rotate-hint { display: block; margin: 12px 0 0; padding: 8px 12px; border-radius: 4px; background: var(--surface-raised); color: var(--text-2); font-size: 13px; text-align: center; }
+}
 
 /* --- Store & gear ------------------------------------------------------------------ */
 .store-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

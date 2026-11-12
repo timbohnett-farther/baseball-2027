@@ -97,6 +97,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
         </div>
       </div>
 
+      <p className="rotate-hint" aria-hidden>Turn your phone sideways for the full field.</p>
       <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} /></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
@@ -153,13 +154,15 @@ function Who({ batter, pitcher, heat }: { batter?: SimPlayer; pitcher?: SimPlaye
   );
 }
 
-/** A strike-zone diagram. Children draw on top; `onPick` turns a click into plate coordinates. */
+/** A strike-zone diagram. Children draw on top; `onPick` turns a tap or click into plate coordinates.
+ *  pointerdown (not click) so a phone tap lands the instant the finger touches, with no tap delay. */
 function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div className={`zone ${onPick ? "pickable" : ""}`} ref={ref}
-      onClick={(e) => {
-        if (!onPick || !ref.current) return;
+      onPointerDown={(e) => {
+        if (!onPick || !ref.current || e.button !== 0) return;
+        e.preventDefault();
         const r = ref.current.getBoundingClientRect();
         const x = ((e.clientX - r.left) / r.width) * 2 * GRID - GRID;
         const y = GRID - ((e.clientY - r.top) / r.height) * 2 * GRID;
@@ -243,13 +246,13 @@ function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
             <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
           </div>
           <div className="duel-buttons">
-            <button className="primary" onClick={() => swing("contact")}>Contact <small>Space</small></button>
-            <button className="primary" onClick={() => swing("power")}>Power <small>P</small></button>
-            <button onClick={() => swing("take")}>Take <small>T</small></button>
+            <button className="primary" onPointerDown={() => swing("contact")} onClick={() => swing("contact")}>Contact <small className="key">Space</small></button>
+            <button className="primary" onPointerDown={() => swing("power")} onClick={() => swing("power")}>Power <small className="key">P</small></button>
+            <button onPointerDown={() => swing("take")} onClick={() => swing("take")}>Take <small className="key">T</small></button>
             {sup && (
-              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onClick={() => swing("power", true)}
+              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onPointerDown={() => swing("power", true)} onClick={() => swing("power", true)}
                 title={sup.charges === 0 ? "No charges left" : sup.clutch ? "Clutch spot. Spend a charge." : "Only in clutch spots"}>
-                Super <small>S · {sup.charges} left</small>
+                Super <small><span className="key">S · </span>{sup.charges} left</small>
               </button>
             )}
           </div>
@@ -311,7 +314,7 @@ function FieldPanel({ batter, fielder, kind, onGlove }: {
             <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
           </div>
           <div className="duel-buttons">
-            <button className="primary" onClick={glove}>Glove it <small>Space</small></button>
+            <button className="primary" onPointerDown={glove} onClick={glove}>Glove it <small className="key">Space</small></button>
           </div>
           <small className="muted">Tap when the marker hits the gold. Nail it and you steal a hit; miss and it drops in.</small>
         </div>
