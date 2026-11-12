@@ -30,4 +30,7 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
       milestone-only per ARCHITECTURE.md.
 - [x] W15 touch/mobile layout for the duel (big swing buttons, zone tap), landscape lock hint. (f32529e)
 - [ ] W16 Railway: confirm migration 0005 applied in production, smoke the store endpoints, deploy check for each push.
+      After every push: `scripts/deploy-check.sh` (waits for /health to report the pushed SHA + all migrations). Two Railway
+      projects (`baseball-2027` → baseball-2027-production.up.railway.app, `Baseball 2027` → web-production-6a936) both
+      deploy main; the first is the one with the bucket vars and is the canonical URL.
 - [ ] W17 polish pass: loading states, empty states, error toasts, keyboard hints, accessibility audit.

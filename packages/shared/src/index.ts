@@ -53,6 +53,8 @@ export interface HealthStatus {
   ok: boolean;
   /** "local" = embedded dev database (PGlite) instead of Railway Postgres. */
   database: "connected" | "local" | "error";
+  /** Migrations applied to this database; compare with the repo's drizzle journal after a deploy. */
+  migrations: number;
   version: string;
   /** When player data was last refreshed from MLB (ISO time), if known. */
   dataRefreshedAt: string | null;

@@ -4,7 +4,7 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import type { HealthStatus } from "@bb/shared";
 import { attachUser, authRoutes } from "./auth.ts";
-import { databaseStatus } from "./db/index.ts";
+import { databaseStatus, migrationsApplied } from "./db/index.ts";
 import { webDist } from "./paths.ts";
 import { dataRefreshedAt, pool, teamPlayers, teamSummaries } from "./store.ts";
 import { gameRoutes } from "./games.ts";
@@ -21,6 +21,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   app.get("/health", async (): Promise<HealthStatus> => ({
     ok: true,
     database: await databaseStatus(),
+    migrations: await migrationsApplied(),
     version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
     dataRefreshedAt: dataRefreshedAt()?.toISOString() ?? null,
   }));

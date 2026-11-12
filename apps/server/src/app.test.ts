@@ -42,6 +42,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
+  assert.equal(res.json().migrations, 8, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 

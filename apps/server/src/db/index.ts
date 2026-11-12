@@ -58,6 +58,17 @@ export async function databaseStatus(): Promise<"connected" | "local" | "error">
   }
 }
 
+/** How many migrations drizzle has applied (its own `__drizzle_migrations` ledger). 0 if unreadable. */
+export async function migrationsApplied(): Promise<number> {
+  try {
+    const rows = await getDb().execute(dsql`select count(*)::int as n from drizzle.__drizzle_migrations`);
+    const first = (Array.isArray(rows) ? rows[0] : (rows as { rows?: unknown[] }).rows?.[0]) as { n?: number } | undefined;
+    return Number(first?.n ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 const toSnake = (k: string) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
 /** Replace the draft pool with a fresh one. Players who left the pool keep their rows (drafted teams may hold them). */
