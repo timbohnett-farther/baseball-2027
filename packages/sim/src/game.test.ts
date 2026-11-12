@@ -243,3 +243,37 @@ test("heat and rally: earned on the field, capped, and visible in every state", 
   }
   assert.ok(fires > 0, "a great lineup against a weak staff catches fire");
 });
+
+import { isClutch } from "./game.ts";
+
+test("super bat: charges only spend in clutch spots, and a spent charge marks the play", () => {
+  const bat = { id: "thunderclap", name: "Thunderclap", charges: 2, contact: 6, power: 10 };
+  const home = { ...avg2, gear: { superBat: bat } };
+  const inputs: UserInput[] = [];
+  let spent = 0;
+  let g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true });
+  for (let guard = 0; guard < 2000 && !g.result; guard++) {
+    const a = g.awaiting!;
+    if (a.role === "pitch") inputs.push(pitchIn);
+    else {
+      assert.ok(a.super, "a team with a bat is always told about it when batting");
+      assert.equal(a.super.clutch, isClutch(a.state, 3));
+      assert.equal(a.super.charges, 2 - spent);
+      // Always ask for a super swing; the engine only honors it when it's allowed.
+      inputs.push({ kind: "swing", swing: "power", timing: 0, super: true });
+      if (a.super.clutch && a.super.charges > 0) spent++;
+    }
+    g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true });
+  }
+  assert.ok(g.result);
+  assert.equal(spent, 2, "both charges get used over a full game");
+  const supers = g.events.filter((e) => e.type === "play" && e.superSwing);
+  assert.ok(supers.length <= 2);
+  // A Super Swing that connects is at least a highlight; one that whiffs is just a spent charge.
+  const hits = new Set(["single", "double", "triple", "home_run"]);
+  for (const e of supers) if (e.type === "play" && hits.has(e.outcome)) assert.ok(e.tier === 1 || e.tier === 2);
+  // Without a bat, the same inputs are just normal swings: nothing is marked.
+  const plain = playInteractive({ away: avg, home: avg2, seed: 21, userSide: "home", inputs, autoField: true });
+  assert.equal(plain.awaiting?.super ?? null, null);
+  assert.equal(plain.events.filter((e) => e.type === "play" && e.superSwing).length, 0);
+});

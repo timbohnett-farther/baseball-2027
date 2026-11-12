@@ -1,5 +1,5 @@
 import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
-import type { HittingRatings, PitchingRatings, Role } from "@bb/shared";
+import type { Gear, HittingRatings, PitchingRatings, Role } from "@bb/shared";
 import type { SimTeam, UserInput } from "@bb/sim";
 
 export const mlbTeams = pgTable("mlb_teams", {
@@ -67,9 +67,18 @@ export const userTeams = pgTable("user_teams", {
   name: text("name").notNull(),
   color: text("color").notNull(),
   status: text("status").$type<"drafting" | "ready">().notNull().default("drafting"),
+  /** Wood bat spec and the equipped Super Power Bat (null = defaults). */
+  gear: jsonb("gear").$type<Gear>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Super Power Bats a user owns (bought or dropped). */
+export const userItems = pgTable("user_items", {
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  itemId: text("item_id").notNull(),
+  acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.itemId] })]);
 
 export const userTeamPlayers = pgTable("user_team_players", {
   teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
@@ -93,6 +102,8 @@ export const games = pgTable("games", {
   userScore: integer("user_score").notNull(),
   opponentScore: integer("opponent_score").notNull(),
   result: text("result").$type<"W" | "L" | "T">().notNull(),
+  /** Coins this game paid out (0 for games before the store existed). */
+  coins: integer("coins").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

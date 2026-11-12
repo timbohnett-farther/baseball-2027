@@ -5,13 +5,14 @@ import { AuthPanel } from "./auth.tsx";
 import { MyTeamView } from "./draft.tsx";
 import { PlayView } from "./game.tsx";
 import { Ovr, PlayerBoard, PlayerTable } from "./players.tsx";
+import { StoreView } from "./store.tsx";
 
 const DIVISION_ORDER = [
   "American League East", "American League Central", "American League West",
   "National League East", "National League Central", "National League West",
 ];
 
-type View = { kind: "teams" } | { kind: "team"; team: TeamDetail } | { kind: "players" } | { kind: "my-team" } | { kind: "play" } | { kind: "sign-in" };
+type View = { kind: "teams" } | { kind: "team"; team: TeamDetail } | { kind: "players" } | { kind: "my-team" } | { kind: "play" } | { kind: "store" } | { kind: "sign-in" };
 
 export function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -49,6 +50,7 @@ export function App() {
         <nav className="tabs">
           {tab("play", "Play")}
           {tab("my-team", "My team")}
+          {tab("store", "Store")}
           {tab("players", "Player board")}
           {tab("teams", "MLB teams")}
         </nav>
@@ -56,7 +58,8 @@ export function App() {
 
       {view.kind === "my-team" && (me ? <MyTeamView teams={data?.teams ?? []} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />)}
       {view.kind === "play" && (me ? <PlayView teams={data?.teams ?? []} onDraft={() => setView({ kind: "my-team" })} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "play" }); }} />)}
-      {view.kind === "sign-in" && <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />}
+      {view.kind === "store" && (me ? <StoreView /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "store" }); }} />)}
+      {view.kind === "sign-in" &&<AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />}
       {view.kind === "players" && <PlayerBoard teams={data?.teams ?? []} />}
 
       {view.kind === "team" && (

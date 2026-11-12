@@ -3,9 +3,10 @@
 // choices so far; each new choice reveals the next few events, which play out on the field.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { playInteractive, type Aim, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
+import { playInteractive, type Aim, type Awaiting, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
+import { RewardLine } from "./store.tsx";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
@@ -70,11 +71,12 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
 
   // Once it's over, the server replays our choices against the seed and records the game.
   const [saved, setSaved] = useState<"saving" | "saved" | string | null>(null);
+  const [reward, setReward] = useState<PlayedGame["reward"]>(undefined);
   useEffect(() => {
     if (!g.result || saved) return;
     setSaved("saving");
-    api("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seed: setup.seed, inputs, final: g.result.final } })
-      .then(() => setSaved("saved"), (e: Error) => setSaved(e.message));
+    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seed: setup.seed, inputs, final: g.result.final } })
+      .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
   }, [g.result, saved, inputs, setup]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
 
@@ -102,7 +104,8 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          heat={awaiting.state.heat} incoming={awaiting.incoming} onSwing={(swing, timing) => submit({ kind: "swing", swing, timing })} />
+          heat={awaiting.state.heat} incoming={awaiting.incoming} sup={awaiting.super}
+          onSwing={(swing, timing, sup) => submit(sup ? { kind: "swing", swing, timing, super: true } : { kind: "swing", swing, timing })} />
       )}
       {awaiting?.role === "field" && awaiting.ball && (
         <FieldPanel key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
@@ -119,6 +122,7 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
             <span className="display">{youWon ? "Victory" : g.result.winner ? "Defeat" : "Tie game"}</span>
             <span>{(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text}</span>
           </div>
+          {reward && <RewardLine reward={reward} />}
           {saved && saved !== "saving" && (
             <p className={`muted duel-note ${saved === "saved" ? "" : "bad"}`} aria-live="polite">
               {saved === "saved" ? "Counted toward your record." : saved}
@@ -187,21 +191,23 @@ function PitchPanel({ pitcher, batter, heat, type, onType, onThrow }: {
   );
 }
 
-function SwingPanel({ pitcher, batter, heat, incoming, onSwing }: {
+function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; incoming: { type: PitchType; mph: number; aim: Aim };
-  onSwing: (swing: "contact" | "power" | "take", timing: number) => void;
+  sup: Awaiting["super"];
+  onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean) => void;
 }) {
   const ms = flightMs(incoming.mph);
   const startRef = useRef(performance.now());
   const doneRef = useRef(false);
   const onSwingRef = useRef(onSwing);
   onSwingRef.current = onSwing;
+  const canSuper = !!sup && sup.clutch && sup.charges > 0;
 
-  const swing = useCallback((kind: "contact" | "power" | "take") => {
+  const swing = useCallback((kind: "contact" | "power" | "take", superSwing = false) => {
     if (doneRef.current) return;
     doneRef.current = true;
     const p = (performance.now() - startRef.current) / ms;
-    onSwingRef.current(kind, Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)));
+    onSwingRef.current(kind, Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)), superSwing);
   }, [ms]);
 
   // Let it go by and it's a take.
@@ -216,10 +222,11 @@ function SwingPanel({ pitcher, batter, heat, incoming, onSwing }: {
       if (e.code === "Space" || e.key === "c" || e.key === "C") { e.preventDefault(); swing("contact"); }
       else if (e.key === "p" || e.key === "P") swing("power");
       else if (e.key === "t" || e.key === "T") swing("take");
+      else if ((e.key === "s" || e.key === "S") && canSuper) swing("power", true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [swing]);
+  }, [swing, canSuper]);
 
   const label = TYPES.find((t) => t.type === incoming.type)!.label;
   return (
@@ -236,8 +243,17 @@ function SwingPanel({ pitcher, batter, heat, incoming, onSwing }: {
             <button className="primary" onClick={() => swing("contact")}>Contact <small>Space</small></button>
             <button className="primary" onClick={() => swing("power")}>Power <small>P</small></button>
             <button onClick={() => swing("take")}>Take <small>T</small></button>
+            {sup && (
+              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onClick={() => swing("power", true)}
+                title={sup.charges === 0 ? "No charges left" : sup.clutch ? "Clutch spot. Spend a charge." : "Only in clutch spots"}>
+                Super <small>S · {sup.charges} left</small>
+              </button>
+            )}
           </div>
-          <small className="muted">Swing when the marker hits the gold. Contact for hits, Power for homers.</small>
+          <small className="muted">
+            Swing when the marker hits the gold. Contact for hits, Power for homers.
+            {sup && (canSuper ? " Clutch spot: a Super Swing is ready." : ` ${sup.bat} charges only in clutch spots.`)}
+          </small>
         </div>
         <Zone>
           <i className="zone-ball" style={{ left: `${toPct(incoming.aim.x)}%`, top: `${toPct(-incoming.aim.y)}%`, animationDuration: `${ms}ms` }} />

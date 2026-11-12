@@ -3,6 +3,7 @@ import type { MyTeam, TeamSummary } from "@bb/shared";
 import type { GameEvent, GameHistory, InteractiveSetup, PlayedGame, Side, SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { Ovr } from "./players.tsx";
+import { RewardLine } from "./store.tsx";
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
 
@@ -290,6 +291,7 @@ function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
           <span>{(current as Extract<GameEvent, { type: "final" }>).text}</span>
         </div>
       )}
+      {done && game.reward && <RewardLine reward={game.reward} />}
 
       <PlayCard card={card} players={players} />
 

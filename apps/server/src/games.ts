@@ -1,11 +1,11 @@
 import { randomInt } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { chemistry, slotsFor, teamAbbreviation, type Player } from "@bb/shared";
-import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, type GameHistory, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
+import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, slotsFor, teamAbbreviation, woodDeltas, type Gear, type Player } from "@bb/shared";
+import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
-import { getDb } from "./db/index.ts";
-import { games, mlbTeams, userTeamPlayers, userTeams } from "./db/schema.ts";
+import { getDb, type Db } from "./db/index.ts";
+import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
 import { findPlayer, pool } from "./store.ts";
 import { playerFromDb } from "./team.ts";
 
@@ -31,18 +31,52 @@ function staff(pitchers: SimPlayer[], roles: Map<number, string>, overall: Map<n
   return [starter, ...byOverall.filter((p) => p !== starter)];
 }
 
-/** The user's drafted team, with chemistry applied to every rating. */
-export function userSimTeam(name: string, color: string, players: Player[], season: number): SimTeam {
+/** The user's drafted team, with chemistry applied to every rating and their bat gear on top (wood is always on, ±2 at most). */
+export function userSimTeam(name: string, color: string, players: Player[], season: number, gear: Gear | null = null): SimTeam {
   const chem = chemistry(players, season);
   const skills = new Map(chem.players.map((b) => [b.playerId, b.skills as Record<string, number>]));
-  const sims = new Map(players.map((p) => [p.id, toSim(p, skills.get(p.id))]));
+  const wood = woodDeltas(gear?.wood ?? DEFAULT_WOOD);
+  const sims = new Map(players.map((p) => {
+    const s = toSim(p, skills.get(p.id));
+    if (s.batting) s.batting = { ...s.batting, contact: s.batting.contact + wood.contact, power: s.batting.power + wood.power };
+    return [p.id, s];
+  }));
   const roles = new Map(players.map((p) => [p.id, p.ratings.role]));
   const overall = new Map(chem.players.map((b) => [b.playerId, b.effective]));
+  const sb = gear?.superBat ? BAT_BY_ID[gear.superBat] : undefined;
   return {
     name, abbr: teamAbbreviation(name), color,
     lineup: autoLineup(players.filter(isHitter).map((p) => sims.get(p.id)!)),
     pitchers: staff(players.filter((p) => isPitcher(p) || p.ratings.role === "TWP").map((p) => sims.get(p.id)!), roles, overall),
+    gear: { superBat: sb ? { id: sb.id, name: sb.name, charges: sb.charges, contact: sb.boost.contact, power: sb.boost.power } : null },
   };
+}
+
+/**
+ * Pay out a finished game: coins by the rules in @bb/shared, plus a Legendary bat at win milestones.
+ * The only place coins are ever added; the client never sends a coin amount.
+ */
+async function payout(db: Db, userId: number, result: GameResult, outcome: "W" | "L" | "T"): Promise<NonNullable<PlayedGame["reward"]>> {
+  const history = await db.select({ result: games.result }).from(games).where(eq(games.userId, userId)).orderBy(desc(games.id));
+  let streak = 0;
+  for (const g of history) { if (g.result !== "W") break; streak++; }
+  if (outcome === "W") streak++;
+  const wins = history.filter((g) => g.result === "W").length + (outcome === "W" ? 1 : 0);
+  const trailedBy = Math.max(0, ...result.events.map((e) => e.state.score.away - e.state.score.home));
+  const c = coinsFor({
+    result: outcome, shutout: result.final.away === 0, homers: result.box.batting.home.reduce((n, b) => n + b.hr, 0),
+    comeback: trailedBy >= 2, streak,
+  });
+  await db.update(users).set({ coins: sql`${users.coins} + ${c.total}` }).where(eq(users.id, userId));
+
+  let drop: NonNullable<PlayedGame["reward"]>["drop"] = null;
+  const milestone = LEGENDARY_MILESTONES.find((m) => m.wins === wins);
+  if (outcome === "W" && milestone) {
+    const inserted = await db.insert(userItems).values({ userId, itemId: milestone.batId }).onConflictDoNothing().returning();
+    if (inserted.length) drop = { id: milestone.batId, name: BAT_BY_ID[milestone.batId].name };
+  }
+  const { total, ...coins } = c;
+  return { total, coins, drop };
 }
 
 /**
@@ -108,7 +142,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
       if (p) players.push(p);
     }
-    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear()) };
+    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear) };
   }
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
@@ -142,11 +176,12 @@ export async function gameRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
       const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
+      const reward = await payout(db, req.user!.id, result, outcome);
       const [row] = await db.insert(games).values({
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: DEFAULT_INNINGS,
-        userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome,
+        userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
-      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result };
+      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
       return reply.code(201).send(body);
     },
   );
@@ -161,12 +196,13 @@ export async function gameRoutes(app: FastifyInstance) {
     const seed = randomInt(0, 2 ** 31 - 1);
     const result = simulateGame({ ...teams, seed, innings: DEFAULT_INNINGS });
     const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
+    const reward = await payout(db, req.user!.id, result, outcome);
 
     const [row] = await db.insert(games).values({
       userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: DEFAULT_INNINGS,
-      userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome,
+      userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
-    const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result };
+    const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
     return reply.code(201).send(body);
   });
 

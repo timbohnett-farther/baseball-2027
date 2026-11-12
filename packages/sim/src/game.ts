@@ -39,7 +39,10 @@ interface Ctx {
   /** Interactive mode: the user's side and their input log. `autoField` replays logs recorded before fielding existed. */
   user?: { side: Side; inputs: UserInput[]; cursor: number; autoField?: boolean };
   /** Interactive mode: how the user's last swing was timed, for the ball in play. */
-  lastSwing?: { power: boolean; q: number };
+  lastSwing?: { power: boolean; q: number; boost?: { contact: number; power: number } };
+  /** Interactive mode: Super Power Bat charges left, and whether this at-bat spent one. */
+  superLeft: number;
+  superUsed: boolean;
   /** Interactive mode: how the user's last fielding tap changed the play. */
   lastField?: { fielderId: number; robbed: boolean; booted: boolean };
 }
@@ -119,10 +122,21 @@ const TYPE_MPH: Record<PitchType, number> = { fastball: 93, slider: 86, change: 
 /** Off-speed pitches fool hitters a bit more; fastballs are the safe pitch. */
 const TYPE_WHIFF: Record<PitchType, number> = { fastball: 0, slider: 0.04, change: 0.03, curve: 0.05 };
 
+/** A Super Swing is only allowed in a clutch spot: runners in scoring position, two strikes, or late in the game. */
+export function isClutch(state: GameState, innings: number): boolean {
+  return state.bases.second !== null || state.bases.third !== null || state.strikes === 2 || state.inning >= Math.min(7, innings);
+}
+
+function superInfo(c: Ctx, role: Awaiting["role"]): Awaiting["super"] {
+  const bat = c.user && c.teams[c.user.side].gear?.superBat;
+  if (!bat || role !== "swing") return null;
+  return { bat: bat.name, charges: c.superLeft, clutch: isClutch(c.state, c.innings) };
+}
+
 function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null): UserInput {
   const u = c.user!;
   const next = u.inputs[u.cursor];
-  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball });
+  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role) });
   if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
   u.cursor++;
   return next;
@@ -140,6 +154,7 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
 
   let type: PitchType, loc: Aim, mph: number;
   let swingKind: "contact" | "power" | "take" | null = null, q = 0;
+  let boost: { contact: number; power: number } | undefined;
   if (userPitching) {
     const inp = takeInput(c, "pitch", batter, pitcher, null) as Extract<UserInput, { kind: "pitch" }>;
     type = inp.type;
@@ -159,6 +174,13 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     const inp = takeInput(c, "swing", batter, pitcher, { type, mph, aim: loc }) as Extract<UserInput, { kind: "swing" }>;
     swingKind = inp.swing;
     q = 1 - Math.min(1, Math.abs(inp.timing));
+    // A Super Swing spends a charge (clutch spots only; an illegal request is just a normal swing).
+    const sb = c.teams[c.user!.side].gear?.superBat;
+    if (inp.super && sb && swingKind !== "take" && c.superLeft > 0 && isClutch(c.state, c.innings)) {
+      c.superLeft--; c.superUsed = true;
+      boost = { contact: sb.contact, power: sb.power };
+      q = 0.5 + 0.5 * q; // the bat forgives timing
+    }
   }
 
   const zone = inZone(loc);
@@ -170,9 +192,10 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
 
   const mo = momentum(c, batter, pitcher);
+  const zc = z((b?.contact ?? 70) + (boost?.contact ?? 0));
   let contact = zone
-    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo, 0.5, 0.97)
-    : clamp(0.55 + 0.05 * z(b?.contact) - 0.06 * stuff - TYPE_WHIFF[type] + mo, 0.2, 0.8);
+    ? clamp(0.85 + 0.04 * zc - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo, 0.5, 0.97)
+    : clamp(0.55 + 0.05 * zc - 0.06 * stuff - TYPE_WHIFF[type] + mo, 0.2, 0.8);
   let foul = zone ? 0.42 : 0.5;
   if (swingKind) {
     // The user's timing decides most of it: a perfect swing is a very good one.
@@ -181,15 +204,19 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   }
   if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
   if (rng.next() < foul) return { result: "foul", zone, mph };
-  if (swingKind) c.lastSwing = { power: swingKind === "power", q };
+  if (swingKind) c.lastSwing = { power: swingKind === "power", q, boost };
   return { result: "in_play", zone, mph };
 }
 
 // --- Ball in play ----------------------------------------------------------------------
 
-function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: { power: boolean; q: number }): Outcome {
+function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["lastSwing"]): Outcome {
   const { rng } = c;
-  const b = batter.batting, p = pitcher.pitching;
+  const p = pitcher.pitching;
+  // A Super Swing adds the bat's boost to the hitter's ratings for this ball only.
+  const b = batter.batting && swing?.boost
+    ? { ...batter.batting, contact: batter.batting.contact + swing.boost.contact, power: batter.batting.power + swing.boost.power }
+    : batter.batting;
   const defense = (teamDefense(c.teams[fieldingSide(c)]) - 70) / 10;
   // A swing the user timed well helps; Power trades hits for homers, Contact the other way.
   const dHr = swing ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
@@ -425,9 +452,13 @@ function plateAppearance(c: Ctx) {
   if (fielded?.robbed && tier !== 1) { tier = 2; card = "ROBBED"; stat = findPlayer(c, fielded.fielderId).name; line = call(rng, "webGem"); }
   else if (fielded?.booted) text += ` ${call(rng, "booted")}`;
 
+  // A Super Swing that connects is a highlight in its own right.
+  const superSwing = c.superUsed; c.superUsed = false;
+  if (superSwing && isHit && tier !== 1) { tier = 2; card = outcome === "home_run" ? "SUPER HOMER" : "SUPER SWING"; stat = stat ?? c.teams[bSide].gear?.superBat?.name ?? null; }
+
   c.events.push({
     type: "play", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, outcome, runs, rbi,
-    text, tier, call: line, card, stat,
+    text, tier, call: line, card, stat, ...(superSwing ? { superSwing } : {}),
   });
   if (walkOff) c.over = true;
 }
@@ -466,6 +497,8 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     pitching: { away: new Map(), home: new Map() },
     over: false,
     user,
+    superLeft: user ? (input[user.side].gear?.superBat?.charges ?? 0) : 0,
+    superUsed: false,
   };
   const s = c.state;
 

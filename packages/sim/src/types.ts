@@ -22,7 +22,12 @@ export interface SimTeam {
   lineup: SimPlayer[];
   /** Starter first, then the bullpen in the order they'll be used. */
   pitchers: SimPlayer[];
+  /** Equipped Super Power Bat, snapshotted with the team so a replay sees the same gear. */
+  gear?: { superBat: SuperBatGear | null };
 }
+
+/** A Super Power Bat as the engine sees it: charges per game and the rating boost of a Super Swing. */
+export interface SuperBatGear { id: string; name: string; charges: number; contact: number; power: number }
 
 export type Side = "away" | "home";
 
@@ -66,6 +71,8 @@ export type GameEvent =
       card: string | null;
       /** Fun stat for the card, e.g. "431 ft" or "102 mph". */
       stat: string | null;
+      /** The user spent a Super Power Bat charge on this at-bat. */
+      superSwing?: boolean;
     }
   | { type: "pitching_change"; state: GameState; side: Side; pitcherId: number; text: string }
   | { type: "final"; state: GameState; text: string };
@@ -97,6 +104,8 @@ export interface PlayedGame {
   userSide: Side;
   teams: Record<Side, SimTeam>;
   result: GameResult;
+  /** What the game paid out, on the response to a just-finished game only. */
+  reward?: { total: number; coins: Record<string, number>; drop: { id: string; name: string } | null };
 }
 
 export interface GameSummary {
@@ -123,8 +132,8 @@ export interface Aim { x: number; y: number }
 
 export type UserInput =
   | { kind: "pitch"; type: PitchType; aim: Aim }
-  /** timing: -1 = very early, 0 = perfect, 1 = very late. */
-  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number }
+  /** timing: -1 = very early, 0 = perfect, 1 = very late. `super` spends a Super Power Bat charge (clutch spots only). */
+  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number; super?: boolean }
   /** A close ball in play on the user's defense: the glove tap, timed the same way. */
   | { kind: "field"; timing: number };
 
@@ -138,6 +147,8 @@ export interface Awaiting {
   incoming: { type: PitchType; mph: number; aim: Aim } | null;
   /** When fielding a close one: what's coming and who has to make the play. */
   ball: { kind: "grounder" | "liner" | "fly"; fielderId: number } | null;
+  /** When batting with a Super Power Bat: charges left this game, and whether this is a clutch spot (the only time a charge can be spent). */
+  super: { bat: string; charges: number; clutch: boolean } | null;
 }
 
 export interface InteractiveGame {

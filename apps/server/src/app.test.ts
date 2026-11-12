@@ -20,8 +20,9 @@ const cookieOf = (res: LightMyRequestResponse) => {
   return c ? `bb_session=${c.value}` : "";
 };
 
-async function signup(username: string, password = "secret123") {
-  const res = await app.inject({ method: "POST", url: "/api/auth/signup", payload: { username, password, displayName: "Micah" } });
+async function signup(username: string, password = "secret123", ip?: string) {
+  // `ip` sidesteps the per-IP attempt limit once a file's worth of signups has used it up.
+  const res = await app.inject({ method: "POST", url: "/api/auth/signup", payload: { username, password, displayName: "Micah" }, remoteAddress: ip });
   return { res, cookie: cookieOf(res) };
 }
 
@@ -188,4 +189,56 @@ test("play a game against an MLB team, then see it in your history", async () =>
   const reloaded = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.deepEqual(reloaded.result.events, out.result!.events);
   assert.equal((await app.inject({ url: "/api/games", headers })).json().games.length, 2);
+});
+
+test("coins: games pay out, the store sells bats, gear equips", async () => {
+  const { res: su, cookie } = await signup("shopper", undefined, "10.0.0.9");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Shoppers", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams[0];
+
+  const first = await app.inject({ url: "/api/store", headers });
+  let store = first.json();
+  assert.equal(store.coins, 0, first.body);
+  assert.deepEqual(store.owned, []);
+  assert.deepEqual(store.gear, { wood: { wood: "ash", length: 33, weight: 31 }, superBat: null });
+  assert.ok(store.bats.length >= 10);
+
+  const game = (await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id } })).json();
+  assert.ok(game.reward.total >= 20, JSON.stringify(game.reward));
+  assert.ok(game.reward.coins.result > 0);
+  const me = (await app.inject({ url: "/api/me", headers })).json();
+  assert.equal(me.coins, game.reward.total);
+
+  // Too poor for a Rare bat; Legendary never for sale.
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "hornet" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "ninth-wave" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "nope" } })).statusCode, 400);
+  // Can't equip what you don't own.
+  assert.equal((await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { superBat: "hornet" } })).statusCode, 400);
+
+  // Give the user an allowance (only the server can touch coins), then buy.
+  const { getDb } = await import("./db/index.ts");
+  const { users } = await import("./db/schema.ts");
+  const { eq } = await import("drizzle-orm");
+  await getDb().update(users).set({ coins: 1000 }).where(eq(users.username, "shopper"));
+  const bought = await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "hornet" } });
+  assert.equal(bought.statusCode, 200, bought.body);
+  assert.equal(bought.json().coins, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "hornet" } })).statusCode, 400); // already owned
+
+  const gear = await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { superBat: "hornet", wood: { wood: "maple", length: 34, weight: 32 } } });
+  assert.equal(gear.statusCode, 200, gear.body);
+  assert.equal((await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { wood: { wood: "oak", length: 33, weight: 31 } } })).statusCode, 400);
+  store = (await app.inject({ url: "/api/store", headers })).json();
+  assert.deepEqual(store.owned, ["hornet"]);
+  assert.deepEqual(store.gear, { wood: { wood: "maple", length: 34, weight: 32 }, superBat: "hornet" });
+
+  // The equipped bat rides along in the interactive setup, so the browser can offer Super Swings.
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id } })).json();
+  assert.equal(setup.teams.home.gear.superBat.id, "hornet");
+  assert.equal(setup.teams.home.gear.superBat.charges, 3);
 });
