@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
+import { useSound } from "./audio.ts";
 import { AuthPanel } from "./auth.tsx";
 import { MyTeamView } from "./draft.tsx";
 import { PlayView } from "./game.tsx";
@@ -19,6 +20,7 @@ export function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [data, setData] = useState<{ season: number; teams: TeamSummary[] } | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [sound, toggleSound] = useSound();
   const [view, setView] = useState<View>({ kind: "teams" });
 
   useEffect(() => {
@@ -39,6 +41,10 @@ export function App() {
     <div className="page">
       <header className="hero">
         <div className="userbar">
+          <button className="link" onClick={toggleSound} aria-pressed={sound} title={sound ? "Mute ballpark sound" : "Turn ballpark sound on"}>
+            {sound ? "🔊 Sound" : "🔇 Muted"}
+          </button>
+          <span className="sep">·</span>
           {me ? <>Hi, <b>{me.displayName}</b> · <button className="link" onClick={signOut}>Sign out</button></>
             : me === null && <button className="link" onClick={() => setView({ kind: "sign-in" })}>Sign in</button>}
         </div>

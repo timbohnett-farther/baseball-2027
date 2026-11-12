@@ -5,6 +5,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playInteractive, type Aim, type Awaiting, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
+import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { RewardLine } from "./store.tsx";
 
@@ -62,6 +63,8 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
 
   const submit = useCallback((input: UserInput) => setInputs((prev) => [...prev, input]), []);
   const current = events[Math.min(shown, events.length - 1)];
+  useEffect(() => crowdBed(), []);
+  useEffect(() => { playEvent(current, (current.state.half === "top" ? "away" : "home") === setup.userSide); }, [current, setup.userSide]);
   const highlights = useReel(events, speed);
   const fieldIndex = highlights.index ?? Math.min(shown, events.length - 1);
   const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);

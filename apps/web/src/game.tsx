@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MyTeam, TeamSummary } from "@bb/shared";
 import type { GameEvent, GameHistory, InteractiveSetup, PlayedGame, Side, SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
+import { crowdBed, playEvent } from "./audio.ts";
 import { Ovr } from "./players.tsx";
 import { RewardLine } from "./store.tsx";
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
@@ -245,6 +246,8 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
   const current = events[i];
   const s = current.state;
   const side: Side = s.half === "top" ? "away" : "home";
+  useEffect(() => crowdBed(), []);
+  useEffect(() => { playEvent(current, side === game.userSide); }, [current, side, game.userSide]);
   const batterId = current.type === "pitch" || current.type === "play" ? current.batterId : null;
   const pitcherId = current.type === "pitch" || current.type === "play" ? current.pitcherId : null;
   const lastPitch = [...events.slice(0, i + 1)].reverse().find((e) => e.type === "pitch") as Extract<GameEvent, { type: "pitch" }> | undefined;
