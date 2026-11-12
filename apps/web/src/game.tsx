@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MyTeam, TeamSummary } from "@bb/shared";
-import type { GameEvent, GameHistory, PlayedGame, Side, SimPlayer } from "@bb/sim";
+import type { GameEvent, GameHistory, InteractiveSetup, PlayedGame, Side, SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { Ovr } from "./players.tsx";
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
+const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
 
 // --- Pick an opponent ------------------------------------------------------------------
 
@@ -12,6 +13,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
   const [history, setHistory] = useState<GameHistory | null>(null);
   const [opponent, setOpponent] = useState<number | null>(null);
   const [game, setGame] = useState<PlayedGame | null>(null);
+  const [duel, setDuel] = useState<InteractiveSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -21,16 +23,20 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
   };
   useEffect(load, []);
 
-  async function play() {
+  async function play(mode: "sim" | "duel") {
     if (!opponent) return;
     setBusy(true);
     setError(null);
-    try { setGame(await api<PlayedGame>("/api/games", { body: { opponentTeamId: opponent } })); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    try {
+      if (mode === "duel") setDuel(await api<InteractiveSetup>("/api/games/interactive", { body: { opponentTeamId: opponent } }));
+      else setGame(await api<PlayedGame>("/api/games", { body: { opponentTeamId: opponent } }));
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   const open = async (id: number) => {
     try { setGame(await api<PlayedGame>(`/api/games/${id}`)); } catch (e) { setError((e as Error).message); }
   };
 
+  if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} onDone={() => setDuel(null)} /></Suspense>;
   if (game) return <GameView game={game} onDone={() => { setGame(null); load(); }} />;
   if (myTeam === undefined) return <section className="panel">{error ?? "Loading…"}</section>;
   if (!myTeam || myTeam.status !== "ready") {
@@ -65,7 +71,10 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
           ))}
         </div>
         {error && <p className="error">{error}</p>}
-        <p><button className="primary" disabled={!opponent || busy} onClick={play}>{busy ? "Warming up…" : "Play ball"}</button></p>
+        <p className="play-buttons">
+          <button className="primary" disabled={!opponent || busy} onClick={() => play("duel")}>{busy ? "Warming up…" : "Play it yourself"}</button>
+          <button disabled={!opponent || busy} onClick={() => play("sim")}>Watch the sim</button>
+        </p>
       </section>
 
       {history && history.games.length > 0 && (
@@ -99,7 +108,7 @@ const SPEEDS = [1, 2, 4];
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** How long each event stays on screen at 1x (ms). Big plays linger so their card can land. */
-function holdFor(e: GameEvent): number {
+export function holdFor(e: GameEvent): number {
   switch (e.type) {
     case "pitch": return 450;
     case "half_start": return 1300;
@@ -214,7 +223,7 @@ function FeedItem({ e }: { e: GameEvent }) {
 }
 
 /** Scorebug (docs/VISUAL_DESIGN.md 4.1): score, inning, outs, count, runners in one compact unit. */
-function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
+export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   const e = game.result.events[index];
   const s = e.state;
   const showCount = e.type === "pitch";
@@ -248,7 +257,7 @@ function Diamond({ bases }: { bases: { first: number | null; second: number | nu
   );
 }
 
-function BoxScoreView({ game }: { game: PlayedGame }) {
+export function BoxScoreView({ game }: { game: PlayedGame }) {
   const { box, final } = game.result;
   const innings = Math.max(box.linescore.away.length, box.linescore.home.length);
   const sides: Side[] = ["away", "home"];

@@ -8,8 +8,8 @@
 import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
 import type {
-  Bases, BattingLine, BoxScore, GameEvent, GameResult, GameState, Outcome, PitchingLine, PitchResult,
-  Side, SimPlayer, SimTeam, Tier,
+  Aim, Awaiting, Bases, BattingLine, BoxScore, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
+  PitchingLine, PitchResult, PitchType, Side, SimPlayer, SimTeam, Tier, UserInput,
 } from "./types.ts";
 
 export const DEFAULT_INNINGS = 3;
@@ -36,6 +36,16 @@ interface Ctx {
   batting: Record<Side, Map<number, BattingLine>>;
   pitching: Record<Side, Map<number, PitchingLine>>;
   over: boolean;
+  /** Interactive mode: the user's side and their input log. */
+  user?: { side: Side; inputs: UserInput[]; cursor: number };
+  /** Interactive mode: how the user's last swing was timed, for the ball in play. */
+  lastSwing?: { power: boolean; q: number };
+}
+
+/** Thrown in interactive mode when the log runs out; the caller turns it into "waiting for input". */
+class NeedInput extends Error {
+  awaiting: Awaiting;
+  constructor(awaiting: Awaiting) { super("need input"); this.awaiting = awaiting; }
 }
 
 const snapshot = (s: GameState): GameState => ({ ...s, bases: { ...s.bases }, score: { ...s.score } });
@@ -88,14 +98,88 @@ function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: Pi
   return { result: rng.next() < (zone ? 0.42 : 0.5) ? "foul" : "in_play", zone, mph };
 }
 
+// --- One pitch, with the user in the loop ----------------------------------------------------
+
+const TYPE_MPH: Record<PitchType, number> = { fastball: 93, slider: 86, change: 82, curve: 79 };
+/** Off-speed pitches fool hitters a bit more; fastballs are the safe pitch. */
+const TYPE_WHIFF: Record<PitchType, number> = { fastball: 0, slider: 0.04, change: 0.03, curve: 0.05 };
+
+function takeInput(c: Ctx, role: "pitch" | "swing", batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"]): UserInput {
+  const u = c.user!;
+  const next = u.inputs[u.cursor];
+  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming });
+  if (next.kind !== (role === "pitch" ? "pitch" : "swing")) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
+  u.cursor++;
+  return next;
+}
+
+const inZone = (a: Aim) => Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1;
+
+function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number } {
+  const { rng } = c;
+  const b = batter.batting, p = pitcher.pitching;
+  const used = c.pitchCount.get(pitcher.id) ?? 0;
+  const tired = clamp((used - pitchLimit(pitcher)) / 15, 0, 1);
+  const stuff = z(p?.stuff) - tired, control = z(p?.control) - tired;
+  const userPitching = fieldingSide(c) === c.user!.side;
+
+  let type: PitchType, loc: Aim, mph: number;
+  let swingKind: "contact" | "power" | "take" | null = null, q = 0;
+  if (userPitching) {
+    const inp = takeInput(c, "pitch", batter, pitcher, null) as Extract<UserInput, { kind: "pitch" }>;
+    type = inp.type;
+    // Where it actually lands: the aim plus a miss that shrinks with Control.
+    const miss = clamp(0.5 - 0.15 * control, 0.2, 0.8);
+    loc = { x: clamp(inp.aim.x, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss, y: clamp(inp.aim.y, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss };
+    mph = Math.round(TYPE_MPH[type] + 3 * stuff + (rng.next() - 0.5) * 4);
+  } else {
+    // The computer pitches. Roll the pitch first so the user can see it coming.
+    const r = rng.next();
+    type = r < 0.55 ? "fastball" : r < 0.75 ? "slider" : r < 0.9 ? "change" : "curve";
+    const zone = rng.next() < clamp(0.5 + 0.05 * control, 0.35, 0.65);
+    const edge = () => (rng.next() < 0.5 ? -1 : 1) * (1.05 + rng.next() * 0.5);
+    loc = zone ? { x: (rng.next() * 2 - 1) * 0.95, y: (rng.next() * 2 - 1) * 0.95 }
+      : rng.next() < 0.5 ? { x: edge(), y: (rng.next() * 2 - 1) * 1.4 } : { x: (rng.next() * 2 - 1) * 1.4, y: edge() };
+    mph = Math.round(TYPE_MPH[type] + 3 * stuff + (rng.next() - 0.5) * 4);
+    const inp = takeInput(c, "swing", batter, pitcher, { type, mph, aim: loc }) as Extract<UserInput, { kind: "swing" }>;
+    swingKind = inp.swing;
+    q = 1 - Math.min(1, Math.abs(inp.timing));
+  }
+
+  const zone = inZone(loc);
+  const edge = zone ? clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) - 0.6) / 0.4, 0, 1) : 0;
+  const swing = swingKind
+    ? swingKind !== "take"
+    : zone ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye), 0.5, 0.85)
+      : rng.next() < clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) < 1.3 ? 0.4 : 0.22) - 0.05 * z(b?.eye) + 0.03 * stuff, 0.08, 0.55);
+  if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
+
+  let contact = zone
+    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type], 0.5, 0.97)
+    : clamp(0.55 + 0.05 * z(b?.contact) - 0.06 * stuff - TYPE_WHIFF[type], 0.2, 0.8);
+  let foul = zone ? 0.42 : 0.5;
+  if (swingKind) {
+    // The user's timing decides most of it: a perfect swing is a very good one.
+    contact = clamp(contact * (0.3 + 0.7 * q) + (swingKind === "contact" ? 0.06 : -0.04), 0.05, 0.97);
+    foul = clamp(0.55 - 0.35 * q, 0.15, 0.5);
+  }
+  if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
+  if (rng.next() < foul) return { result: "foul", zone, mph };
+  if (swingKind) c.lastSwing = { power: swingKind === "power", q };
+  return { result: "in_play", zone, mph };
+}
+
 // --- Ball in play ----------------------------------------------------------------------
 
-function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): Outcome {
+function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: { power: boolean; q: number }): Outcome {
   const { rng } = c;
   const b = batter.batting, p = pitcher.pitching;
   const defense = (teamDefense(c.teams[fieldingSide(c)]) - 70) / 10;
-  const hr = clamp(0.05 + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.22);
-  const hit = clamp(0.29 + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.15, 0.45);
+  // A swing the user timed well helps; Power trades hits for homers, Contact the other way.
+  const dHr = swing ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
+  const dHit = swing ? (swing.power ? -0.02 : 0.05 * swing.q) - 0.08 * (1 - swing.q) : 0;
+  const hr = clamp(0.05 + dHr + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.28);
+  const hit = clamp(0.29 + dHit + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.12, 0.45);
   const r = rng.next();
   if (r < hr) return "home_run";
   if (r < hr + hit) {
@@ -204,7 +288,7 @@ function plateAppearance(c: Ctx) {
   let outcome: Outcome | null = null;
   let lastMph = 0;
   while (!outcome) {
-    const pitch = throwPitch(c, batter, pitcher);
+    const pitch = c.user ? throwUserPitch(c, batter, pitcher) : throwPitch(c, batter, pitcher);
     c.pitchCount.set(pitcher.id, (c.pitchCount.get(pitcher.id) ?? 0) + 1);
     pLine.pitches++;
     lastMph = pitch.mph;
@@ -214,7 +298,7 @@ function plateAppearance(c: Ctx) {
     c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone });
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
-    else if (pitch.result === "in_play") outcome = ballInPlay(c, batter, pitcher);
+    else if (pitch.result === "in_play") { outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined; }
   }
 
   const count = `${state.balls}-${state.strikes}`;
@@ -283,7 +367,22 @@ function plateAppearance(c: Ctx) {
 
 // --- Whole game ----------------------------------------------------------------------------
 
-export function simulateGame(input: { away: SimTeam; home: SimTeam; seed: number; innings?: number }): GameResult {
+type GameInput = { away: SimTeam; home: SimTeam; seed: number; innings?: number };
+
+export function simulateGame(input: GameInput): GameResult {
+  return run(input).result!;
+}
+
+/**
+ * Play a game where `userSide` makes the pitching and batting choices. Pass the inputs made so
+ * far; the game replays from the seed and stops at the first moment it needs another one.
+ */
+export function playInteractive(input: GameInput & { userSide: Side; inputs: UserInput[] }): InteractiveGame {
+  const { events, awaiting, result } = run(input, { side: input.userSide, inputs: input.inputs, cursor: 0 });
+  return { events, awaiting, result };
+}
+
+function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; awaiting: Awaiting | null; result: GameResult | null } {
   const innings = input.innings ?? DEFAULT_INNINGS;
   const c: Ctx = {
     rng: createRng(input.seed),
@@ -299,8 +398,11 @@ export function simulateGame(input: { away: SimTeam; home: SimTeam; seed: number
     batting: { away: new Map(), home: new Map() },
     pitching: { away: new Map(), home: new Map() },
     over: false,
+    user,
   };
   const s = c.state;
+
+  try {
 
   for (let inning = 1; inning <= MAX_INNINGS && !c.over; inning++) {
     for (const half of ["top", "bottom"] as const) {
@@ -323,6 +425,11 @@ export function simulateGame(input: { away: SimTeam; home: SimTeam; seed: number
     if (inning >= innings && s.score.home !== s.score.away) break;
   }
 
+  } catch (e) {
+    if (e instanceof NeedInput) return { events: c.events, awaiting: e.awaiting, result: null };
+    throw e;
+  }
+
   const winner: Side | null = s.score.home > s.score.away ? "home" : s.score.away > s.score.home ? "away" : null;
   const { away, home } = c.teams;
   s.balls = 0; s.strikes = 0;
@@ -337,7 +444,7 @@ export function simulateGame(input: { away: SimTeam; home: SimTeam; seed: number
     batting: { away: away.lineup.map((p) => bat(c, "away", p)), home: home.lineup.map((p) => bat(c, "home", p)) },
     pitching: { away: [...c.pitching.away.values()], home: [...c.pitching.home.values()] },
   };
-  return { seed: input.seed, innings, final: { ...s.score }, winner, events: c.events, box };
+  return { events: c.events, awaiting: null, result: { seed: input.seed, innings, final: { ...s.score }, winner, events: c.events, box } };
 }
 
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;

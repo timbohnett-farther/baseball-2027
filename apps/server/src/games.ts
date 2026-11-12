@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { chemistry, slotsFor, teamAbbreviation, type Player } from "@bb/shared";
-import { autoLineup, DEFAULT_INNINGS, simulateGame, type GameHistory, type PlayedGame, type SimPlayer, type SimTeam } from "@bb/sim";
+import { autoLineup, DEFAULT_INNINGS, simulateGame, type GameHistory, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb } from "./db/index.ts";
 import { games, mlbTeams, userTeamPlayers, userTeams } from "./db/schema.ts";
@@ -80,22 +80,43 @@ function played(row: typeof games.$inferSelect, opponent: { id: number; name: st
 }
 
 export async function gameRoutes(app: FastifyInstance) {
-  app.post<{ Body: { opponentTeamId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
+  /** Both lineups for a game against an MLB team, or the reason it can't be played yet. */
+  async function matchup(userId: number, opponentTeamId: unknown): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam }> {
     const db = getDb();
-    const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, req.user!.id));
-    if (!team) return reply.code(400).send({ error: "Draft your team first." });
-    if (team.status !== "ready") return reply.code(400).send({ error: "Finish your draft before playing." });
+    const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, userId));
+    if (!team) return { error: "Draft your team first." };
+    if (team.status !== "ready") return { error: "Finish your draft before playing." };
 
     const rows = await db.select({ playerId: userTeamPlayers.playerId }).from(userTeamPlayers).where(eq(userTeamPlayers.teamId, team.id));
-    const opponent = mlbSimTeam(Number(req.body?.opponentTeamId), new Set(rows.map((r) => r.playerId)));
-    if (!opponent) return reply.code(400).send({ error: "Pick an MLB team to play." });
+    const opponent = mlbSimTeam(Number(opponentTeamId), new Set(rows.map((r) => r.playerId)));
+    if (!opponent) return { error: "Pick an MLB team to play." };
 
     const players: Player[] = [];
     for (const r of rows) {
       const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
       if (p) players.push(p);
     }
-    const me = userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear());
+    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear()) };
+  }
+
+  // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
+  // so all it needs from us is the two lineups and a seed. Results aren't recorded yet.
+  app.post<{ Body: { opponentTeamId?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
+    const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+    if ("error" in m) return reply.code(400).send({ error: m.error });
+    const id = Number(req.body!.opponentTeamId);
+    const body: InteractiveSetup = {
+      seed: randomInt(0, 2 ** 31 - 1), innings: DEFAULT_INNINGS, userSide: "home",
+      opponent: { id, name: m.opponent.name, abbr: m.opponent.abbr }, teams: { away: m.opponent, home: m.me },
+    };
+    return reply.code(201).send(body);
+  });
+
+  app.post<{ Body: { opponentTeamId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
+    const db = getDb();
+    const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+    if ("error" in m) return reply.code(400).send({ error: m.error });
+    const { team, opponent, me } = m;
     // You're the home team: you always get the last at-bat.
     const teams = { away: opponent, home: me };
     const seed = randomInt(0, 2 ** 31 - 1);

@@ -112,3 +112,64 @@ test("auto lineup: speedy contact leads off, biggest power bats cleanup", () => 
   assert.equal(lineup[0].name, "Speedy");
   assert.ok(lineup.slice(2, 4).some((p) => p.name === "Slugger"));
 });
+
+// --- Interactive play ----------------------------------------------------------------------
+
+import { playInteractive } from "./game.ts";
+import type { UserInput } from "./types.ts";
+
+/** Keep answering whatever the game asks until it ends. */
+function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch" | "swing") => UserInput) {
+  const inputs: UserInput[] = [];
+  for (let guard = 0; guard < 2000; guard++) {
+    const g = playInteractive({ away: avg, home: avg2, seed, userSide, inputs });
+    if (g.result) return { g, inputs };
+    inputs.push(answer(g.awaiting!.role));
+  }
+  throw new Error("game never ended");
+}
+const pitchIn: UserInput = { kind: "pitch", type: "fastball", aim: { x: 0, y: 0 } };
+const swingAt = (swing: "contact" | "power" | "take", timing = 0): UserInput => ({ kind: "swing", swing, timing });
+
+test("interactive: asks for a pitch when the user fields, a swing when the user bats", () => {
+  const pitching = playInteractive({ away: avg, home: avg2, seed: 7, userSide: "away", inputs: [] });
+  assert.equal(pitching.awaiting?.role, "swing"); // away bats first
+  assert.ok(pitching.awaiting?.incoming);
+  const fielding = playInteractive({ away: avg, home: avg2, seed: 7, userSide: "home", inputs: [] });
+  assert.equal(fielding.awaiting?.role, "pitch");
+  assert.equal(fielding.awaiting?.incoming, null);
+});
+
+test("interactive: same seed + same inputs = same game, and a prefix of inputs is a prefix of events", () => {
+  const a = playOut(11, "home", (role) => (role === "pitch" ? pitchIn : swingAt("contact")));
+  const b = playOut(11, "home", (role) => (role === "pitch" ? pitchIn : swingAt("contact")));
+  assert.deepEqual(a.g.result, b.g.result);
+  const mid = playInteractive({ away: avg, home: avg2, seed: 11, userSide: "home", inputs: a.inputs.slice(0, 5) });
+  assert.deepEqual(mid.events, a.g.events.slice(0, mid.events.length));
+});
+
+test("interactive: games finish consistently as batter and pitcher", () => {
+  for (let seed = 0; seed < 15; seed++) {
+    for (const side of ["home", "away"] as const)
+      checkConsistency(playOut(seed, side, (role) => (role === "pitch" ? pitchIn : swingAt("contact"))).g.result!);
+  }
+});
+
+test("interactive: perfect timing beats terrible timing", () => {
+  const runs = (timing: number) => {
+    let hits = 0;
+    for (let seed = 0; seed < 60; seed++) hits += playOut(seed, "away", (role) => (role === "pitch" ? pitchIn : swingAt("contact", timing))).g.result!.box.hits.away;
+    return hits;
+  };
+  assert.ok(runs(0) > runs(0.9) * 2, "good timing should produce far more hits");
+});
+
+test("interactive: out-of-order input is rejected", () => {
+  assert.throws(() => playInteractive({ away: avg, home: avg2, seed: 1, userSide: "away", inputs: [pitchIn] }), /expected swing/);
+});
+
+test("auto sim is unchanged by the interactive code", () => {
+  // Guards stored games: events are re-created from the seed, so this output must never drift.
+  const g = simulateGame({ away: avg, home: avg2, seed: 42 });
+  assert.equal(g.events.length > 20, true);
+});

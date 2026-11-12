@@ -106,3 +106,42 @@ export interface GameHistory {
   record: { w: number; l: number; t: number };
   games: GameSummary[];
 }
+
+// --- Interactive play ---------------------------------------------------------------------
+// The user's choices are an ordered input log. Replaying the log against the same seed gives
+// the same game, so the server can verify an interactive game later.
+
+export type PitchType = "fastball" | "slider" | "change" | "curve";
+/** Position over the plate: x, y in -1..1 is inside the strike zone, beyond that is a ball. */
+export interface Aim { x: number; y: number }
+
+export type UserInput =
+  | { kind: "pitch"; type: PitchType; aim: Aim }
+  /** timing: -1 = very early, 0 = perfect, 1 = very late. */
+  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number };
+
+/** What the game needs from the user next. */
+export interface Awaiting {
+  role: "pitch" | "swing";
+  batterId: number;
+  pitcherId: number;
+  state: GameState;
+  /** When batting: the pitch that is on its way. */
+  incoming: { type: PitchType; mph: number; aim: Aim } | null;
+}
+
+export interface InteractiveGame {
+  events: GameEvent[];
+  awaiting: Awaiting | null;
+  /** Set once the game is over. */
+  result: GameResult | null;
+}
+
+/** Everything the browser needs to run a play-it-yourself game. */
+export interface InteractiveSetup {
+  seed: number;
+  innings: number;
+  userSide: Side;
+  opponent: { id: number; name: string; abbr: string };
+  teams: Record<Side, SimTeam>;
+}
