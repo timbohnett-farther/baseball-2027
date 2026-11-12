@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
-  canAdd, chemistry, draftStatus, TEAM_COLORS,
+  canAdd, chemistry, developRatings, draftStatus, progressFor, TEAM_COLORS,
   type CreateTeamRequest, type DraftPick, type Me, type MyTeam, type Player,
 } from "@bb/shared";
 import { requireUser } from "./auth.ts";
@@ -24,12 +24,15 @@ export async function playerFromDb(db: Db | Tx, id: number): Promise<Player | nu
   };
 }
 
-async function teamPlayers(db: Db | Tx, teamId: number): Promise<Player[]> {
+/** A team's drafted players, each with his development level already folded into his ratings. */
+export async function teamPlayers(db: Db | Tx, teamId: number): Promise<Player[]> {
   const rows = await db.select().from(userTeamPlayers).where(eq(userTeamPlayers.teamId, teamId)).orderBy(userTeamPlayers.addedAt);
   const out: Player[] = [];
   for (const r of rows) {
     const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
-    if (p) out.push(p);
+    if (!p) continue;
+    const progress = progressFor(r.xp);
+    out.push({ ...p, ratings: developRatings(p.ratings, progress.level), progress });
   }
   return out;
 }

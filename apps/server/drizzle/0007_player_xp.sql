@@ -1,0 +1,1 @@
+ALTER TABLE "user_team_players" ADD COLUMN "xp" integer DEFAULT 0 NOT NULL;

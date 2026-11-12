@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { slotsFor, type MyTeam, type Player } from "@bb/shared";
+import { DEFAULT_WOOD, slotsFor, woodDeltas, type MyTeam, type Player } from "@bb/shared";
 import { buildApp } from "./app.ts";
 import { closeDb, initDb } from "./db/index.ts";
 import { pool, startStore } from "./store.ts";
@@ -295,4 +295,43 @@ test("season: 20 games, playoffs if over .500, bonuses paid by the server", asyn
   const again = await app.inject({ method: "POST", url: "/api/season", headers });
   assert.equal(again.statusCode, 201, again.body);
   assert.equal(again.json().number, 2);
+});
+
+test("player development: games earn XP, levels lift ratings, only the server writes XP", async () => {
+  const { res: su, cookie } = await signup("coach", undefined, "10.0.0.12");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Coaches", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const before = (await app.inject({ url: "/api/my-team", headers })).json();
+  for (const p of before.players) assert.deepEqual(p.progress, { xp: 0, level: 0, nextLevelXp: 60 });
+
+  const opp = pool().teams[0].id;
+  const g = (await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp } })).json();
+  const appeared = new Set<number>([...g.result.box.batting.home, ...g.result.box.pitching.home].map((l: { playerId: number }) => l.playerId));
+  const after = (await app.inject({ url: "/api/my-team", headers })).json();
+  for (const p of after.players) {
+    if (appeared.has(p.id)) assert.ok(p.progress.xp >= 10, `${p.name} xp ${p.progress.xp}`);
+    else assert.equal(p.progress.xp, 0);
+  }
+  assert.ok(g.reward.levelUps.every((l: { level: number }) => l.level === 1)); // 60 xp is a lot for one game, but allowed
+
+  // Level 3: +3 to every rating, capped at 99, and the sim sees the developed player.
+  const { getDb } = await import("./db/index.ts");
+  const { userTeamPlayers } = await import("./db/schema.ts");
+  const { eq } = await import("drizzle-orm");
+  const star = before.players.find((p: { ratings: { role: string } }) => p.ratings.role === "H");
+  await getDb().update(userTeamPlayers).set({ xp: 180 }).where(eq(userTeamPlayers.playerId, star.id));
+  const team = (await app.inject({ url: "/api/my-team", headers })).json();
+  const grown = team.players.find((p: { id: number }) => p.id === star.id);
+  assert.equal(grown.progress.level, 3);
+  assert.equal(grown.ratings.overall, Math.min(99, star.ratings.overall + 3));
+  assert.equal(grown.ratings.hitting.contact, Math.min(99, star.ratings.hitting.contact + 3));
+  // The sim gets the developed rating, then chemistry (which can shift with the new overall) and the wood bat on top.
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp } })).json();
+  const inSim = setup.teams.home.lineup.find((p: { id: number }) => p.id === star.id);
+  assert.ok(inSim, "developed player is in the lineup");
+  const chem = team.chemistry.players.find((b: { playerId: number }) => b.playerId === star.id);
+  assert.equal(inSim.batting.contact, (chem.skills.contact ?? grown.ratings.hitting.contact) + woodDeltas(DEFAULT_WOOD).contact);
 });

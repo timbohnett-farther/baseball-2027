@@ -105,7 +105,11 @@ export interface PlayedGame {
   teams: Record<Side, SimTeam>;
   result: GameResult;
   /** What the game paid out, on the response to a just-finished game only. */
-  reward?: { total: number; coins: Record<string, number>; drop: { id: string; name: string } | null };
+  reward?: {
+    total: number; coins: Record<string, number>; drop: { id: string; name: string } | null;
+    /** Drafted players who reached a new development level in this game. */
+    levelUps?: { id: number; name: string; level: number }[];
+  };
 }
 
 export interface GameSummary {

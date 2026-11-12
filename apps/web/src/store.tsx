@@ -133,6 +133,7 @@ export function RewardLine({ reward }: { reward: NonNullable<import("@bb/sim").P
       <span className="reward-total"><span className="coin" aria-hidden /> +{reward.total} coins</span>
       <small className="muted">{parts.join(" · ")}</small>
       {reward.drop && <span className="chip ready">New Legendary bat: {reward.drop.name}</span>}
+      {reward.levelUps?.map((u) => <span key={u.id} className="chip ready">{u.name} reached level {u.level}</span>)}
     </div>
   );
 }

@@ -1,14 +1,14 @@
 import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, slotsFor, teamAbbreviation, woodDeltas, type Gear, type Player } from "@bb/shared";
+import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
 import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
 import { seasonMatch, settleSeason, type SeasonRow } from "./season.ts";
-import { findPlayer, pool } from "./store.ts";
-import { playerFromDb } from "./team.ts";
+import { pool } from "./store.ts";
+import { teamPlayers } from "./team.ts";
 
 const isPitcher = (p: Player) => p.ratings.role === "SP" || p.ratings.role === "RP";
 const isHitter = (p: Player) => p.ratings.role === "H" || p.ratings.role === "TWP";
@@ -131,6 +131,34 @@ async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: 
   if (bonus > 0) { reward.coins.season = bonus; reward.total += bonus; }
 }
 
+/**
+ * Player development: everyone who appeared for the user earns XP (appearance, hits, homers,
+ * strikeouts thrown, a win bonus). Levels come from XP alone, so a level-up is just a threshold crossed.
+ */
+async function awardXp(db: Db, teamId: number, result: GameResult, outcome: "W" | "L" | "T"): Promise<NonNullable<NonNullable<PlayedGame["reward"]>["levelUps"]>> {
+  const gained = new Map<number, { name: string; xp: number }>();
+  const add = (id: number, name: string, xp: number) => {
+    const g = gained.get(id) ?? { name, xp: 0 };
+    g.xp += xp;
+    gained.set(id, g);
+  };
+  for (const b of result.box.batting.home) add(b.playerId, b.name, XP_RULES.appearance + b.h * XP_RULES.hit + b.hr * XP_RULES.homer);
+  for (const p of result.box.pitching.home) add(p.playerId, p.name, (gained.has(p.playerId) ? 0 : XP_RULES.appearance) + p.k * XP_RULES.strikeout);
+  if (outcome === "W") for (const g of gained.values()) g.xp += XP_RULES.win;
+
+  const rows = await db.select({ playerId: userTeamPlayers.playerId, xp: userTeamPlayers.xp })
+    .from(userTeamPlayers).where(eq(userTeamPlayers.teamId, teamId));
+  const levelUps: { id: number; name: string; level: number }[] = [];
+  for (const r of rows) {
+    const g = gained.get(r.playerId);
+    if (!g) continue;
+    const xp = r.xp + g.xp;
+    await db.update(userTeamPlayers).set({ xp }).where(and(eq(userTeamPlayers.teamId, teamId), eq(userTeamPlayers.playerId, r.playerId)));
+    if (levelFor(xp) > levelFor(r.xp)) levelUps.push({ id: r.playerId, name: g.name, level: levelFor(xp) });
+  }
+  return levelUps;
+}
+
 export async function gameRoutes(app: FastifyInstance) {
   /** Both lineups for a game against an MLB team, or the reason it can't be played yet. */
   async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null }> {
@@ -146,15 +174,9 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!team) return { error: "Draft your team first." };
     if (team.status !== "ready") return { error: "Finish your draft before playing." };
 
-    const rows = await db.select({ playerId: userTeamPlayers.playerId }).from(userTeamPlayers).where(eq(userTeamPlayers.teamId, team.id));
-    const opponent = mlbSimTeam(Number(opponentTeamId), new Set(rows.map((r) => r.playerId)));
+    const players = await teamPlayers(db, team.id); // ratings include each player's development level
+    const opponent = mlbSimTeam(Number(opponentTeamId), new Set(players.map((p) => p.id)));
     if (!opponent) return { error: "Pick an MLB team to play." };
-
-    const players: Player[] = [];
-    for (const r of rows) {
-      const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
-      if (p) players.push(p);
-    }
     return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear), season };
   }
 
@@ -195,6 +217,7 @@ export async function gameRoutes(app: FastifyInstance) {
         userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
       if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
+      reward.levelUps = await awardXp(db, team.id, result, outcome);
       const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
       return reply.code(201).send(body);
     },
@@ -217,6 +240,7 @@ export async function gameRoutes(app: FastifyInstance) {
       userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
     if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
+    reward.levelUps = await awardXp(db, team.id, result, outcome);
     const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
     return reply.code(201).send(body);
   });

@@ -84,6 +84,8 @@ export const userTeamPlayers = pgTable("user_team_players", {
   teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
   playerId: integer("player_id").notNull().references(() => players.id),
   addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Development XP from games played for this team; the server is the only writer. */
+  xp: integer("xp").notNull().default(0),
 }, (t) => [primaryKey({ columns: [t.teamId, t.playerId] })]);
 
 export const games = pgTable("games", {

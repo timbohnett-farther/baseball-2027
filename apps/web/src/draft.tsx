@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  canAdd, chemistry, slotsFor, ROSTER_SIZE, TEAM_COLORS,
-  type ChemistryReport, type DraftPick, type MyTeam, type Player, type TeamSummary,
+  canAdd, chemistry, LEVEL_XP, slotsFor, ROSTER_SIZE, TEAM_COLORS,
+  type ChemistryReport, type DraftPick, type MyTeam, type Player, type PlayerProgress, type TeamSummary,
 } from "@bb/shared";
 import { api, ApiError } from "./api.ts";
 import { Ovr, PlayerBoard } from "./players.tsx";
@@ -39,6 +39,19 @@ const totalEffective = (r: ChemistryReport) => r.players.reduce((s, p) => s + p.
 
 const Delta = ({ value }: { value: number }) =>
   value === 0 ? null : <span className={`delta ${value > 0 ? "up" : "down"}`}>{value > 0 ? `+${value}` : value}</span>;
+
+/** Development level and progress to the next one. Games played, hits, homers and strikeouts all count. */
+function Dev({ progress }: { progress: PlayerProgress }) {
+  const into = progress.xp - progress.level * LEVEL_XP;
+  const pct = progress.nextLevelXp === null ? 100 : Math.round((into / LEVEL_XP) * 100);
+  const title = progress.nextLevelXp === null ? `Level ${progress.level} · maxed out` : `${progress.xp} / ${progress.nextLevelXp} XP to level ${progress.level + 1}`;
+  return (
+    <span className="slot-dev" title={title}>
+      {progress.level > 0 && <span className="lvl">Lv {progress.level}</span>}
+      <span className="xp" aria-hidden><i style={{ width: `${pct}%` }} /></span>
+    </span>
+  );
+}
 
 export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
   const [team, setTeam] = useState<MyTeam | null | undefined>(undefined); // undefined = loading, null = none yet
@@ -107,6 +120,7 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
                           {p.lastName || p.name}{twoWayEcho ? " (two-way)" : ""}
                         </span>
                         <span className="muted small">{p.teamAbbr ?? "FA"}</span>
+                        {p.progress && <Dev progress={p.progress} />}
                         {!twoWayEcho && <button className="x" title="Remove" aria-label={`Remove ${p.name}`} disabled={busy === p.id} onClick={() => drop(p)}>×</button>}
                       </>
                     ) : <span className="muted small">empty</span>}

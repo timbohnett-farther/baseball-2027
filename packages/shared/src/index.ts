@@ -1,6 +1,7 @@
 // Types shared by the browser, the server and the data refresh.
 
 import type { PlayerRatings } from "./ratings.ts";
+import type { PlayerProgress } from "./progress.ts";
 
 export interface MlbTeam {
   id: number;
@@ -32,6 +33,8 @@ export interface Player {
   /** "Active", "Injured 60-Day", "Free Agent", ... */
   status: string;
   ratings: Omit<PlayerRatings, "id">;
+  /** On your drafted players only: XP and level earned from games (ratings above already include the level). */
+  progress?: PlayerProgress;
 }
 
 export interface TeamSummary extends MlbTeam {
@@ -62,3 +65,4 @@ export * from "./chemistry.ts";
 export * from "./names.ts";
 export * from "./items.ts";
 export * from "./season.ts";
+export * from "./progress.ts";
