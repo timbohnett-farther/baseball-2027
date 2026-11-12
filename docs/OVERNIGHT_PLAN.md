@@ -21,7 +21,7 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
 - [x] W10 uniform detail: `jerseyTexture(team, player)` canvas on the torso (name arc + back/chest numbers from
       `jerseyNumber(id)`, pinstripes for every other club), stirrup socks, `dress()` replaces `recolor()`, fielders
       dressed by lineup position, mound rig follows `pitcherId`, plate umpire, on-deck batter = next in order.
-- [ ] W11 season mode: 20-game schedule vs real teams, standings, playoff bracket, season rewards (server tables
+- [x] W11 (c6eb250) season mode: 20-game schedule vs real teams, standings, playoff bracket, season rewards (server tables
       `seasons`, `season_games`; web Season tab). Coins only via server `payout()`.
 - [ ] W12 player development: XP per game for drafted players, level-ups raise ratings within caps; shown on My team.
 - [ ] W13 crowd + ballpark audio: procedural WebAudio bed (crowd murmur, bat crack, PA stings), mute toggle, respects
