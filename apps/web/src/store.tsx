@@ -4,6 +4,7 @@ import {
   type BatLength, type BatWeight, type Cosmetic, type CosmeticSlot, type Gear, type StoreState, type SuperBat, type Wood,
 } from "@bb/shared";
 import { api } from "./api.ts";
+import { ErrorNote, Loading, toast } from "./ui.tsx";
 
 const WOODS: { wood: Wood; label: string; note: string }[] = [
   { wood: "ash", label: "Ash", note: "+1 Contact" },
@@ -39,6 +40,7 @@ export function StoreView() {
     try {
       const r = await api<{ coins: number; batId: string }>("/api/store/buy", { body: { batId: bat.id } });
       setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.batId] });
+      toast(`${bat.name} is yours. ${r.coins.toLocaleString()} coins left.`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
   const buyLook = async (c: Cosmetic) => {
@@ -46,11 +48,12 @@ export function StoreView() {
     try {
       const r = await api<{ coins: number; itemId: string }>("/api/store/buy", { body: { cosmeticId: c.id } });
       setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.itemId] });
+      toast(`${c.name} added to your locker.`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
-  if (error && !store) return <section className="panel"><p className="error">{error}</p></section>;
-  if (!store) return <section className="panel"><p className="muted">Opening the store…</p></section>;
+  if (error && !store) return <section className="panel"><ErrorNote message={error} onRetry={load} /></section>;
+  if (!store) return <Loading label="Opening the store…" />;
   const { wood } = store.gear;
   const d = woodDeltas(wood);
   const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
@@ -63,7 +66,7 @@ export function StoreView() {
         <div className="coins"><span className="coin" aria-hidden /> <b>{store.coins.toLocaleString()}</b> coins</div>
       </div>
       <p className="muted">Win games to earn coins. Every win pays, shutouts and homers pay extra, and a streak keeps adding up.</p>
-      {error && <p className="error">{error}</p>}
+      <ErrorNote message={error} />
 
       <h3>Your wood bat</h3>
       <div className="wood">

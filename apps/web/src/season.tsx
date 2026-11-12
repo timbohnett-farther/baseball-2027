@@ -3,6 +3,7 @@ import { PLAYOFF_ROUNDS, SEASON_LENGTH, type SeasonGame, type SeasonState } from
 import type { InteractiveSetup, PlayedGame } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { GameView } from "./game.tsx";
+import { ErrorNote, Loading } from "./ui.tsx";
 const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
 
 const ROUND_NAMES = ["", "Wild Card", "League Series", "World Series"];
@@ -35,7 +36,7 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
 
   if (duel && season) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} seasonId={season.id} onDone={() => { setDuel(null); load(); }} /></Suspense>;
   if (game) return <GameView game={game} onDone={() => { setGame(null); load(); }} />;
-  if (season === undefined) return <section className="panel">{error ?? "Loading…"}</section>;
+  if (season === undefined) return error ? <section className="panel"><ErrorNote message={error} onRetry={load} /></section> : <Loading label="Loading your season…" />;
 
   if (season === null || season.status === "done") {
     return (
@@ -47,7 +48,7 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
             {SEASON_LENGTH} games against real MLB clubs. Finish over .500 and you're into a {PLAYOFF_ROUNDS}-round playoff, best of 3 each.
             Season bonuses are paid on top of every game's coins.
           </p>
-          {error && <p className="error">{error}</p>}
+          <ErrorNote message={error} />
           <p className="play-buttons">
             <button className="primary" disabled={busy} onClick={start}>{busy ? "Setting the schedule…" : "Start season"}</button>
             <button onClick={onDraft}>My team</button>
@@ -77,7 +78,7 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
                 ? <>{ROUND_NAMES[next.round]}, game {next.gameNo - Math.min(...playoffs.filter((g) => g.round === next.round).map((g) => g.gameNo)) + 1} vs <b style={{ color: "var(--text)" }}>{next.opponent.name}</b>. First to 2 wins.</>
                 : <>Game {next.gameNo} of {SEASON_LENGTH} vs <b style={{ color: "var(--text)" }}>{next.opponent.name}</b>.</>}
             </p>
-            {error && <p className="error">{error}</p>}
+            <ErrorNote message={error} />
             <p className="play-buttons">
               <button className="primary" disabled={busy} onClick={() => play("duel")}>{busy ? "Warming up…" : "Play it yourself"}</button>
               <button disabled={busy} onClick={() => play("sim")}>Watch the sim</button>

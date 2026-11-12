@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { Me } from "@bb/shared";
 import { api } from "./api.ts";
+import { ErrorNote } from "./ui.tsx";
 
 export function AuthPanel({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [mode, setMode] = useState<"signup" | "login">("signup");
@@ -43,7 +44,7 @@ export function AuthPanel({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === "signup" ? "new-password" : "current-password"} required minLength={6} />
         </label>
-        {error && <p className="error">{error}</p>}
+        <ErrorNote message={error} />
         <button className="primary" disabled={busy}>{mode === "signup" ? "Create account" : "Sign in"}</button>
         {mode === "signup" && <p className="muted small">Usernames: 3–20 letters, numbers or _. Passwords: 6+ characters.</p>}
       </form>

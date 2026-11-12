@@ -8,6 +8,7 @@ import { PlayView } from "./game.tsx";
 import { Ovr, PlayerBoard, PlayerTable } from "./players.tsx";
 import { SeasonView } from "./season.tsx";
 import { StoreView } from "./store.tsx";
+import { Empty, Loading, Toaster, toast } from "./ui.tsx";
 
 const DIVISION_ORDER = [
   "American League East", "American League Central", "American League West",
@@ -22,26 +23,34 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [sound, toggleSound] = useSound();
   const [view, setView] = useState<View>({ kind: "teams" });
+  const [offline, setOffline] = useState(false);
 
+  const loadTeams = () => {
+    setOffline(false);
+    return fetch("/api/teams").then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then(setData)
+      .catch(() => { setOffline(true); toast("Couldn't reach the server. Check your connection and try again.", "bad"); });
+  };
   useEffect(() => {
-    fetch("/health").then((r) => r.json()).then(setHealth).catch(() => setHealth(null));
-    fetch("/api/teams").then((r) => r.json()).then(setData);
+    fetch("/health").then((r) => r.json()).then(setHealth).catch(() => setHealth({ ok: false } as HealthStatus));
+    loadTeams();
     api<Me>("/api/me").then((m) => { setMe(m); setView({ kind: "my-team" }); }).catch(() => setMe(null));
   }, []);
 
   const openTeam = (id: number) => api<TeamDetail>(`/api/teams/${id}`).then((team) => setView({ kind: "team", team }));
   const signOut = async () => { await api("/api/auth/logout", { method: "POST" }); setMe(null); setView({ kind: "teams" }); };
   const tab = (kind: View["kind"], label: string) => (
-    <button className={view.kind === kind || (kind === "teams" && view.kind === "team") ? "on" : ""} onClick={() => setView({ kind } as View)}>{label}</button>
+    <button role="tab" aria-selected={view.kind === kind || (kind === "teams" && view.kind === "team")} className={view.kind === kind || (kind === "teams" && view.kind === "team") ? "on" : ""} onClick={() => setView({ kind } as View)}>{label}</button>
   );
 
   return (
     <>
+    <a className="skip" href="#main">Skip to content</a>
     <Atmosphere />
+    <Toaster />
     <div className="page">
       <header className="hero">
         <div className="userbar">
-          <button className="link" onClick={toggleSound} aria-pressed={sound} title={sound ? "Mute ballpark sound" : "Turn ballpark sound on"}>
+          <button className="link" onClick={toggleSound} aria-pressed={sound} aria-label={sound ? "Mute ballpark sound" : "Turn ballpark sound on"} title={sound ? "Mute ballpark sound" : "Turn ballpark sound on"}>
             {sound ? "🔊 Sound" : "🔇 Muted"}
           </button>
           <span className="sep">·</span>
@@ -50,11 +59,11 @@ export function App() {
         </div>
         <h1>Baseball 2027</h1>
         <p className="tag">Draft real big-leaguers. Win games. Earn gear.</p>
-        <div className="status">
-          <span className={health?.ok ? "dot ok" : "dot"} /> Server {health?.ok ? "online" : "checking…"}
+        <div className="status" role="status">
+          <span className={health === null ? "dot" : health.ok ? "dot ok" : "dot off"} aria-hidden /> Server {health === null ? "checking…" : health.ok ? "online" : "offline"}
           {data && <><span className="sep">·</span> {data.season} stats</>}
         </div>
-        <nav className="tabs">
+        <nav className="tabs" role="tablist" aria-label="Sections">
           {tab("play", "Play")}
           {tab("season", "Season")}
           {tab("my-team", "My team")}
@@ -63,6 +72,7 @@ export function App() {
           {tab("teams", "MLB teams")}
         </nav>
       </header>
+      <div id="main" tabIndex={-1}>
 
       {view.kind === "my-team" && (me ? <MyTeamView teams={data?.teams ?? []} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "my-team" }); }} />)}
       {view.kind === "play" && (me ? <PlayView teams={data?.teams ?? []} onDraft={() => setView({ kind: "my-team" })} /> : <AuthPanel onSignedIn={(m) => { setMe(m); setView({ kind: "play" }); }} />)}
@@ -80,7 +90,10 @@ export function App() {
         </section>
       )}
 
-      {view.kind === "teams" && (
+      {view.kind === "teams" && !data && (offline
+        ? <section className="panel"><Empty title="The ballpark is closed" hint="The server didn't answer, so the league can't load yet."><button className="primary" onClick={loadTeams}>Try again</button></Empty></section>
+        : <Loading label="Loading the league…" />)}
+      {view.kind === "teams" && data && (
         <main className="divisions">
           {DIVISION_ORDER.map((division) => (
             <section key={division} className="division">
@@ -96,6 +109,7 @@ export function App() {
           ))}
         </main>
       )}
+      </div>
     </div>
     </>
   );

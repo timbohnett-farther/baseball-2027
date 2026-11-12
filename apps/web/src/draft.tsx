@@ -5,6 +5,7 @@ import {
 } from "@bb/shared";
 import { api, ApiError } from "./api.ts";
 import { Ovr, PlayerBoard } from "./players.tsx";
+import { ErrorNote, Loading } from "./ui.tsx";
 
 const toPick = (p: Player): DraftPick => ({ playerId: p.id, position: p.position, role: p.ratings.role });
 
@@ -74,7 +75,7 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
   const drop = (p: Player) => act(p.id, () => api<MyTeam>(`/api/my-team/players/${p.id}`, { method: "DELETE" }));
   const finish = () => act(null, () => api<MyTeam>("/api/my-team/finish", { method: "POST" }));
 
-  if (team === undefined) return <section className="panel">{error ?? "Loading your team…"}</section>;
+  if (team === undefined) return error ? <section className="panel"><ErrorNote message={error} /></section> : <Loading label="Loading your team…" />;
   if (team === null) return <CreateTeam onCreated={setTeam} />;
 
   const picks = team.players.map(toPick);
@@ -100,7 +101,7 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
             </span>
           )}
         </div>
-        {error && <p className="error">{error}</p>}
+        <ErrorNote message={error} />
 
         <div className="layout">
           <div>
@@ -207,7 +208,7 @@ function CreateTeam({ onCreated }: { onCreated: (t: MyTeam) => void }) {
             ))}
           </div>
         </div>
-        {error && <p className="error">{error}</p>}
+        <ErrorNote message={error} />
         <button className="primary">Create team</button>
       </form>
     </section>

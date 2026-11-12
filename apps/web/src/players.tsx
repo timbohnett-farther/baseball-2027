@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Player, TeamSummary } from "@bb/shared";
+import { Empty, toast } from "./ui.tsx";
 
 export const POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "DH", "P"];
 
@@ -20,7 +21,8 @@ export function PlayerBoard({ teams, action, extraHeader }: {
     if (team) params.set("team", team);
     if (q.trim()) params.set("q", q.trim());
     const ctrl = new AbortController();
-    fetch(`/api/players?${params}`, { signal: ctrl.signal }).then((r) => r.json()).then(setResult).catch(() => {});
+    fetch(`/api/players?${params}`, { signal: ctrl.signal }).then((r) => r.json()).then(setResult)
+      .catch((e: Error) => { if (e.name !== "AbortError") toast("Couldn't load players. Check your connection.", "bad"); });
     return () => ctrl.abort();
   }, [position, team, q]);
 
@@ -39,8 +41,13 @@ export function PlayerBoard({ teams, action, extraHeader }: {
           {[...teams].sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)).map((t) => <option key={t.id} value={t.abbreviation}>{t.abbreviation}</option>)}
         </select>
       </div>
-      <p className="muted">{result ? `${result.total} players${result.total > 150 ? ", showing top 150" : ""}` : "Loading…"}</p>
-      {result && <PlayerTable players={result.players} showTeam action={action} />}
+      <p className="muted" role="status">{result ? `${result.total} players${result.total > 150 ? ", showing top 150" : ""}` : "Loading…"}</p>
+      {result && result.total === 0 && (
+        <Empty title="No players match" hint="Try a shorter name, or clear the position and team filters.">
+          <button onClick={() => { setQ(""); setPosition(""); setTeam(""); }}>Clear filters</button>
+        </Empty>
+      )}
+      {result && result.total > 0 && <PlayerTable players={result.players} showTeam action={action} />}
     </section>
   );
 }

@@ -5,6 +5,7 @@ import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { Ovr } from "./players.tsx";
 import { RewardLine } from "./store.tsx";
+import { Empty, ErrorNote, Loading } from "./ui.tsx";
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
 
@@ -40,7 +41,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
 
   if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} onDone={() => { setDuel(null); load(); }} /></Suspense>;
   if (game) return <GameView game={game} onDone={() => { setGame(null); load(); }} />;
-  if (myTeam === undefined) return <section className="panel">{error ?? "Loading…"}</section>;
+  if (myTeam === undefined) return error ? <section className="panel"><ErrorNote message={error} onRetry={load} /></section> : <Loading label="Checking your lineup…" />;
   if (!myTeam || myTeam.status !== "ready") {
     return (
       <section className="panel narrow">
@@ -72,13 +73,19 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
             </button>
           ))}
         </div>
-        {error && <p className="error">{error}</p>}
+        <ErrorNote message={error} />
         <p className="play-buttons">
           <button className="primary" disabled={!opponent || busy} onClick={() => play("duel")}>{busy ? "Warming up…" : "Play it yourself"}</button>
           <button disabled={!opponent || busy} onClick={() => play("sim")}>Watch the sim</button>
         </p>
       </section>
 
+      {history && history.games.length === 0 && (
+        <section className="panel">
+          <h3>Recent games</h3>
+          <Empty title="No games yet" hint="Pick an opponent above and play your first one. Every win pays coins." />
+        </section>
+      )}
       {history && history.games.length > 0 && (
         <section className="panel">
           <h3>Recent games</h3>

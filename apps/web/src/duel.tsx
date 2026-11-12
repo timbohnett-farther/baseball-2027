@@ -156,10 +156,23 @@ function Who({ batter, pitcher, heat }: { batter?: SimPlayer; pitcher?: SimPlaye
 
 /** A strike-zone diagram. Children draw on top; `onPick` turns a tap or click into plate coordinates.
  *  pointerdown (not click) so a phone tap lands the instant the finger touches, with no tap delay. */
+// Keyboard aim: number keys laid out like a numpad (7 8 9 high, 4 5 6 middle, 1 2 3 low), all inside the strike zone.
+const KEY_AIM: Record<string, Aim> = {};
+"123456789".split("").forEach((k, i) => { KEY_AIM[k] = { x: ((i % 3) - 1) * 0.6, y: (Math.floor(i / 3) - 1) * 0.6 }; });
+
 function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div className={`zone ${onPick ? "pickable" : ""}`} ref={ref}
+      role={onPick ? "button" : undefined} tabIndex={onPick ? 0 : undefined}
+      aria-label={onPick ? "Strike zone. Press 1 to 9 to aim like a numpad, or Enter for the middle." : undefined}
+      onKeyDown={(e) => {
+        if (!onPick) return;
+        const aim = KEY_AIM[e.key] ?? (e.key === "Enter" || e.key === " " ? KEY_AIM["5"] : undefined);
+        if (!aim) return;
+        e.preventDefault();
+        onPick(aim);
+      }}
       onPointerDown={(e) => {
         if (!onPick || !ref.current || e.button !== 0) return;
         e.preventDefault();
@@ -190,7 +203,7 @@ function PitchPanel({ pitcher, batter, heat, type, onType, onThrow }: {
         </div>
         <div className="duel-zone-wrap">
           <Zone onPick={onThrow} />
-          <small className="muted">Tap where to throw it. Strikes are in the box.</small>
+          <small className="muted">Tap where to throw it. Strikes are in the box. <span className="key">Keys 1–9 aim.</span></small>
         </div>
       </div>
     </div>
