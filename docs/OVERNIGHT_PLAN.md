@@ -14,9 +14,10 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
 ## Waves
 
 - [x] W8 pro-proportioned rigs + night ballpark (fc87e8c)
-- [ ] W9 visual check harness: Playwright script that signs up a throwaway user, plays a duel, screenshots the field
-      (`apps/web/scripts/shot.ts`), so art passes are reviewed as JPEGs in the scratchpad before pushing. Then use it to
-      tune W8 (rig proportions, bat pose, crowd density, light levels).
+- [x] W9 art-review harness: `node apps/web/scripts/shot.mjs [outDir] [moment ...]` (playwright-core + local Chrome,
+      dev-only `/?shot=<pitch|swing|hr|k|single|double|final>` fixture page in `apps/web/src/shot.tsx`, no sign-in
+      needed). First tuning pass: bat rests over the back shoulder, scoreboard text auto-fits, half-size ball in
+      close cameras.
 - [ ] W10 uniform detail: jersey numbers + name arc via a per-team canvas texture, pinstripe/alt variants, stirrups;
       umpire behind the plate; on-deck batter.
 - [ ] W11 season mode: 20-game schedule vs real teams, standings, playoff bracket, season rewards (server tables

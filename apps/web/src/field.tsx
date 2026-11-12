@@ -67,8 +67,12 @@ function signTexture(text: string, bg: string, fg: string, w = 1024, h = 160): T
   c.width = w; c.height = h;
   const g = c.getContext("2d")!;
   g.fillStyle = bg; g.fillRect(0, 0, w, h);
-  g.fillStyle = fg; g.font = `600 ${Math.round(h * 0.62)}px Oswald, "Arial Narrow", sans-serif`;
-  g.textAlign = "center"; g.textBaseline = "middle";
+  const font = (px: number) => `600 ${Math.round(px)}px Oswald, "Arial Narrow", sans-serif`;
+  let px = h * 0.62;
+  g.font = font(px);
+  const tw = g.measureText(text).width;
+  if (tw > w * 0.9) { px *= (w * 0.9) / tw; g.font = font(px); } // long names shrink to fit the panel
+  g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle";
   g.fillText(text, w / 2, h / 2 + h * 0.03);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -144,7 +148,7 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0): THREE.Group {
     const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.02, 10), std("#2a1d12", 0.5));
     b.add(stick, knob);
     b.position.copy(hands).add(V(0, 0.03, 0));
-    b.rotation.set(0.35, 0, -0.45);
+    b.rotation.set(-0.58, 0, 0.41);
     b.name = "bat";
     rig.add(b);
     rig.rotation.y = Math.PI / 2; // local +z (chest) now faces +x, across the plate
@@ -494,14 +498,14 @@ class Director {
     if (!b) return;
     const bat = b.getObjectByName("bat");
     // Right-handed cut: hips open toward the pitcher, barrel drops from the back shoulder and extends flat.
-    this.tween(0.2, (p) => { b.rotation.y = 2.4 * p; if (bat) { bat.rotation.z = -0.45 - 1.1 * p; bat.rotation.x = 0.35 - 0.5 * p; } }, delay);
+    this.tween(0.2, (p) => { b.rotation.y = 2.4 * p; if (bat) { bat.rotation.z = 0.41 - 1.5 * p; bat.rotation.x = -0.58 + 1.0 * p; } }, delay);
     if (miss) this.after(delay + 0.25, () => {});
   }
 
   private onPitch(e: Extract<GameEvent, { type: "pitch" }>) {
     this.ensureBatter(e, e.batterId);
     const bat = this.batter?.getObjectByName("bat");
-    if (bat) bat.rotation.set(0.35, 0, -0.45);
+    if (bat) bat.rotation.set(-0.58, 0, 0.41);
     const dur = Math.min(0.5, Math.max(0.3, 0.55 - (e.mph - 70) * 0.006));
     const i = e.state.score.away * 7 + e.state.score.home * 3 + e.state.balls * 11 + e.state.strikes * 13 + e.state.outs * 17 + e.mph;
     const side = rnd(i, 3) < 0.5 ? -1 : 1;
@@ -687,6 +691,7 @@ class Director {
     this.pop.intensity *= Math.exp(-real * 9);
     const kind = this.shots[0]?.kind;
     this.rim.intensity = 1.2 + (kind === "barrel" || kind === "dust" ? 1.6 : 0);
+    this.ball.scale.setScalar(kind && kind !== "ride" ? 0.5 : 1); // oversized for the long gameplay lens only
     this.updateCamera(real);
     this.renderer.render(this.scene, this.cam);
   };
@@ -701,7 +706,7 @@ class Director {
       case "barrel": pos = V(-1.5, 0.75, 2.3); look = V(0.25, 1.05, 0); fov = 18; rate = 40; break;
       case "dust": { // behind the batter, swinging a quarter turn around him as the swing releases
         const a = -0.95 + 1.55 * clamp01(this.shotT / shot.dur);
-        pos = V(-0.95 + Math.sin(a) * 3.1, 1.15, 0.3 + Math.cos(a) * 3.1); look = V(-0.5, 1.3, 0.1); fov = 26; rate = 40; break;
+        pos = V(-0.95 + Math.sin(a) * 3.1, 1.15, 0.3 + Math.cos(a) * 3.1); look = V(-0.7, 1.2, 0.1); fov = 26; rate = 40; break;
       }
       case "ride": pos = V(b.x * 0.6, b.y * 0.6 + 2.2, b.z + 9); look = b.clone(); fov = 34; rate = 5; break;
       case "drive": pos = t.clone().add(V(2.6, 1.4, 3.4)); look = t.clone().add(V(0, 1.1, 0)); fov = 30; rate = 8; hand = 0.012; break;
