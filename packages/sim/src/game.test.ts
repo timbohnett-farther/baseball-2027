@@ -169,7 +169,27 @@ test("interactive: out-of-order input is rejected", () => {
 });
 
 test("auto sim is unchanged by the interactive code", () => {
-  // Guards stored games: events are re-created from the seed, so this output must never drift.
   const g = simulateGame({ away: avg, home: avg2, seed: 42 });
   assert.equal(g.events.length > 20, true);
+});
+
+test("heat and rally: earned on the field, capped, and visible in every state", () => {
+  const isHit = (o: string) => ["single", "double", "triple", "home_run"].includes(o);
+  let fires = 0;
+  for (let seed = 0; seed < 10; seed++) {
+    const g = simulateGame({ away: team(95, "Mashers"), home: team(40, "Scrubs"), seed });
+    for (const [i, e] of g.events.entries()) {
+      const s = e.state;
+      assert.ok(Object.values(s.heat).every((h) => h >= 1 && h <= 3));
+      assert.ok(s.rally.away >= 0 && s.rally.away <= 100 && s.rally.home >= 0 && s.rally.home <= 100);
+      if (e.type === "half_start") assert.equal(s.fire, null, "fire goes out when the half ends");
+      if (e.type !== "play") continue;
+      // The previous event is this plate appearance's last pitch: heat before the play.
+      const before = g.events[i - 1].state.heat[e.batterId] ?? 0, after = s.heat[e.batterId] ?? 0;
+      if (isHit(e.outcome)) assert.equal(after, Math.min(3, before + 1));
+      if (e.outcome === "strikeout") assert.equal(after, Math.max(0, before - 1));
+      if (e.card === "ON FIRE") { fires++; assert.equal(s.fire, "away"); assert.equal(s.rally.away, 100); }
+    }
+  }
+  assert.ok(fires > 0, "a great lineup against a weak staff catches fire");
 });

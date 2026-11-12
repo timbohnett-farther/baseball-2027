@@ -48,7 +48,19 @@ class NeedInput extends Error {
   constructor(awaiting: Awaiting) { super("need input"); this.awaiting = awaiting; }
 }
 
-const snapshot = (s: GameState): GameState => ({ ...s, bases: { ...s.bases }, score: { ...s.score } });
+const snapshot = (s: GameState): GameState => ({ ...s, bases: { ...s.bases }, score: { ...s.score }, heat: { ...s.heat }, rally: { ...s.rally } });
+
+// --- Heat and Rally: visible momentum, earned on the field and capped ---------------------------
+
+const MAX_HEAT = 3;
+const heatOf = (c: Ctx, id: number) => c.state.heat[id] ?? 0;
+function warm(c: Ctx, id: number, delta: number) {
+  const h = clamp(heatOf(c, id) + delta, 0, MAX_HEAT);
+  if (h > 0) c.state.heat[id] = h; else delete c.state.heat[id];
+}
+/** Extra chance (+/-) on the batter's side of a matchup: his heat, less the pitcher's, plus being On Fire. */
+const momentum = (c: Ctx, batter: SimPlayer, pitcher: SimPlayer) =>
+  0.025 * (heatOf(c, batter.id) - heatOf(c, pitcher.id)) + (c.state.fire === battingSide(c) ? 0.05 : 0);
 const battingSide = (c: Ctx): Side => (c.state.half === "top" ? "away" : "home");
 const fieldingSide = (c: Ctx): Side => other(battingSide(c));
 const pitcherOf = (c: Ctx, side: Side) => c.teams[side].pitchers[c.pitcherIdx[side]];
@@ -91,9 +103,10 @@ function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: Pi
   const mph = Math.round((fastball ? 93 + 0.3 * 10 * stuff : 85 + 0.2 * 10 * stuff) + (rng.next() - 0.5) * 4);
 
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
+  const mo = momentum(c, batter, pitcher);
   const contact = zone
-    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff, 0.6, 0.97)
-    : clamp(0.6 + 0.05 * z(b?.contact) - 0.06 * stuff, 0.3, 0.85);
+    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff + mo, 0.6, 0.97)
+    : clamp(0.6 + 0.05 * z(b?.contact) - 0.06 * stuff + mo, 0.3, 0.85);
   if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
   return { result: rng.next() < (zone ? 0.42 : 0.5) ? "foul" : "in_play", zone, mph };
 }
@@ -154,9 +167,10 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
       : rng.next() < clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) < 1.3 ? 0.4 : 0.22) - 0.05 * z(b?.eye) + 0.03 * stuff, 0.08, 0.55);
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
 
+  const mo = momentum(c, batter, pitcher);
   let contact = zone
-    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type], 0.5, 0.97)
-    : clamp(0.55 + 0.05 * z(b?.contact) - 0.06 * stuff - TYPE_WHIFF[type], 0.2, 0.8);
+    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo, 0.5, 0.97)
+    : clamp(0.55 + 0.05 * z(b?.contact) - 0.06 * stuff - TYPE_WHIFF[type] + mo, 0.2, 0.8);
   let foul = zone ? 0.42 : 0.5;
   if (swingKind) {
     // The user's timing decides most of it: a perfect swing is a very good one.
@@ -178,8 +192,9 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: { pow
   // A swing the user timed well helps; Power trades hits for homers, Contact the other way.
   const dHr = swing ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
   const dHit = swing ? (swing.power ? -0.02 : 0.05 * swing.q) - 0.08 * (1 - swing.q) : 0;
-  const hr = clamp(0.05 + dHr + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.28);
-  const hit = clamp(0.29 + dHit + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.12, 0.45);
+  const mo = momentum(c, batter, pitcher);
+  const hr = clamp(0.05 + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.28);
+  const hit = clamp(0.29 + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.12, 0.45);
   const r = rng.next();
   if (r < hr) return "home_run";
   if (r < hr + hit) {
@@ -326,7 +341,17 @@ function plateAppearance(c: Ctx) {
   bLine.rbi += rbi;
   for (const id of scored) bat(c, bSide, findPlayer(c, id)).r++;
   pLine.r += runs;
-  pLine.outs += ["strikeout", "groundout", "flyout", "lineout", "sac_fly"].includes(outcome) ? 1 : outcome === "double_play" ? 2 : 0;
+  const outsMade = ["strikeout", "groundout", "flyout", "lineout", "sac_fly"].includes(outcome) ? 1 : outcome === "double_play" ? 2 : 0;
+  pLine.outs += outsMade;
+
+  // Heat and Rally. Once a team is On Fire its meter stops draining until the half ends.
+  warm(c, batter.id, isHit ? 1 : outsMade ? -1 : 0);
+  warm(c, pitcher.id, outcome === "strikeout" ? 1 : isHit ? -1 : 0);
+  let caughtFire = false;
+  if (state.fire !== bSide) {
+    state.rally[bSide] = clamp(state.rally[bSide] + (isHit ? 25 : outcome === "walk" ? 10 : 0) + 15 * runs - 12 * outsMade, 0, 100);
+    if (state.rally[bSide] >= 100) { state.fire = bSide; caughtFire = true; }
+  }
 
   // Is the game over on this play?
   const lastInning = state.inning >= c.innings;
@@ -357,6 +382,7 @@ function plateAppearance(c: Ctx) {
     else tier = 3;
   } else if (outcome === "double") tier = 3;
   if (!line && isHit && (bLine.h === 3 || (outcome === "home_run" && bLine.hr === 2))) line = call(rng, "heatedUp");
+  if (caughtFire && (tier === 0 || tier === 3)) { tier = 2; card = "ON FIRE"; line = call(rng, "onFire"); }
 
   c.events.push({
     type: "play", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, outcome, runs, rbi,
@@ -388,7 +414,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     rng: createRng(input.seed),
     teams: { away: input.away, home: input.home },
     innings,
-    state: { inning: 1, half: "top", outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null }, score: { away: 0, home: 0 } },
+    state: { inning: 1, half: "top", outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null }, score: { away: 0, home: 0 }, heat: {}, rally: { away: 0, home: 0 }, fire: null },
     events: [],
     lineupIdx: { away: 0, home: 0 },
     pitcherIdx: { away: 0, home: 0 },
@@ -408,6 +434,8 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     for (const half of ["top", "bottom"] as const) {
       // Home team doesn't bat in the last inning if it's already ahead.
       if (half === "bottom" && inning >= innings && s.score.home > s.score.away) break;
+      // Being On Fire lasts the half; the fire side always just finished batting.
+      if (s.fire) { s.rally[s.fire] = 0; s.fire = null; }
       Object.assign(s, { inning, half, outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null } });
       const side = battingSide(c);
       const before = s.score[side];

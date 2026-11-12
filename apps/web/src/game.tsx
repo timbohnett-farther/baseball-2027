@@ -229,9 +229,12 @@ export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   const showCount = e.type === "pitch";
   const flash = e.type === "play" && e.runs > 0;
   const row = (side: Side) => (
-    <div className="bug-row" style={{ ["--team" as string]: game.teams[side].color }}>
+    <div className={`bug-row ${s.fire === side ? "fire" : ""}`} style={{ ["--team" as string]: game.teams[side].color }}>
       <span className="bug-abbr">{game.teams[side].abbr}</span>
       <span className={`bug-score ${flash && (s.half === "top" ? "away" : "home") === side ? "flash" : ""}`} key={`${side}${s.score[side]}`}>{s.score[side]}</span>
+      <span className="bug-rally" role="meter" aria-label={s.fire === side ? "On fire" : `Rally ${s.rally[side]}%`} aria-valuenow={s.rally[side]} aria-valuemin={0} aria-valuemax={100}>
+        <i style={{ width: `${s.rally[side]}%` }} />
+      </span>
     </div>
   );
   return (

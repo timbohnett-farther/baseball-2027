@@ -42,6 +42,7 @@ export const CALLS = {
   bigK: ["Sit down!", "Strike three! What a pitch!", "Got him!"],
   gameOverK: ["Strike three, ballgame!", "He slams the door!"],
   heatedUp: ["He's on FIRE!", "Nobody can cool him off!"],
+  onFire: ["This team is ON FIRE!", "The dugout is rocking!", "Somebody call the fire department!"],
   triple: ["Look at him fly around the bases!"],
   doublePlay: ["Two for the price of one!", "Turn two! Inning over!"],
 } as const;

@@ -48,6 +48,12 @@ export interface GameState {
   strikes: number;
   bases: Bases;
   score: { away: number; home: number };
+  /** Heat by player id, 1-3 (absent = cold): batters warm up on hits and cool on outs; pitchers on strikeouts and hits allowed. */
+  heat: Record<number, number>;
+  /** Rally meter per team, 0-100: fills on hits, walks and runs, drains on outs. */
+  rally: { away: number; home: number };
+  /** The team whose Rally hit 100: On Fire until their half of the inning ends. */
+  fire: Side | null;
 }
 
 export type GameEvent =

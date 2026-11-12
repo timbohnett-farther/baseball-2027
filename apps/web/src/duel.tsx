@@ -87,11 +87,11 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
 
       {awaiting?.role === "pitch" && (
         <PitchPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          type={pitchType} onType={setPitchType} onThrow={(aim) => submit({ kind: "pitch", type: pitchType, aim })} />
+          heat={awaiting.state.heat} type={pitchType} onType={setPitchType} onThrow={(aim) => submit({ kind: "pitch", type: pitchType, aim })} />
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          incoming={awaiting.incoming} onSwing={(swing, timing) => submit({ kind: "swing", swing, timing })} />
+          heat={awaiting.state.heat} incoming={awaiting.incoming} onSwing={(swing, timing) => submit({ kind: "swing", swing, timing })} />
       )}
 
       {!awaiting && !done && lastCall && current.type !== "final" && (
@@ -116,11 +116,17 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
   );
 }
 
-function Who({ batter, pitcher }: { batter?: SimPlayer; pitcher?: SimPlayer }) {
+/** Heat flames: one per level, earned on the field (hits for batters, strikeouts for pitchers). */
+function Heat({ level }: { level: number }) {
+  if (!level) return null;
+  return <span className={`heat heat-${level}`} aria-label={`heat ${level} of 3`}>{"🔥".repeat(level)}</span>;
+}
+
+function Who({ batter, pitcher, heat }: { batter?: SimPlayer; pitcher?: SimPlayer; heat: Record<number, number> }) {
   return (
     <div className="matchup">
-      <span><small>AT BAT</small> {batter?.name}</span>
-      <span><small>PITCHING</small> {pitcher?.name}</span>
+      <span><small>AT BAT</small> {batter?.name}<Heat level={batter ? heat[batter.id] ?? 0 : 0} /></span>
+      <span><small>PITCHING</small> {pitcher?.name}<Heat level={pitcher ? heat[pitcher.id] ?? 0 : 0} /></span>
     </div>
   );
 }
@@ -143,12 +149,12 @@ function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: Re
   );
 }
 
-function PitchPanel({ pitcher, batter, type, onType, onThrow }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim) => void;
+function PitchPanel({ pitcher, batter, heat, type, onType, onThrow }: {
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim) => void;
 }) {
   return (
     <div className="duel-panel">
-      <Who batter={batter} pitcher={pitcher} />
+      <Who batter={batter} pitcher={pitcher} heat={heat} />
       <div className="duel-row">
         <div className="duel-types" role="group" aria-label="Pitch type">
           {TYPES.map((t) => (
@@ -166,8 +172,8 @@ function PitchPanel({ pitcher, batter, type, onType, onThrow }: {
   );
 }
 
-function SwingPanel({ pitcher, batter, incoming, onSwing }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; incoming: { type: PitchType; mph: number; aim: Aim };
+function SwingPanel({ pitcher, batter, heat, incoming, onSwing }: {
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; incoming: { type: PitchType; mph: number; aim: Aim };
   onSwing: (swing: "contact" | "power" | "take", timing: number) => void;
 }) {
   const ms = flightMs(incoming.mph);
@@ -203,7 +209,7 @@ function SwingPanel({ pitcher, batter, incoming, onSwing }: {
   const label = TYPES.find((t) => t.type === incoming.type)!.label;
   return (
     <div className="duel-panel">
-      <Who batter={batter} pitcher={pitcher} />
+      <Who batter={batter} pitcher={pitcher} heat={heat} />
       <div className="duel-row">
         <div className="duel-incoming">
           <div className="duel-pitch"><b>{label}</b> {incoming.mph} mph</div>
