@@ -5,7 +5,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playInteractive, type Aim, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
-import { BoxScoreView, holdFor, Scorebug } from "./game.tsx";
+import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
@@ -61,6 +61,9 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
 
   const submit = useCallback((input: UserInput) => setInputs((prev) => [...prev, input]), []);
   const current = events[Math.min(shown, events.length - 1)];
+  const highlights = useReel(events, speed);
+  const fieldIndex = highlights.index ?? Math.min(shown, events.length - 1);
+  const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);
   const youWon = g.result?.winner === setup.userSide;
   const done = !!g.result && caughtUp;
   const awaiting = caughtUp ? g.awaiting : null;
@@ -81,11 +84,17 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
         <Scorebug game={shell} index={Math.min(shown, events.length - 1)} />
         <div className="game-controls">
           {!done && [1, 2].map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
-          {done ? <button className="primary" onClick={onDone}>Done</button> : <button className="link" onClick={onDone}>Quit</button>}
+          {!done && !caughtUp && <SkipPlay e={current} speed={speed} onSkip={() => setShown((n) => n + 1)} />}
+          {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
+          {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
+          {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
+          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : <button className="link" onClick={onDone}>Quit</button>}
         </div>
       </div>
 
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={Math.min(shown, events.length - 1)} speed={speed} /></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} /></Suspense>
+      {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
+      <PlayCard card={card} players={players} />
 
       {awaiting?.role === "pitch" && (
         <PitchPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}

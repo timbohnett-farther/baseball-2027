@@ -16,13 +16,23 @@ const WALL_R = 112;
 const FIELD_POS = [V(0, 0, -18.4), V(0, 0, 2.2), V(17, 0, -24), V(8, 0, -35), V(-8, 0, -35), V(-17, 0, -24), V(-34, 0, -66), V(0, 0, -80), V(34, 0, -66)];
 const HOME_LOOK = V(0, 1.2, -26);
 const FREEZE = 0.35; // contact freeze (s, real time) for tier 1-2 plays
-const SLOWMO = 0.9; // quarter-speed window after the freeze
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const rnd = (i: number, k: number) => { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); };
 const polar = (r: number, a: number) => V(Math.sin(a) * r, 0, -Math.cos(a) * r);
 
 interface Tween { t: number; delay: number; dur: number; fn: (p: number) => void; end?: () => void }
+
+// The named cameras of VISUAL_DESIGN 3.3. A big play queues a shot list; each shot runs on the
+// shot clock (playback seconds) and may slow or freeze the action under it. An empty queue is the
+// gameplay camera. `ride` ends early once the ball lands.
+type ShotKind = "barrel" | "dust" | "ride" | "drive" | "hero" | "dive";
+interface Shot { kind: ShotKind; dur: number; scale?: number | ((t: number) => number); target?: THREE.Object3D | null }
+const RAMP = (t: number) => 0.25 + Math.min(1, t / 0.6) * 0.75; // slow-mo easing back to full speed
+const barrel = (dur = FREEZE): Shot => ({ kind: "barrel", dur, scale: 0 });
+const dust = (dur: number): Shot => ({ kind: "dust", dur, scale: 0.25 });
+const ride = (dur: number): Shot => ({ kind: "ride", dur, scale: RAMP });
+const on = (kind: "drive" | "hero" | "dive", target: THREE.Object3D | null, dur: number, scale = 1): Shot => ({ kind, dur, target, scale });
 
 function softSprite(color: string): THREE.CanvasTexture {
   const c = document.createElement("canvas");
@@ -135,15 +145,15 @@ class Dust {
   }
 }
 
-type Mode = "home" | "contact" | "chase" | "follow";
-
 class Director {
   speed = 1;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private cam = new THREE.PerspectiveCamera(48, 16 / 9, 0.1, 400);
   private look = HOME_LOOK.clone();
-  private mode: Mode = "home";
+  private shots: Shot[] = [];
+  private shotT = 0; // real seconds into the current shot
+  private cut = false; // next camera update snaps instead of easing (a hard cut)
   private tweens: Tween[] = [];
   private ball: THREE.Mesh;
   private ballFlying = false;
@@ -155,7 +165,7 @@ class Director {
   private colors: Record<Side, THREE.Color>;
   private burstDust: Dust; private drift: Dust;
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
-  private slowT = 99; private slowOn = false; private shake = 0;
+  private shake = 0;
   private raf = 0; private last = performance.now();
 
   constructor(private canvas: HTMLCanvasElement, game: PlayedGame, private reduced: boolean) {
@@ -260,8 +270,12 @@ class Director {
       const batch = this.tweens; this.tweens = [];
       for (const w of batch) { w.fn(1); w.end?.(); }
     }
-    this.mode = "home"; this.slowOn = false; this.slowT = 99; this.ballFlying = false;
+    this.ballFlying = false;
+    if (this.shots.length) this.cutTo([]); // hard cut back only if a sequence was running; routine events ease
   }
+
+  /** Replace the shot list; the first shot (or the gameplay camera) starts with a hard cut. */
+  private cutTo(shots: Shot[]) { this.shots = shots; this.shotT = 0; this.cut = true; }
 
   private flight(from: THREE.Vector3, to: THREE.Vector3, peak: number, dur: number, delay = 0, hold = false) {
     this.tween(dur, (p) => {
@@ -383,30 +397,32 @@ class Director {
     this.ensureBatter(e, e.batterId);
     const idx = e.state.score.away * 5 + e.state.score.home * 7 + e.state.outs * 3 + e.batterId + e.pitcherId;
     const o = e.outcome;
-    const cinematic = !this.reduced && (e.tier === 1 || e.tier === 2);
+    const big = e.tier === 1 || e.tier === 2;
+    const cinematic = !this.reduced && big;
     const contact = V(0, 1, 0);
-    const big = cinematic && (o === "home_run" || o === "triple");
-    let delay = 0;
+    const batter = this.batter;
+    const delay = 0.35;
 
     if (o === "strikeout" || o === "walk") {
       this.syncRunners(e, 0.1);
+      // A signature or highlight punch-out: pitcher's stare, then the batter walking off.
+      if (o === "strikeout" && big) this.cutTo(this.reduced ? [on("drive", batter, 1.0)] : [on("drive", this.fielders[0], 0.9), on("hero", batter, e.tier === 1 ? 1.6 : 1.0)]);
       return;
     }
-    if (cinematic) {
-      this.slowOn = true; this.slowT = 0; this.mode = "contact"; this.shake = big ? 0.35 : 0.15; this.pop.intensity = 14;
-    }
+    if (cinematic) { this.shake = o === "home_run" || o === "triple" ? 0.35 : 0.15; this.pop.intensity = 14; }
     this.burstDust.burst(V(0, 0.15, 0.2), cinematic ? 220 : 40, cinematic ? 7 : 3.5);
     this.swing(0, false);
     const ang = (rnd(idx, 1) - 0.5) * 1.35;
     const side = ang < 0 ? -1 : 1;
     let outcomeFielder: THREE.Group | null = null;
+    const trot = o === "home_run" && cinematic ? 1.1 : 0.5; // seconds per base; a homer is admired, not sprinted
 
     if (o === "home_run") {
       const feet = parseInt(e.stat ?? "400", 10) || 400;
       const to = polar(Math.max(feet * FT, WALL_R + 6), ang * 0.8); to.y = 9;
-      this.flight(contact, to, 38 + rnd(idx, 2) * 14, 2.7, delay);
-      this.after(delay + 2.7, () => { this.burstDust.burst(V(to.x, 6, to.z), 30, 4); this.ball.visible = false; });
-      this.tween(1.6, (p) => this.nearestOF(ang).position.lerpVectors(FIELD_POS[7], polar(WALL_R - 6, ang * 0.8), p * 0.6), delay + 0.4);
+      this.flight(contact, to, 38 + rnd(idx, 2) * 14, 2.7);
+      this.after(2.7, () => { this.burstDust.burst(V(to.x, 6, to.z), 30, 4); this.ball.visible = false; });
+      this.tween(1.6, (p) => this.nearestOF(ang).position.lerpVectors(FIELD_POS[7], polar(WALL_R - 6, ang * 0.8), p * 0.6), 0.4);
     } else if (o === "single") {
       const to = polar(42 + rnd(idx, 2) * 16, ang);
       this.flight(contact, to, 6, 0.9);
@@ -441,14 +457,27 @@ class Director {
         this.flight(fp.clone().setY(1.3), BASES[1].clone().setY(1.2), 1.5, 0.5, 0.85);
         this.after(1.35, () => { this.ball.visible = false; });
       } else this.after(0.85, () => { this.ball.visible = false; });
+      outcomeFielder = f;
     }
-    delay = 0.35;
-    this.syncRunners(e, delay);
-    void outcomeFielder;
+    this.syncRunners(e, delay, trot);
+
+    if (this.reduced) { if (big) this.cutTo([on("drive", batter, 1.2)]); return; }
+    if (e.tier === 3) { this.cutTo([on("drive", batter, 0.8)]); return; }
+    if (!big) return;
+    // VISUAL_DESIGN 3.2: barrel freeze → slow release with a quarter orbit → ride the ball → reaction → hero.
+    this.ball.position.copy(contact); this.ball.visible = true;
+    const isOut = o === "flyout" || o === "lineout" || o === "groundout" || o === "double_play" || o === "sac_fly";
+    const closer: Shot[] = o === "double_play" ? [on("dive", this.at(BASES[2]), 0.9), on("drive", this.fielders[3], 0.6)]
+      : isOut && outcomeFielder ? [on("dive", outcomeFielder, 1.0)]
+      : e.tier === 1 ? [on("hero", batter, 1.4), on("drive", batter, 0.8)]
+      : [on("hero", batter, 0.9)];
+    this.cutTo([barrel(), dust(e.tier === 1 ? 0.9 : 0.55), ride(o === "home_run" ? 3.4 : 2.4), ...closer]);
   }
 
+  private at(p: THREE.Vector3) { const o = new THREE.Object3D(); o.position.copy(p); return o; }
+
   /** Move runners (and the batter) to where the sim says they are; scorers go home, outs fade. */
-  private syncRunners(e: GameEvent, delay: number) {
+  private syncRunners(e: GameEvent, delay: number, trot = 0.5) {
     if (e.type !== "play") return;
     const target = new Map<number, number>();
     ([e.state.bases.first, e.state.bases.second, e.state.bases.third] as (number | null)[]).forEach((id, i) => { if (id !== null) target.set(id, i + 1); });
@@ -474,7 +503,7 @@ class Director {
       runner.rotation.y = 0;
       const bat = b.getObjectByName("bat"); if (bat) b.remove(bat);
       this.moveTo(runner, BASES[0], 0.01);
-      if (batterScored) this.runPath(runner, 0, 4, delay, true);
+      if (batterScored) this.runPath(runner, 0, 4, delay, true, trot);
       else { runner.base = batterBase; this.runners.set(e.batterId, runner); this.runPath(runner, 0, batterBase!, delay, false); }
     } else {
       this.batter = null; this.batterId = null;
@@ -482,12 +511,12 @@ class Director {
     }
   }
 
-  private runPath(g: THREE.Object3D, from: number, to: number, delay: number, remove: boolean) {
+  private runPath(g: THREE.Object3D, from: number, to: number, delay: number, remove: boolean, pace = 0.5) {
     for (let b = from; b < to; b++) {
       const a = BASES[b % 4], c = BASES[(b + 1) % 4], k = b - from;
-      this.tween(0.5, (p) => g.position.lerpVectors(a, c, p), delay + k * 0.5);
+      this.tween(pace, (p) => g.position.lerpVectors(a, c, p), delay + k * pace);
     }
-    if (remove) this.after(delay + (to - from) * 0.5 + 0.05, () => this.fadeOut(g, 0));
+    if (remove) this.after(delay + (to - from) * pace + 0.05, () => this.fadeOut(g, 0));
   }
 
   // --- render loop -------------------------------------------------------------------------
@@ -499,12 +528,13 @@ class Director {
     const real = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     let scale = this.speed;
-    if (this.slowOn) {
-      this.slowT += real;
-      const t = this.slowT;
-      scale *= t < FREEZE ? 0 : t < FREEZE + SLOWMO ? 0.25 : Math.min(1, 0.25 + (t - FREEZE - SLOWMO) / 0.6 * 0.75);
-      if (this.mode === "contact" && t > FREEZE + 0.5) this.mode = "chase";
-      if (t > FREEZE + SLOWMO + 0.6) this.slowOn = false;
+    const shot = this.shots[0];
+    if (shot) {
+      this.shotT += real;
+      const s = shot.scale ?? 1;
+      scale *= typeof s === "function" ? s(this.shotT) : s;
+      const landed = shot.kind === "ride" && this.shotT > 0.3 && !this.ballFlying;
+      if (this.shotT >= shot.dur || landed) { this.shots.shift(); this.shotT = 0; this.cut = true; }
     }
     const dt = real * scale;
     this.tweens = this.tweens.filter((w) => {
@@ -518,26 +548,40 @@ class Director {
     this.burstDust.update(dt);
     this.drift.update(real);
     this.pop.intensity *= Math.exp(-real * 9);
-    this.rim.intensity = 1.2 + (this.mode === "contact" ? 1.6 : 0);
+    const kind = this.shots[0]?.kind;
+    this.rim.intensity = 1.2 + (kind === "barrel" || kind === "dust" ? 1.6 : 0);
     this.updateCamera(real);
     this.renderer.render(this.scene, this.cam);
   };
 
+  /** The named cameras (VISUAL_DESIGN 3.3): low, close and long-lensed; the gameplay camera when no shot runs. */
   private updateCamera(dt: number) {
-    let pos = this.homePos(), look = HOME_LOOK.clone(), fov = 48, rate = 2.5;
+    let pos = this.homePos(), look = HOME_LOOK.clone(), fov = 48, rate = 2.5, hand = 0;
     const b = this.ball.position;
-    if (this.mode === "contact") { pos = V(-1.7, 0.9, 3.3); look = V(0.3, 1.1, 0); fov = 24; rate = 16; }
-    else if (this.ballFlying && this.ball.visible) {
-      if (this.mode === "chase") { pos = V(b.x * 0.35, Math.max(1.8, b.y * 0.5 + 2.5), b.z + 14); look = b.clone(); fov = 38; rate = 3.5; }
-      else { look = HOME_LOOK.clone().lerp(b, 0.55); rate = 3; }
+    const shot = this.shots[0];
+    const t = shot?.target?.position ?? V(-0.95, 0, 0.3);
+    switch (shot?.kind) {
+      case "barrel": pos = V(-1.5, 0.75, 2.3); look = V(0.25, 1.05, 0); fov = 18; rate = 40; break;
+      case "dust": { // behind the batter, swinging a quarter turn around him as the swing releases
+        const a = -0.95 + 1.55 * clamp01(this.shotT / shot.dur);
+        pos = V(-0.95 + Math.sin(a) * 3.1, 1.15, 0.3 + Math.cos(a) * 3.1); look = V(-0.5, 1.3, 0.1); fov = 26; rate = 40; break;
+      }
+      case "ride": pos = V(b.x * 0.6, b.y * 0.6 + 2.2, b.z + 9); look = b.clone(); fov = 34; rate = 5; break;
+      case "drive": pos = t.clone().add(V(2.6, 1.4, 3.4)); look = t.clone().add(V(0, 1.1, 0)); fov = 30; rate = 8; hand = 0.012; break;
+      case "hero": pos = t.clone().add(V(1.5, 0.45, 1.9)); look = t.clone().add(V(0, 1.55, 0)); fov = 22; rate = 10; hand = 0.02; break;
+      case "dive": pos = t.clone().add(V(3.4, 0.3, 2.4)); look = t.clone().add(V(0, 0.7, 0)); fov = 26; rate = 10; hand = 0.015; break;
+      default:
+        if (this.ballFlying && this.ball.visible) { look = HOME_LOOK.clone().lerp(b, 0.55); rate = 3; }
     }
-    const k = 1 - Math.exp(-dt * rate);
+    const k = this.cut ? 1 : 1 - Math.exp(-dt * rate);
+    this.cut = false;
     this.cam.position.lerp(pos, k);
     this.look.lerp(look, k);
     this.cam.fov += (fov - this.cam.fov) * k;
     this.cam.updateProjectionMatrix();
-    if (this.shake > 0.001) {
-      this.cam.position.x += (Math.random() - 0.5) * this.shake; this.cam.position.y += (Math.random() - 0.5) * this.shake;
+    const jitter = this.shake > 0.001 ? this.shake : hand;
+    if (jitter) {
+      this.cam.position.x += (Math.random() - 0.5) * jitter; this.cam.position.y += (Math.random() - 0.5) * jitter;
       this.shake *= Math.exp(-dt * 6);
     }
     this.cam.lookAt(this.look);

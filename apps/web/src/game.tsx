@@ -107,22 +107,123 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
 const SPEEDS = [1, 2, 4];
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-/** How long each event stays on screen at 1x (ms). Big plays linger so their card can land. */
+/** How long each event stays on screen at 1x (ms). Big plays run their camera sequence (VISUAL_DESIGN 3.1). */
 export function holdFor(e: GameEvent): number {
   switch (e.type) {
     case "pitch": return 450;
     case "half_start": return 1300;
     case "pitching_change": return 1400;
     case "final": return 0;
-    case "play": return e.tier === 1 ? 4200 : e.tier === 2 ? 3000 : e.tier === 3 ? 1700 : 1300;
+    case "play": {
+      if (reducedMotion()) return e.tier === 1 ? 3600 : e.tier === 2 ? 2800 : e.tier === 3 ? 1500 : 1300;
+      return e.tier === 1 ? 8500 : e.tier === 2 ? 5200 : e.tier === 3 ? 1800 : 1300;
+    }
   }
+}
+
+/** A big play may be skipped once its first beats have landed (3 s signature, 1.5 s highlight). */
+export function skipAfter(e: GameEvent): number | null {
+  if (e.type !== "play" || !(e.tier === 1 || e.tier === 2)) return null;
+  return e.tier === 1 ? 3000 : 1500;
+}
+
+/** The overlay card lands late in the sequence, after the ball has been ridden out. */
+function cardTiming(e: Extract<GameEvent, { type: "play" }>): [delay: number, dur: number] {
+  if (reducedMotion()) return [200, e.tier === 1 ? 3000 : 2200];
+  return e.tier === 1 ? [3800, 4200] : [2200, 2800];
+}
+
+/** Show the card after `delay`, for `dur`, both scaled by playback speed. */
+export function usePlayCard(e: GameEvent | undefined, speed: number, key: unknown) {
+  const [card, setCard] = useState<Extract<GameEvent, { type: "play" }> | null>(null);
+  useEffect(() => {
+    setCard(null);
+    if (!e || e.type !== "play" || !e.card || !(e.tier === 1 || e.tier === 2)) return;
+    const [delay, dur] = cardTiming(e);
+    const show = setTimeout(() => setCard(e), delay / speed);
+    const hide = setTimeout(() => setCard(null), (delay + dur) / speed);
+    return () => { clearTimeout(show); clearTimeout(hide); };
+  }, [e, speed, key]);
+  return card;
+}
+
+export function PlayCard({ card, players }: { card: Extract<GameEvent, { type: "play" }> | null; players: Map<number, SimPlayer> }) {
+  if (!card) return null;
+  return (
+    <div className={`big-play tier-${card.tier}`}>
+      <div className="big-play-title">{card.card}</div>
+      <div className="big-play-name">{players.get(card.batterId)?.name}</div>
+      {card.stat && <div className="big-play-stat">{card.stat}</div>}
+    </div>
+  );
+}
+
+/** A "skip" affordance for a big play that unlocks after its opening beats. */
+export function SkipPlay({ e, speed, onSkip }: { e: GameEvent | undefined; speed: number; onSkip: () => void }) {
+  const [ready, setReady] = useState(false);
+  const after = e ? skipAfter(e) : null;
+  useEffect(() => {
+    setReady(false);
+    if (after === null) return;
+    const t = setTimeout(() => setReady(true), after / speed);
+    return () => clearTimeout(t);
+  }, [e, after, speed]);
+  if (after === null || !ready) return null;
+  return <button className="link skip-play" onClick={onSkip}>Skip ▸</button>;
+}
+
+// --- Highlight reel (VISUAL_DESIGN 3.5) ----------------------------------------------------
+
+/** Indices of the plays worth replaying: every signature play, then the best highlights, in game order. */
+export function highlightPicks(events: GameEvent[], max = 6): number[] {
+  const scored = events.map((e, i) => ({ e, i })).filter(({ e }) => e.type === "play" && (e.tier === 1 || e.tier === 2)) as { e: Extract<GameEvent, { type: "play" }>; i: number }[];
+  scored.sort((a, b) => a.e.tier - b.e.tier || b.e.runs - a.e.runs || b.i - a.i);
+  return scored.slice(0, max).map(({ i }) => i).sort((a, b) => a - b);
+}
+
+export interface Reel { picks: number[]; at: number } // at: -1 title card, 0..n-1 plays, n closing card
+
+/** Drives a reel through title → plays → closing on the same clock as live playback. */
+export function useReel(events: GameEvent[], speed: number) {
+  const [reel, setReel] = useState<Reel | null>(null);
+  const picks = useMemo(() => highlightPicks(events), [events]);
+  useEffect(() => {
+    if (!reel) return;
+    const n = reel.picks.length;
+    const ms = reel.at < 0 ? 2200 : reel.at < n ? holdFor(events[reel.picks[reel.at]]) : 2800;
+    const t = setTimeout(() => setReel(reel.at >= n ? null : { ...reel, at: reel.at + 1 }), ms / speed);
+    return () => clearTimeout(t);
+  }, [reel, speed, events]);
+  const index = reel && reel.at >= 0 && reel.at < reel.picks.length ? reel.picks[reel.at] : null;
+  return {
+    reel, index, available: picks.length > 0,
+    start: () => setReel({ picks, at: -1 }),
+    stop: () => setReel(null),
+    skip: () => setReel((r) => (r && r.at < r.picks.length ? { ...r, at: r.at + 1 } : r)),
+  };
+}
+
+export function ReelCard({ reel, game, finalText }: { reel: Reel; game: PlayedGame; finalText: string }) {
+  if (reel.at === -1) return (
+    <div className="big-play tier-1 reel-card">
+      <div className="big-play-title">Highlights</div>
+      <div className="big-play-name">{game.teams.away.abbr} at {game.teams.home.abbr}</div>
+      <div className="big-play-stat">{reel.picks.length} {reel.picks.length === 1 ? "play" : "plays"}</div>
+    </div>
+  );
+  if (reel.at === reel.picks.length) return (
+    <div className="big-play tier-1 reel-card">
+      <div className="big-play-title">Final</div>
+      <div className="big-play-name">{finalText}</div>
+    </div>
+  );
+  return null;
 }
 
 function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
   const { events } = game.result;
   const [i, setI] = useState(0);
   const [speed, setSpeed] = useState(1);
-  const [card, setCard] = useState<Extract<GameEvent, { type: "play" }> | null>(null);
   const feedRef = useRef<HTMLOListElement>(null);
   const players = useMemo(() => {
     const m = new Map<number, SimPlayer>();
@@ -130,21 +231,15 @@ function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
     return m;
   }, [game]);
   const done = i >= events.length - 1;
+  const highlights = useReel(events, speed);
+  const shownIndex = highlights.index ?? i; // the reel borrows the field after the final
+  const card = usePlayCard(events[shownIndex], speed, highlights.reel?.at);
 
   useEffect(() => {
     if (done) return;
     const t = setTimeout(() => setI((n) => n + 1), holdFor(events[i]) / speed);
     return () => clearTimeout(t);
   }, [i, speed, done, events]);
-
-  useEffect(() => {
-    const e = events[i];
-    if (e.type === "play" && e.card && (e.tier === 1 || e.tier === 2)) {
-      setCard(e);
-      const t = setTimeout(() => setCard(null), (e.tier === 1 ? 3800 : 2600) / speed);
-      return () => clearTimeout(t);
-    }
-  }, [i, events, speed]);
 
   const current = events[i];
   const s = current.state;
@@ -169,12 +264,17 @@ function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
         <Scorebug game={game} index={i} />
         <div className="game-controls">
           {!done && SPEEDS.map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
+          {!done && <SkipPlay e={current} speed={speed} onSkip={() => setI((n) => n + 1)} />}
           {!done && <button className="link" onClick={() => setI(events.length - 1)}>Skip to final</button>}
-          {done && <button className="primary" onClick={onDone}>Done</button>}
+          {done && highlights.reel && <SkipPlay e={events[shownIndex]} speed={speed} onSkip={highlights.skip} />}
+          {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
+          {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
+          {done && !highlights.reel && <button className="primary" onClick={onDone}>Done</button>}
         </div>
       </div>
 
-      <Suspense fallback={<div className="field" />}><FieldView game={game} index={i} speed={speed} /></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={game} index={shownIndex} speed={speed} /></Suspense>
+      {highlights.reel && <ReelCard reel={highlights.reel} game={game} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
 
       {!done && batterId && (
         <div className="matchup">
@@ -191,13 +291,7 @@ function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
         </div>
       )}
 
-      {card && !reducedMotion() && (
-        <div className={`big-play tier-${card.tier}`} key={i}>
-          <div className="big-play-title">{card.card}</div>
-          <div className="big-play-name">{players.get(card.batterId)?.name}</div>
-          {card.stat && <div className="big-play-stat">{card.stat}</div>}
-        </div>
-      )}
+      <PlayCard card={card} players={players} />
 
       <ol className="feed" ref={feedRef}>
         {feed.map((e) => <FeedItem key={events.indexOf(e)} e={e} />)}
