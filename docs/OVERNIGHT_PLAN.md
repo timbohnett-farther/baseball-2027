@@ -26,7 +26,7 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
 - [x] W12 player development (c3746af): XP per game for drafted players, level-ups raise ratings within caps; shown on My team.
 - [x] W13 crowd + ballpark audio (426e920): procedural WebAudio bed (crowd murmur, bat crack, PA stings), mute toggle, respects
       reduced-motion/autoplay rules.
-- [ ] W14 cosmetic gear store: helmet/cleat/batting-glove colourways, applied to the rig; Legendary drops stay
+- [x] W14 cosmetic gear store: helmet/cleat/batting-glove colourways, applied to the rig; Legendary drops stay (5c36163)
       milestone-only per ARCHITECTURE.md.
 - [ ] W15 touch/mobile layout for the duel (big swing buttons, zone tap), landscape lock hint.
 - [ ] W16 Railway: confirm migration 0005 applied in production, smoke the store endpoints, deploy check for each push.
