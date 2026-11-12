@@ -119,10 +119,10 @@ import { playInteractive } from "./game.ts";
 import type { UserInput } from "./types.ts";
 
 /** Keep answering whatever the game asks until it ends. */
-function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch" | "swing") => UserInput) {
+function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch" | "swing" | "field") => UserInput, autoField = false) {
   const inputs: UserInput[] = [];
   for (let guard = 0; guard < 2000; guard++) {
-    const g = playInteractive({ away: avg, home: avg2, seed, userSide, inputs });
+    const g = playInteractive({ away: avg, home: avg2, seed, userSide, inputs, autoField });
     if (g.result) return { g, inputs };
     inputs.push(answer(g.awaiting!.role));
   }
@@ -130,6 +130,9 @@ function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch"
 }
 const pitchIn: UserInput = { kind: "pitch", type: "fastball", aim: { x: 0, y: 0 } };
 const swingAt = (swing: "contact" | "power" | "take", timing = 0): UserInput => ({ kind: "swing", swing, timing });
+const glove = (timing = 0): UserInput => ({ kind: "field", timing });
+/** Pitch strikes, swing contact, and field with the given tap timing. */
+const everyRole = (fieldTiming: number) => (role: "pitch" | "swing" | "field") => role === "pitch" ? pitchIn : role === "field" ? glove(fieldTiming) : swingAt("contact");
 
 test("interactive: asks for a pitch when the user fields, a swing when the user bats", () => {
   const pitching = playInteractive({ away: avg, home: avg2, seed: 7, userSide: "away", inputs: [] });
@@ -141,8 +144,8 @@ test("interactive: asks for a pitch when the user fields, a swing when the user 
 });
 
 test("interactive: same seed + same inputs = same game, and a prefix of inputs is a prefix of events", () => {
-  const a = playOut(11, "home", (role) => (role === "pitch" ? pitchIn : swingAt("contact")));
-  const b = playOut(11, "home", (role) => (role === "pitch" ? pitchIn : swingAt("contact")));
+  const a = playOut(11, "home", everyRole(0));
+  const b = playOut(11, "home", everyRole(0));
   assert.deepEqual(a.g.result, b.g.result);
   const mid = playInteractive({ away: avg, home: avg2, seed: 11, userSide: "home", inputs: a.inputs.slice(0, 5) });
   assert.deepEqual(mid.events, a.g.events.slice(0, mid.events.length));
@@ -151,14 +154,61 @@ test("interactive: same seed + same inputs = same game, and a prefix of inputs i
 test("interactive: games finish consistently as batter and pitcher", () => {
   for (let seed = 0; seed < 15; seed++) {
     for (const side of ["home", "away"] as const)
-      checkConsistency(playOut(seed, side, (role) => (role === "pitch" ? pitchIn : swingAt("contact"))).g.result!);
+      checkConsistency(playOut(seed, side, everyRole(0.3)).g.result!);
   }
+});
+
+test("fielding: only close balls on the user's defense ask for a glove tap", () => {
+  let asks = 0, plays = 0;
+  for (let seed = 0; seed < 20; seed++) {
+    const { g, inputs } = playOut(seed, "home", everyRole(0));
+    asks += inputs.filter((i) => i.kind === "field").length;
+    plays += g.result!.events.filter((e) => e.type === "play" && !["strikeout", "walk"].includes(e.outcome)).length;
+  }
+  assert.ok(asks > 0 && asks < plays / 2, `${asks} glove taps over ${plays} balls in play`);
+  // The first ask names a fielder on the user's team and what's coming.
+  const inputs: UserInput[] = [];
+  for (let guard = 0; guard < 500; guard++) {
+    const g = playInteractive({ away: avg, home: avg2, seed: 3, userSide: "home", inputs });
+    if (g.awaiting?.role === "field") {
+      assert.ok(avg2.lineup.some((p) => p.id === g.awaiting!.ball!.fielderId));
+      assert.ok(["grounder", "liner", "fly"].includes(g.awaiting.ball!.kind));
+      assert.equal(g.awaiting.state.half, "top");
+      return;
+    }
+    inputs.push(everyRole(0)(g.awaiting!.role));
+  }
+  assert.fail("never asked to field");
+});
+
+test("fielding: a perfect tap turns close hits into outs, a whiff gives them up", () => {
+  const hitsAllowed = (timing: number) => {
+    let h = 0;
+    for (let seed = 0; seed < 40; seed++) h += playOut(seed, "home", everyRole(timing)).g.result!.box.hits.away;
+    return h;
+  };
+  const good = hitsAllowed(0), bad = hitsAllowed(1);
+  assert.ok(good < bad, `hits allowed: perfect ${good}, whiffed ${bad}`);
+  const robbed = Array.from({ length: 40 }, (_, seed) => playOut(seed, "home", everyRole(0)).g.result!)
+    .flatMap((r) => r.events).filter((e) => e.type === "play" && e.card === "ROBBED");
+  assert.ok(robbed.length > 0, "a stolen hit becomes a ROBBED card");
+  assert.ok(robbed.every((e) => e.type === "play" && e.tier === 2 && e.call && e.stat));
+});
+
+test("fielding: a log recorded before fielding existed still replays with autoField", () => {
+  // A pre-fielding client never saw a "field" prompt, so its log has only pitches and swings.
+  const old = playOut(5, "home", everyRole(0), true);
+  assert.ok(old.inputs.every((i) => i.kind !== "field"));
+  const replay = playInteractive({ away: avg, home: avg2, seed: 5, userSide: "home", inputs: old.inputs, autoField: true });
+  assert.deepEqual(replay.result, old.g.result);
+  // Strict replay (the finish route) refuses it: the glove tap is now part of the record.
+  assert.throws(() => playInteractive({ away: avg, home: avg2, seed: 5, userSide: "home", inputs: old.inputs }), /expected field/);
 });
 
 test("interactive: perfect timing beats terrible timing", () => {
   const runs = (timing: number) => {
     let hits = 0;
-    for (let seed = 0; seed < 60; seed++) hits += playOut(seed, "away", (role) => (role === "pitch" ? pitchIn : swingAt("contact", timing))).g.result!.box.hits.away;
+    for (let seed = 0; seed < 60; seed++) hits += playOut(seed, "away", (role) => (role === "pitch" ? pitchIn : role === "field" ? glove() : swingAt("contact", timing))).g.result!.box.hits.away;
     return hits;
   };
   assert.ok(runs(0) > runs(0.9) * 2, "good timing should produce far more hits");

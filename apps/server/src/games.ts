@@ -76,7 +76,8 @@ export function mlbSimTeam(teamId: number, exclude: Set<number> = new Set()): Si
 
 function played(row: typeof games.$inferSelect, opponent: { id: number; name: string; abbr: string }): PlayedGame {
   const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings };
-  const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs }).result! : simulateGame(input);
+  // autoField: games saved before fielding taps existed have none in their log; the play stands as rolled.
+  const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs, autoField: true }).result! : simulateGame(input);
   return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result };
 }
 
@@ -86,6 +87,7 @@ function isInput(i: unknown): i is UserInput {
   const u = i as Record<string, unknown>;
   if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim);
   if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1;
+  if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1;
   return false;
 }
 

@@ -45,6 +45,8 @@ export const CALLS = {
   onFire: ["This team is ON FIRE!", "The dugout is rocking!", "Somebody call the fire department!"],
   triple: ["Look at him fly around the bases!"],
   doublePlay: ["Two for the price of one!", "Turn two! Inning over!"],
+  webGem: ["WEB GEM! He took a hit away!", "What a play! Robbed!", "Highlight reel! That was a sure hit!"],
+  booted: ["It gets through!", "He couldn't come up with it!", "Just off the glove!"],
 } as const;
 
 export const call = (rng: Rng, kind: keyof typeof CALLS): string => pick(rng, [...CALLS[kind]]);

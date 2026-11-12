@@ -124,16 +124,20 @@ export interface Aim { x: number; y: number }
 export type UserInput =
   | { kind: "pitch"; type: PitchType; aim: Aim }
   /** timing: -1 = very early, 0 = perfect, 1 = very late. */
-  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number };
+  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number }
+  /** A close ball in play on the user's defense: the glove tap, timed the same way. */
+  | { kind: "field"; timing: number };
 
 /** What the game needs from the user next. */
 export interface Awaiting {
-  role: "pitch" | "swing";
+  role: "pitch" | "swing" | "field";
   batterId: number;
   pitcherId: number;
   state: GameState;
   /** When batting: the pitch that is on its way. */
   incoming: { type: PitchType; mph: number; aim: Aim } | null;
+  /** When fielding a close one: what's coming and who has to make the play. */
+  ball: { kind: "grounder" | "liner" | "fly"; fielderId: number } | null;
 }
 
 export interface InteractiveGame {

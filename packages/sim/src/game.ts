@@ -36,10 +36,12 @@ interface Ctx {
   batting: Record<Side, Map<number, BattingLine>>;
   pitching: Record<Side, Map<number, PitchingLine>>;
   over: boolean;
-  /** Interactive mode: the user's side and their input log. */
-  user?: { side: Side; inputs: UserInput[]; cursor: number };
+  /** Interactive mode: the user's side and their input log. `autoField` replays logs recorded before fielding existed. */
+  user?: { side: Side; inputs: UserInput[]; cursor: number; autoField?: boolean };
   /** Interactive mode: how the user's last swing was timed, for the ball in play. */
   lastSwing?: { power: boolean; q: number };
+  /** Interactive mode: how the user's last fielding tap changed the play. */
+  lastField?: { fielderId: number; robbed: boolean; booted: boolean };
 }
 
 /** Thrown in interactive mode when the log runs out; the caller turns it into "waiting for input". */
@@ -117,11 +119,11 @@ const TYPE_MPH: Record<PitchType, number> = { fastball: 93, slider: 86, change: 
 /** Off-speed pitches fool hitters a bit more; fastballs are the safe pitch. */
 const TYPE_WHIFF: Record<PitchType, number> = { fastball: 0, slider: 0.04, change: 0.03, curve: 0.05 };
 
-function takeInput(c: Ctx, role: "pitch" | "swing", batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"]): UserInput {
+function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null): UserInput {
   const u = c.user!;
   const next = u.inputs[u.cursor];
-  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming });
-  if (next.kind !== (role === "pitch" ? "pitch" : "swing")) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
+  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball });
+  if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
   u.cursor++;
   return next;
 }
@@ -195,22 +197,55 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: { pow
   const mo = momentum(c, batter, pitcher);
   const hr = clamp(0.05 + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.28);
   const hit = clamp(0.29 + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.12, 0.45);
-  const r = rng.next();
+  let r = rng.next();
   if (r < hr) return "home_run";
+  // One draw decides what kind of hit or out it is (drawn here so the fielding step below
+  // can read it without changing the auto-sim's RNG sequence).
+  const x = rng.next();
+  const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement), 0.3, 0.6);
+
+  // A close one on the user's defense: their glove tap settles it (contextual takeover).
+  if (c.user && fieldingSide(c) === c.user.side && Math.abs(r - (hr + hit)) < CONTEST_BAND) {
+    const kind = x < ground ? "grounder" : x < ground + 0.35 ? "fly" : "liner";
+    const fielder = pickFielder(c.teams[fieldingSide(c)], kind, (x * 1000) % 1);
+    const q = takeFieldInput(c, batter, pitcher, { kind, fielderId: fielder.id });
+    const wasHit = r < hr + hit;
+    r += (q - 0.5) * 2 * CONTEST_BAND; // a perfect tap makes the out, a whiff gives up the hit
+    const isHit = r < hr + hit;
+    c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit };
+  }
+
   if (r < hr + hit) {
-    const x = rng.next();
     const triple = clamp(0.03 + 0.015 * z(b?.speed), 0.005, 0.08);
     const double = clamp(0.22 + 0.03 * z(b?.power), 0.1, 0.35);
     return x < triple ? "triple" : x < triple + double ? "double" : "single";
   }
-  const x = rng.next();
-  const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement), 0.3, 0.6);
   if (x < ground) {
     const { outs, bases } = c.state;
     if (bases.first !== null && outs < 2 && rng.next() < clamp(0.4 - 0.06 * z(b?.speed), 0.15, 0.6)) return "double_play";
     return "groundout";
   }
   return x < ground + 0.35 ? "flyout" : "lineout";
+}
+
+/** How close to the hit/out line a ball must land to be worth a glove tap (about 1 in 5 balls in play). */
+const CONTEST_BAND = 0.06;
+
+/** Who's got it: grounders and liners to the infield, flies to the outfield, by where it's hit (0 = left line, 1 = right line). */
+function pickFielder(team: SimTeam, kind: "grounder" | "liner" | "fly", dir: number): SimPlayer {
+  const want = kind === "fly" ? (dir < 0.33 ? ["LF", "OF"] : dir < 0.67 ? ["CF", "OF"] : ["RF", "OF"])
+    : dir < 0.25 ? ["3B"] : dir < 0.5 ? ["SS"] : dir < 0.75 ? ["2B"] : ["1B"];
+  const byPos = want.map((pos) => team.lineup.find((p) => p.position === pos)).find(Boolean);
+  return byPos ?? [...team.lineup].sort((a, b) => (b.batting?.fielding ?? 0) - (a.batting?.fielding ?? 0))[0];
+}
+
+/** Quality of the user's glove tap, 0-1. Better fielders get a wider window to hit. */
+function takeFieldInput(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, ball: NonNullable<Awaiting["ball"]>): number {
+  const u = c.user!;
+  if (u.autoField && u.inputs[u.cursor]?.kind !== "field") return 0.5; // no tap recorded: the play stands as rolled
+  const inp = takeInput(c, "field", batter, pitcher, null, ball) as Extract<UserInput, { kind: "field" }>;
+  const window = clamp(1 + 0.15 * z(findPlayer(c, ball.fielderId).batting?.fielding), 0.6, 1.4);
+  return 1 - Math.min(1, Math.abs(inp.timing) / window);
 }
 
 // --- Running the bases -----------------------------------------------------------------
@@ -384,9 +419,15 @@ function plateAppearance(c: Ctx) {
   if (!line && isHit && (bLine.h === 3 || (outcome === "home_run" && bLine.hr === 2))) line = call(rng, "heatedUp");
   if (caughtFire && (tier === 0 || tier === 3)) { tier = 2; card = "ON FIRE"; line = call(rng, "onFire"); }
 
+  // The user's glove decided it: a stolen hit is a highlight, a booted one gets a note.
+  let text = describe(rng, outcome, batter.name, count, runs);
+  const fielded = c.lastField; c.lastField = undefined;
+  if (fielded?.robbed && tier !== 1) { tier = 2; card = "ROBBED"; stat = findPlayer(c, fielded.fielderId).name; line = call(rng, "webGem"); }
+  else if (fielded?.booted) text += ` ${call(rng, "booted")}`;
+
   c.events.push({
     type: "play", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, outcome, runs, rbi,
-    text: describe(rng, outcome, batter.name, count, runs), tier, call: line, card, stat,
+    text, tier, call: line, card, stat,
   });
   if (walkOff) c.over = true;
 }
@@ -403,8 +444,8 @@ export function simulateGame(input: GameInput): GameResult {
  * Play a game where `userSide` makes the pitching and batting choices. Pass the inputs made so
  * far; the game replays from the seed and stops at the first moment it needs another one.
  */
-export function playInteractive(input: GameInput & { userSide: Side; inputs: UserInput[] }): InteractiveGame {
-  const { events, awaiting, result } = run(input, { side: input.userSide, inputs: input.inputs, cursor: 0 });
+export function playInteractive(input: GameInput & { userSide: Side; inputs: UserInput[]; autoField?: boolean }): InteractiveGame {
+  const { events, awaiting, result } = run(input, { side: input.userSide, inputs: input.inputs, cursor: 0, autoField: input.autoField });
   return { events, awaiting, result };
 }
 

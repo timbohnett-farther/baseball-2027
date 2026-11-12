@@ -172,8 +172,11 @@ about real people's character.
 
 - **3 innings, 3–4 minutes a game.** Pace over simulation detail.
 - **Two-button controls.** Pitching: aim location, hold to charge velocity
-  and movement. Batting: tap for timing, hold for power. Fielding: point or
-  direction. No pitch menus or defensive shifts.
+  and movement. Batting: tap for timing, hold for power. Fielding: the engine
+  hands you only the close balls (the narrow band around hit-or-out) and names
+  the fielder; one timed glove tap decides it. A perfect tap steals a hit
+  ("ROBBED" card), a whiff lets it through. Everything else is auto-fielded.
+  No pitch menus or defensive shifts.
 - **Heated up.** A meter fills with hits and strikeouts; when it's full the bat
   glows, contact goes farther, and special swings and pitches unlock
   (this is the same Power meter that Super Power Bats and power-ups use).

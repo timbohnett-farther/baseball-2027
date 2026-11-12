@@ -20,6 +20,8 @@ const TYPES: { type: PitchType; label: string; hint: string }[] = [
 const flightMs = (mph: number) => Math.max(700, Math.min(1300, 900 + (93 - mph) * 14));
 /** Where on the flight (0 = release, 1 = plate) the swing is perfectly timed, and how forgiving it is. */
 const SWEET = 0.85, WINDOW = 0.25;
+/** How long a close ball takes to reach the fielder: liners are on you fast, flies hang. */
+const BALLS = { grounder: { ms: 950, label: "Grounder", hint: "Charge it and glove it on the hop." }, liner: { ms: 700, label: "Line drive", hint: "Quick hands. Snag it." }, fly: { ms: 1500, label: "Fly ball", hint: "Track it down and squeeze it." } } as const;
 
 const GRID = 1.8; // zone drawing spans -GRID..GRID
 const toPct = (v: number) => ((v + GRID) / (2 * GRID)) * 100;
@@ -92,6 +94,10 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
           heat={awaiting.state.heat} incoming={awaiting.incoming} onSwing={(swing, timing) => submit({ kind: "swing", swing, timing })} />
+      )}
+      {awaiting?.role === "field" && awaiting.ball && (
+        <FieldPanel key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
+          kind={awaiting.ball.kind} onGlove={(timing) => submit({ kind: "field", timing })} />
       )}
 
       {!awaiting && !done && lastCall && current.type !== "final" && (
@@ -227,6 +233,60 @@ function SwingPanel({ pitcher, batter, heat, incoming, onSwing }: {
         <Zone>
           <i className="zone-ball" style={{ left: `${toPct(incoming.aim.x)}%`, top: `${toPct(-incoming.aim.y)}%`, animationDuration: `${ms}ms` }} />
         </Zone>
+      </div>
+    </div>
+  );
+}
+
+/** A close ball on your defense: one timed tap, same gold window as a swing. Let it go and it drops in. */
+function FieldPanel({ batter, fielder, kind, onGlove }: {
+  batter?: SimPlayer; fielder?: SimPlayer; kind: keyof typeof BALLS; onGlove: (timing: number) => void;
+}) {
+  const { ms, label, hint } = BALLS[kind];
+  const startRef = useRef(performance.now());
+  const doneRef = useRef(false);
+  const onGloveRef = useRef(onGlove);
+  onGloveRef.current = onGlove;
+
+  const glove = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    const p = (performance.now() - startRef.current) / ms;
+    onGloveRef.current(Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)));
+  }, [ms]);
+
+  useEffect(() => {
+    const t = setTimeout(glove, ms * 1.25);
+    return () => clearTimeout(t);
+  }, [ms, glove]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.code === "Space" || e.key === "g" || e.key === "G") { e.preventDefault(); glove(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [glove]);
+
+  return (
+    <div className="duel-panel">
+      <div className="matchup">
+        <span><small>{label.toUpperCase()}</small> {batter?.name}</span>
+        <span><small>YOUR PLAY</small> {fielder?.name} ({fielder?.position})</span>
+      </div>
+      <div className="duel-row">
+        <div className="duel-incoming">
+          <div className="duel-pitch"><b>{label}</b> {hint}</div>
+          <div className="timing" aria-hidden>
+            <i className="timing-sweet" style={{ left: `${(SWEET - WINDOW * 0.2) * 100}%`, width: `${WINDOW * 0.4 * 100}%` }} />
+            <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
+          </div>
+          <div className="duel-buttons">
+            <button className="primary" onClick={glove}>Glove it <small>Space</small></button>
+          </div>
+          <small className="muted">Tap when the marker hits the gold. Nail it and you steal a hit; miss and it drops in.</small>
+        </div>
       </div>
     </div>
   );

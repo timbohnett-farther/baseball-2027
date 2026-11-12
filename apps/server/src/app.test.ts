@@ -174,7 +174,8 @@ test("play a game against an MLB team, then see it in your history", async () =>
   const inputs: unknown[] = [];
   let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: [] });
   while (out.awaiting) {
-    inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } } : { kind: "swing", swing: "contact", timing: 0.1 });
+    inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
     out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: inputs as never });
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body }).then((r) => r);
