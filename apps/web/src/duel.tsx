@@ -4,6 +4,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playInteractive, type Aim, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
+import { api } from "./api.ts";
 import { BoxScoreView, holdFor, Scorebug } from "./game.tsx";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
@@ -61,6 +62,15 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
   const youWon = g.result?.winner === setup.userSide;
   const done = !!g.result && caughtUp;
   const awaiting = caughtUp ? g.awaiting : null;
+
+  // Once it's over, the server replays our choices against the seed and records the game.
+  const [saved, setSaved] = useState<"saving" | "saved" | string | null>(null);
+  useEffect(() => {
+    if (!g.result || saved) return;
+    setSaved("saving");
+    api("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seed: setup.seed, inputs, final: g.result.final } })
+      .then(() => setSaved("saved"), (e: Error) => setSaved(e.message));
+  }, [g.result, saved, inputs, setup]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
 
   return (
@@ -94,6 +104,11 @@ export function DuelView({ setup, onDone }: { setup: InteractiveSetup; onDone: (
             <span className="display">{youWon ? "Victory" : g.result.winner ? "Defeat" : "Tie game"}</span>
             <span>{(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text}</span>
           </div>
+          {saved && saved !== "saving" && (
+            <p className={`muted duel-note ${saved === "saved" ? "" : "bad"}`} aria-live="polite">
+              {saved === "saved" ? "Counted toward your record." : saved}
+            </p>
+          )}
           <BoxScoreView game={shell} />
         </>
       )}

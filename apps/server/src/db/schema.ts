@@ -1,6 +1,6 @@
 import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
 import type { HittingRatings, PitchingRatings, Role } from "@bb/shared";
-import type { SimTeam } from "@bb/sim";
+import type { SimTeam, UserInput } from "@bb/sim";
 
 export const mlbTeams = pgTable("mlb_teams", {
   id: integer("id").primaryKey(),
@@ -88,6 +88,8 @@ export const games = pgTable("games", {
   innings: integer("innings").notNull(),
   userSide: text("user_side").$type<"home" | "away">().notNull(),
   teams: jsonb("teams").$type<Record<"home" | "away", SimTeam>>().notNull(),
+  /** Set when the user played it pitch by pitch: their choices, replayed against the seed. */
+  inputs: jsonb("inputs").$type<UserInput[]>(),
   userScore: integer("user_score").notNull(),
   opponentScore: integer("opponent_score").notNull(),
   result: text("result").$type<"W" | "L" | "T">().notNull(),

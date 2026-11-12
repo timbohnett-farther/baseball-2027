@@ -165,4 +165,26 @@ test("play a game against an MLB team, then see it in your history", async () =>
   // Other people can't see your games.
   const { cookie: other } = await signup("snooper");
   assert.equal((await app.inject({ url: `/api/games/${game.id}`, headers: { cookie: other } })).statusCode, 404);
+
+  // Play it yourself: the browser drives the pure engine with the setup we hand it, then sends
+  // its choices back. We replay them to verify and record the game.
+  const { playInteractive } = await import("@bb/sim");
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: yankees.id } })).json();
+  assert.equal(setup.userSide, "home");
+  const inputs: unknown[] = [];
+  let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: [] });
+  while (out.awaiting) {
+    inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: inputs as never });
+  }
+  const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body }).then((r) => r);
+  const bad = { opponentTeamId: yankees.id, seed: setup.seed, inputs, final: { away: 99, home: 0 } };
+  assert.equal((await finish(bad)).statusCode, 409); // the score you claim must match the replay
+  assert.equal((await finish({ ...bad, inputs: [{ kind: "swing", swing: "bunt", timing: 0 }] })).statusCode, 400);
+  const saved = await finish({ ...bad, final: out.result!.final });
+  assert.equal(saved.statusCode, 201, saved.body);
+  assert.deepEqual(saved.json().result.final, out.result!.final);
+  const reloaded = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
+  assert.deepEqual(reloaded.result.events, out.result!.events);
+  assert.equal((await app.inject({ url: "/api/games", headers })).json().games.length, 2);
 });

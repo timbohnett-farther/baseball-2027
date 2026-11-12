@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { chemistry, slotsFor, teamAbbreviation, type Player } from "@bb/shared";
-import { autoLineup, DEFAULT_INNINGS, simulateGame, type GameHistory, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam } from "@bb/sim";
+import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, type GameHistory, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb } from "./db/index.ts";
 import { games, mlbTeams, userTeamPlayers, userTeams } from "./db/schema.ts";
@@ -75,8 +75,18 @@ export function mlbSimTeam(teamId: number, exclude: Set<number> = new Set()): Si
 }
 
 function played(row: typeof games.$inferSelect, opponent: { id: number; name: string; abbr: string }): PlayedGame {
-  const result = simulateGame({ away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings });
+  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings };
+  const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs }).result! : simulateGame(input);
   return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result };
+}
+
+const isAim = (a: unknown): a is Aim => !!a && typeof a === "object" && Number.isFinite((a as Aim).x) && Number.isFinite((a as Aim).y);
+function isInput(i: unknown): i is UserInput {
+  if (!i || typeof i !== "object") return false;
+  const u = i as Record<string, unknown>;
+  if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim);
+  if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1;
+  return false;
 }
 
 export async function gameRoutes(app: FastifyInstance) {
@@ -100,7 +110,7 @@ export async function gameRoutes(app: FastifyInstance) {
   }
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
-  // so all it needs from us is the two lineups and a seed. Results aren't recorded yet.
+  // so all it needs from us is the two lineups and a seed.
   app.post<{ Body: { opponentTeamId?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
     const m = await matchup(req.user!.id, req.body?.opponentTeamId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
@@ -111,6 +121,33 @@ export async function gameRoutes(app: FastifyInstance) {
     };
     return reply.code(201).send(body);
   });
+
+  // The game is over: replay the user's choices against the seed with today's lineups, and record
+  // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
+  app.post<{ Body: { opponentTeamId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number } } }>(
+    "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
+      const db = getDb();
+      const { seed, inputs, final } = req.body ?? {};
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final) {
+        return reply.code(400).send({ error: "That game can't be saved." });
+      }
+      const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+      if ("error" in m) return reply.code(400).send({ error: m.error });
+      const { team, opponent, me } = m;
+      const teams = { away: opponent, home: me };
+      const { result } = playInteractive({ ...teams, seed: seed!, innings: DEFAULT_INNINGS, userSide: "home", inputs });
+      if (!result || result.final.away !== final.away || result.final.home !== final.home) {
+        return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
+      }
+      const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
+      const [row] = await db.insert(games).values({
+        userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: DEFAULT_INNINGS,
+        userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome,
+      }).returning();
+      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result };
+      return reply.code(201).send(body);
+    },
+  );
 
   app.post<{ Body: { opponentTeamId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
     const db = getDb();

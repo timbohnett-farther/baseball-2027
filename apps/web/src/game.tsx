@@ -36,7 +36,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
     try { setGame(await api<PlayedGame>(`/api/games/${id}`)); } catch (e) { setError((e as Error).message); }
   };
 
-  if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} onDone={() => setDuel(null)} /></Suspense>;
+  if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} onDone={() => { setDuel(null); load(); }} /></Suspense>;
   if (game) return <GameView game={game} onDone={() => { setGame(null); load(); }} />;
   if (myTeam === undefined) return <section className="panel">{error ?? "Loading…"}</section>;
   if (!myTeam || myTeam.status !== "ready") {

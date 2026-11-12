@@ -183,6 +183,7 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 .effect-name { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.05em; font-size: 15px; display: flex; gap: 8px; align-items: center; }
 .effect.good .effect-name { color: var(--good); }
 .effect.bad .effect-name { color: var(--bad); }
+.duel-note.bad { color: var(--bad); }
 .effect p { margin: 4px 0 0; font-size: 14px; color: var(--text); line-height: 1.4; }
 
 .draft-btn { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em; font-size: 14px; border: 0; border-radius: 3px; padding: 6px 12px;
