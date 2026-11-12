@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MyTeam, TeamSummary } from "@bb/shared";
 import type { GameEvent, GameHistory, PlayedGame, Side, SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { Ovr } from "./players.tsx";
+const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
 // --- Pick an opponent ------------------------------------------------------------------
 
@@ -163,6 +164,8 @@ function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
           {done && <button className="primary" onClick={onDone}>Done</button>}
         </div>
       </div>
+
+      <Suspense fallback={<div className="field" />}><FieldView game={game} index={i} speed={speed} /></Suspense>
 
       {!done && batterId && (
         <div className="matchup">
