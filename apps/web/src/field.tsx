@@ -46,51 +46,118 @@ function softSprite(color: string): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
-function grassTexture(): THREE.CanvasTexture {
+/** Checker-mown outfield: straight stripes with a faint cross pass. */
+function grassTexture(repeat: number): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   const g = c.getContext("2d")!;
-  for (let i = 0; i < 24; i++) {
-    g.fillStyle = i % 2 ? "#2c5a3b" : "#316341";
-    g.beginPath(); g.arc(256, 256, 256 - i * 10.6, 0, Math.PI * 2); g.fill();
-  }
+  for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? "#2f6b3c" : "#397c47"; g.fillRect(i * 64, 0, 64, 512); }
+  g.fillStyle = "rgba(0,0,0,0.07)";
+  for (let i = 0; i < 8; i += 2) g.fillRect(0, i * 64, 512, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat, repeat);
+  return t;
+}
+
+/** Signage texture: condensed caps on a flat panel. Names are the game's own fictional makers. */
+function signTexture(text: string, bg: string, fg: string, w = 1024, h = 160): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d")!;
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.fillStyle = fg; g.font = `600 ${Math.round(h * 0.62)}px Oswald, "Arial Narrow", sans-serif`;
+  g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, w / 2, h / 2 + h * 0.03);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
-/** Muted uniform on the body, saturated team colour only as an accent on the cap (VISUAL_DESIGN 1). */
-function makePlayer(color: THREE.Color, bat = false): THREE.Group {
+const PLAYER_SCALE = 1;
+const SKIN = ["#f0c8a4", "#d9a77c", "#b97f57", "#8c5a3c", "#5e3b25"];
+const std = (color: string, roughness = 0.8) => new THREE.MeshStandardMaterial({ color, roughness });
+
+/** Tapered cylinder from one joint to the next (the whole rig is posed this way). */
+function limb(from: THREE.Vector3, to: THREE.Vector3, r: number, mat: THREE.Material, tip = r): THREE.Mesh {
+  const d = to.clone().sub(from), len = d.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(tip, r, len, 10), mat);
+  m.position.copy(from).addScaledVector(d, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+  m.castShadow = true;
+  return m;
+}
+
+/**
+ * Pro-proportioned player, 1.85 m, built in a local frame facing +z: team-colour jersey and cap, white pants,
+ * belt and cleats, posed limbs. Batters get a helmet, a bat held at the back shoulder and the frame turned to
+ * face the plate (right-handed). Fielders get a glove. Generic faces only, no likenesses.
+ */
+function makePlayer(color: THREE.Color, bat = false, seed = 0): THREE.Group {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: color.clone().lerp(new THREE.Color("#6b6f78"), 0.55), roughness: 0.85 });
-  const capMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.9, 4, 10), bodyMat);
-  body.position.y = 0.95;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), new THREE.MeshStandardMaterial({ color: "#a98c76", roughness: 0.8 }));
-  head.position.y = 1.85;
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.225, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
-  cap.position.y = 1.9;
-  for (const m of [body, head, cap]) m.castShadow = true;
-  g.add(body, head, cap);
-  if (bat) {
-    const b = new THREE.Group();
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.95, 8), new THREE.MeshStandardMaterial({ color: "#c9a77a", roughness: 0.6 }));
-    stick.position.y = 0.45;
-    stick.castShadow = true;
-    b.add(stick);
-    b.position.set(0.3, 1.45, 0);
-    b.rotation.z = -0.45;
-    b.name = "bat";
-    g.add(b);
+  const rig = new THREE.Group();
+  rig.name = "rig";
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+  const capMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.55 });
+  const pants = std("#ecebe4"), skin = std(SKIN[seed % SKIN.length], 0.65), dark = std("#1a1a1e", 0.6);
+
+  for (const s of [-1, 1]) {
+    const hip = V(s * 0.12, 0.96, 0), knee = V(s * 0.17, 0.52, bat ? 0.04 : 0.06), foot = V(s * (bat ? 0.3 : 0.19), 0.07, bat ? 0 : 0.04);
+    rig.add(limb(hip, knee, 0.085, pants, 0.072), limb(knee, foot, 0.072, pants, 0.055));
+    const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.29), dark);
+    cleat.position.set(foot.x, 0.04, foot.z + 0.05); cleat.castShadow = true; rig.add(cleat);
   }
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.42, 6, 14), bodyMat);
+  torso.position.y = 1.25; torso.castShadow = true;
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.185, 0.06, 14), dark);
+  belt.position.y = 0.98;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 10), skin);
+  neck.position.y = 1.57;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 16), skin);
+  head.position.y = 1.69; head.castShadow = true;
+  rig.add(torso, belt, neck, head);
+
+  // Headgear: fitted cap with a brim, or a batting helmet with the ear flap toward the pitcher.
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(bat ? 0.13 : 0.122, 20, 12, 0, Math.PI * 2, 0, bat ? Math.PI * 0.6 : Math.PI / 2), capMat);
+  cap.position.y = bat ? 1.7 : 1.69; cap.castShadow = true;
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.11), capMat);
+  brim.position.set(0, bat ? 1.7 : 1.69, 0.15);
+  rig.add(cap, brim);
+  if (bat) { const flap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.09), capMat); flap.position.set(0.12, 1.65, 0.01); rig.add(flap); }
+
+  // Arms: jersey sleeve to the elbow, bare forearm, hand. Batter's hands meet at the back shoulder.
+  const hands = bat ? V(-0.27, 1.43, -0.1) : null;
+  for (const s of [-1, 1]) {
+    const shoulder = V(s * 0.23, 1.47, 0);
+    const elbow = bat ? V(s < 0 ? -0.4 : 0.12, 1.26, s < 0 ? -0.06 : 0.24) : V(s * 0.31, 1.17, 0.08);
+    const hand = hands ? hands.clone().add(V(s * 0.03, 0, 0)) : V(s * 0.29, 0.92, 0.23);
+    rig.add(limb(shoulder, elbow, 0.062, bodyMat, 0.05), limb(elbow, hand, 0.05, skin, 0.04));
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), skin);
+    palm.position.copy(hand); rig.add(palm);
+    if (!bat && s < 0) { const glove = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), std("#6d4327", 0.7)); glove.position.copy(hand).add(V(-0.03, -0.02, 0.05)); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; rig.add(glove); }
+  }
+  if (hands) {
+    const b = new THREE.Group();
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.016, 0.86, 10), std("#c9a06a", 0.45));
+    stick.position.y = 0.43; stick.castShadow = true;
+    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.02, 10), std("#2a1d12", 0.5));
+    b.add(stick, knob);
+    b.position.copy(hands).add(V(0, 0.03, 0));
+    b.rotation.set(0.35, 0, -0.45);
+    b.name = "bat";
+    rig.add(b);
+    rig.rotation.y = Math.PI / 2; // local +z (chest) now faces +x, across the plate
+  }
+  g.add(rig);
   g.userData = { bodyMat, capMat };
-  g.scale.setScalar(1.3);
+  g.scale.setScalar(PLAYER_SCALE);
   return g;
 }
 
 function recolor(g: THREE.Group, color: THREE.Color) {
-  (g.userData.capMat as THREE.MeshStandardMaterial).color.copy(color);
-  (g.userData.bodyMat as THREE.MeshStandardMaterial).color.copy(color).lerp(new THREE.Color("#6b6f78"), 0.55);
+  (g.userData.capMat as THREE.MeshStandardMaterial).color.copy(color).multiplyScalar(0.8);
+  (g.userData.bodyMat as THREE.MeshStandardMaterial).color.copy(color);
 }
 
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
@@ -176,20 +243,23 @@ class Director {
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.shadowMap.enabled = true;
     this.scene.background = new THREE.Color("#0B0D12");
-    this.scene.fog = new THREE.FogExp2("#0B0D12", 0.0042);
+    this.scene.fog = new THREE.FogExp2("#0B0D12", 0.0028);
 
-    // One warm key from upper-left, cool fill at a fifth, rim from behind-right (VISUAL_DESIGN 7.2).
-    const key = new THREE.DirectionalLight("#ffd9a0", 2.6);
+    // Night game under the towers: a bright, slightly warm key from the first-base bank, a cooler fill from
+    // the third-base bank, rim from behind-right (VISUAL_DESIGN 7.2).
+    const key = new THREE.DirectionalLight("#fff1d6", 3.0);
     key.position.set(-40, 55, 30);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, { left: -55, right: 55, top: 70, bottom: -70, near: 1, far: 220 });
     key.target.position.set(0, 0, -30);
+    const fill = new THREE.DirectionalLight("#dfe6ff", 0.9);
+    fill.position.set(45, 40, 20);
     this.rim = new THREE.DirectionalLight("#f2e3c6", 1.2);
     this.rim.position.set(35, 22, -70);
     this.pop = new THREE.PointLight("#f2e3c6", 0, 14);
     this.pop.position.set(0.4, 1.4, 0.8);
-    this.scene.add(key, key.target, this.rim, this.pop, new THREE.HemisphereLight("#4a5a86", "#1a1410", 0.5));
+    this.scene.add(key, key.target, fill, this.rim, this.pop, new THREE.HemisphereLight("#5b6a90", "#2a2418", 0.7));
 
     this.buildPark();
     const white = new THREE.MeshStandardMaterial({ color: "#f4f1ea", roughness: 0.4, emissive: "#443322", emissiveIntensity: 0.4 });
@@ -198,7 +268,12 @@ class Director {
     this.ball.visible = false;
     this.scene.add(this.ball);
 
-    FIELD_POS.forEach((p) => { const f = makePlayer(this.colors.home); f.position.copy(p); this.fielders.push(f); this.scene.add(f); });
+    FIELD_POS.forEach((p, i) => {
+      const f = makePlayer(this.colors.home, false, i * 7 + 3);
+      f.position.copy(p);
+      if (i === 1) f.scale.y = PLAYER_SCALE * 0.62; // catcher's crouch
+      this.fielders.push(f); this.scene.add(f);
+    });
     const dust = softSprite("rgba(255,255,255,1)");
     this.burstDust = new Dust(400, false, 0.9, dust);
     this.drift = new Dust(90, true, 0.55, dust);
@@ -214,35 +289,95 @@ class Director {
       const mesh = new THREE.Mesh(geo, m);
       mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, y, z); mesh.receiveShadow = true; this.scene.add(mesh); return mesh;
     };
-    const grass = new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1 });
-    flat(new THREE.CircleGeometry(WALL_R, 72, Math.PI / 2 - 1.25, 2.5), grass, 0, 0, 0);
-    flat(new THREE.CircleGeometry(24, 48), mat("#5e4a37"), 0, -18.4, 0.01);
-    const inner = flat(new THREE.PlaneGeometry(27, 27), mat("#2e5d3d"), 0, -19.4, 0.02); inner.rotation.z = Math.PI / 4;
-    flat(new THREE.CircleGeometry(7, 32), mat("#5e4a37"), 0, 0.5, 0.03);
-    const mound = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.2, 0.3, 24), mat("#6b543c")); mound.position.set(0, 0.15, -18.4); mound.receiveShadow = true; this.scene.add(mound);
-    const chalk = new THREE.MeshBasicMaterial({ color: "#d9cbb3" });
+    const arc = (geo: THREE.BufferGeometry, m: THREE.Material, y: number) => {
+      const mesh = new THREE.Mesh(geo, m); mesh.position.y = y; (mesh.material as THREE.Material).side = THREE.DoubleSide; this.scene.add(mesh); return mesh;
+    };
+    const dirt = mat("#86613f"), clay = mat("#9a7250");
+    flat(new THREE.CircleGeometry(WALL_R, 96, Math.PI / 2 - 1.25, 2.5), new THREE.MeshStandardMaterial({ map: grassTexture(14), roughness: 1 }), 0, 0, 0);
+    flat(new THREE.RingGeometry(WALL_R - 5, WALL_R, 96, 1, Math.PI / 2 - 1.25, 2.5), dirt, 0, 0, 0.012); // warning track
+    flat(new THREE.CircleGeometry(24, 64), dirt, 0, -18.4, 0.01);
+    const inner = flat(new THREE.PlaneGeometry(27, 27), new THREE.MeshStandardMaterial({ map: grassTexture(2), roughness: 1 }), 0, -19.4, 0.02); inner.rotation.z = Math.PI / 4;
+    flat(new THREE.CircleGeometry(7, 40), dirt, 0, 0.5, 0.03);
+    const mound = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 0.3, 32), clay); mound.position.set(0, 0.15, -18.4); mound.receiveShadow = true; this.scene.add(mound);
+    const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.03, 0.15), mat("#f0ece2", 0.6)); rubber.position.set(0, 0.31, -18.4); this.scene.add(rubber);
+    const chalk = new THREE.MeshBasicMaterial({ color: "#e8e1d2" });
     for (const s of [-1, 1]) { // foul lines
       const line = new THREE.Mesh(new THREE.PlaneGeometry(0.12, WALL_R * 1.1), chalk);
       line.rotation.set(-Math.PI / 2, 0, s * Math.PI / 4); line.position.set(s * WALL_R * 0.389, 0.04, -WALL_R * 0.389); this.scene.add(line);
+      for (const [w, d, dx, dz] of [[0.08, 1.9, 0.6, 0], [0.08, 1.9, -0.6, 0], [1.28, 0.08, 0, 0.95], [1.28, 0.08, 0, -0.95]]) { // batter's boxes
+        const edge = new THREE.Mesh(new THREE.PlaneGeometry(w, d), chalk);
+        edge.rotation.x = -Math.PI / 2; edge.position.set(s * 0.95 + dx, 0.045, 0.3 + dz); this.scene.add(edge);
+      }
     }
     BASES.forEach((b, i) => {
       const m = i === 0 ? new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.05, 5), chalk)
         : new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.6), chalk);
       m.position.set(b.x, 0.07, b.z); if (i) m.rotation.y = Math.PI / 4; this.scene.add(m);
     });
-    // Outfield wall and dark stands; stadium lights become bokeh sprites (VISUAL_DESIGN 7.3).
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(WALL_R, WALL_R, 3, 72, 1, true, Math.PI - 1.25, 2.5), mat("#16322a"));
-    wall.position.y = 1.5; (wall.material as THREE.Material).side = THREE.DoubleSide; this.scene.add(wall);
-    const stands = new THREE.Mesh(new THREE.CylinderGeometry(WALL_R + 22, WALL_R + 6, 30, 72, 1, true, Math.PI - 1.4, 2.8), mat("#10131a"));
-    stands.position.y = 15; (stands.material as THREE.Material).side = THREE.DoubleSide; this.scene.add(stands);
-    const warm = softSprite("rgba(255,214,150,1)"), cool = softSprite("rgba(160,190,255,1)");
-    for (let i = 0; i < 70; i++) {
-      const a = (Math.random() - 0.5) * 2.6, r = WALL_R + 18 + Math.random() * 30;
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: Math.random() < 0.8 ? warm : cool, transparent: true, opacity: 0.25 + Math.random() * 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      s.position.set(Math.sin(a) * r, 8 + Math.random() * 34, -Math.cos(a) * r);
-      s.scale.setScalar(5 + Math.random() * 12);
+
+    // Padded outfield wall with a yellow line, foul poles, fictional-maker signage.
+    const wall = arc(new THREE.CylinderGeometry(WALL_R, WALL_R, 3.2, 96, 1, true, Math.PI - 1.25, 2.5), mat("#1c4a35", 0.9), 1.6);
+    wall.receiveShadow = true;
+    arc(new THREE.CylinderGeometry(WALL_R + 0.05, WALL_R + 0.05, 0.16, 96, 1, true, Math.PI - 1.25, 2.5), new THREE.MeshBasicMaterial({ color: "#f3c724" }), 3.2);
+    const yellow = mat("#f3c724", 0.5);
+    for (const s of [-1, 1]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 16, 10), yellow);
+      pole.position.set(s * WALL_R * Math.sin(1.25), 8, -WALL_R * Math.cos(1.25)); this.scene.add(pole);
+    }
+    const signs: [string, string, string][] = [["NORTHWIND", "#0e2a4a", "#f4f1ea"], ["RIDGEBACK", "#5a1a16", "#f2e3c6"], ["CASCADE", "#123d3a", "#e9f3ef"]];
+    [-0.72, 0, 0.72].forEach((a, i) => {
+      const [text, bg, fg] = signs[i];
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(16, 2.4, 0.2), new THREE.MeshStandardMaterial({ map: signTexture(text, bg, fg), roughness: 0.6 }));
+      panel.position.set(Math.sin(a) * (WALL_R - 0.4), 1.6, -Math.cos(a) * (WALL_R - 0.4)); panel.rotation.y = -a; this.scene.add(panel);
+    });
+
+    // Two decks of seating with a crowd, a facade between, a scoreboard in centre, six light towers.
+    const seats = mat("#2a3140", 0.95), concrete = mat("#1a1e28", 0.95);
+    arc(new THREE.CylinderGeometry(WALL_R + 26, WALL_R + 4, 11, 96, 1, true, Math.PI - 1.4, 2.8), seats, 9);
+    arc(new THREE.CylinderGeometry(WALL_R + 27, WALL_R + 27, 3.5, 96, 1, true, Math.PI - 1.4, 2.8), concrete, 16.2);
+    arc(new THREE.CylinderGeometry(WALL_R + 46, WALL_R + 28, 13, 96, 1, true, Math.PI - 1.4, 2.8), seats, 24.5);
+    this.crowd(WALL_R + 5, WALL_R + 25, 4, 14, 5200);
+    this.crowd(WALL_R + 29, WALL_R + 45, 18.5, 31, 5200);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(30, 10, 1.4), concrete);
+    board.position.set(0, 24, -(WALL_R + 12)); this.scene.add(board);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(28, 8.4), new THREE.MeshBasicMaterial({ map: signTexture("BASEBALL 2027", "#0a0d14", "#f2e3c6", 1024, 300) }));
+    face.position.set(0, 24, -(WALL_R + 11.25)); this.scene.add(face);
+    const glow = softSprite("rgba(255,241,214,1)");
+    for (const a of [-1.3, -0.85, -0.35, 0.35, 0.85, 1.3]) {
+      const r = WALL_R + 42, x = Math.sin(a) * r, z = -Math.cos(a) * r;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.7, 56, 8), concrete);
+      pole.position.set(x, 28, z); this.scene.add(pole);
+      const bank = new THREE.Mesh(new THREE.BoxGeometry(11, 4.5, 0.6), new THREE.MeshBasicMaterial({ color: "#fff6e3" }));
+      bank.position.set(x, 54, z); bank.rotation.y = -a; bank.rotation.x = 0.5; this.scene.add(bank);
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      s.position.set(x, 54, z); s.scale.setScalar(34); this.scene.add(s);
+    }
+    const flash = softSprite("rgba(230,240,255,1)");
+    for (let i = 0; i < 40; i++) { // camera flashes in the decks
+      const a = (Math.random() - 0.5) * 2.6, r = WALL_R + 6 + Math.random() * 38;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flash, transparent: true, opacity: 0.15 + Math.random() * 0.35, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      s.position.set(Math.sin(a) * r, 5 + Math.random() * 26, -Math.cos(a) * r);
+      s.scale.setScalar(2 + Math.random() * 4);
       this.scene.add(s);
     }
+  }
+
+  /** A deck full of people as coloured points along the seating slope. */
+  private crowd(rIn: number, rOut: number, yIn: number, yOut: number, n: number) {
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      const a = (Math.random() - 0.5) * 2.75, t = Math.random(), r = rIn + (rOut - rIn) * t;
+      pos.set([Math.sin(a) * r, yIn + (yOut - yIn) * t + 0.5, -Math.cos(a) * r], i * 3);
+      const p = Math.random();
+      if (p < 0.35) c.copy(this.colors.home).offsetHSL(0, -0.1, (Math.random() - 0.5) * 0.2);
+      else if (p < 0.5) c.set("#f4f1ea").multiplyScalar(0.6 + Math.random() * 0.4);
+      else c.setHSL(Math.random(), 0.45, 0.25 + Math.random() * 0.35);
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    this.scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.75, vertexColors: true, sizeAttenuation: true })));
   }
 
   resize() {
@@ -333,7 +468,7 @@ class Director {
   private battingColor(e: GameEvent) { return this.colors[e.state.half === "top" ? "away" : "home"]; }
 
   private ensureBatter(e: GameEvent, id: number) {
-    if (this.batterId === id && this.batter) { this.batter.rotation.y = 0; this.batter.scale.setScalar(1.3); return; }
+    if (this.batterId === id && this.batter) { this.batter.rotation.y = 0; this.batter.scale.setScalar(PLAYER_SCALE); return; }
     if (this.batter) this.scene.remove(this.batter);
     this.batter = makePlayer(this.battingColor(e), true);
     this.batter.position.set(-0.95, 0, 0.3);
@@ -358,14 +493,15 @@ class Director {
     const b = this.batter;
     if (!b) return;
     const bat = b.getObjectByName("bat");
-    this.tween(0.2, (p) => { b.rotation.y = -2.6 * p; if (bat) bat.rotation.z = -0.45 - 1.0 * p; }, delay);
+    // Right-handed cut: hips open toward the pitcher, barrel drops from the back shoulder and extends flat.
+    this.tween(0.2, (p) => { b.rotation.y = 2.4 * p; if (bat) { bat.rotation.z = -0.45 - 1.1 * p; bat.rotation.x = 0.35 - 0.5 * p; } }, delay);
     if (miss) this.after(delay + 0.25, () => {});
   }
 
   private onPitch(e: Extract<GameEvent, { type: "pitch" }>) {
     this.ensureBatter(e, e.batterId);
     const bat = this.batter?.getObjectByName("bat");
-    if (bat) bat.rotation.z = -0.45;
+    if (bat) bat.rotation.set(0.35, 0, -0.45);
     const dur = Math.min(0.5, Math.max(0.3, 0.55 - (e.mph - 70) * 0.006));
     const i = e.state.score.away * 7 + e.state.score.home * 3 + e.state.balls * 11 + e.state.strikes * 13 + e.state.outs * 17 + e.mph;
     const side = rnd(i, 3) < 0.5 ? -1 : 1;
@@ -501,6 +637,7 @@ class Director {
       this.batter = null; this.batterId = null;
       const runner = b as THREE.Group & { base?: number };
       runner.rotation.y = 0;
+      const rig = b.getObjectByName("rig"); if (rig) rig.rotation.y = -Math.PI / 4; // face up the line
       const bat = b.getObjectByName("bat"); if (bat) b.remove(bat);
       this.moveTo(runner, BASES[0], 0.01);
       if (batterScored) this.runPath(runner, 0, 4, delay, true, trot);
