@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  LEGENDARY_MILESTONES, woodDeltas,
-  type BatLength, type BatWeight, type Gear, type StoreState, type SuperBat, type Wood,
+  COSMETIC_SLOTS, LEGENDARY_MILESTONES, woodDeltas,
+  type BatLength, type BatWeight, type Cosmetic, type CosmeticSlot, type Gear, type StoreState, type SuperBat, type Wood,
 } from "@bb/shared";
 import { api } from "./api.ts";
 
@@ -12,6 +12,11 @@ const WOODS: { wood: Wood; label: string; note: string }[] = [
 const CLASS_LABEL = { wood: "Wood", bbcor: "BBCOR", usssa: "USSSA" } as const;
 const SWING_LABEL = { balanced: "Balanced", mid: "Mid-loaded", end: "End-loaded" } as const;
 const BUILD_LABEL = { alloy: "One-piece alloy", composite: "Two-piece composite", hybrid: "Hybrid" } as const;
+const SLOT_LABEL: Record<CosmeticSlot, { title: string; note: string }> = {
+  helmet: { title: "Batting helmet", note: "Worn by whoever is up." },
+  cleats: { title: "Cleats", note: "Every player on your club." },
+  gloves: { title: "Batting gloves", note: "Looks only. Zero effect on ratings." },
+};
 
 /** Coins, the wood bat you swing every day, and the Super Power Bats you can buy or earn. */
 export function StoreView() {
@@ -34,6 +39,13 @@ export function StoreView() {
     try {
       const r = await api<{ coins: number; batId: string }>("/api/store/buy", { body: { batId: bat.id } });
       setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.batId] });
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  const buyLook = async (c: Cosmetic) => {
+    setError(null); setBusy(c.id);
+    try {
+      const r = await api<{ coins: number; itemId: string }>("/api/store/buy", { body: { cosmeticId: c.id } });
+      setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.itemId] });
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
@@ -67,6 +79,35 @@ export function StoreView() {
           <small className="muted">Applies to your whole lineup. Free, always on.</small>
         </div>
       </div>
+
+      <h3>Your look</h3>
+      <p className="muted">Colourways for your club. Pick one per slot; the stock look is always free.</p>
+      {COSMETIC_SLOTS.map((slot) => {
+        const worn = store.gear.cosmetics?.[slot] ?? null;
+        return (
+          <div key={slot} className="look-row">
+            <div className="look-head"><b>{SLOT_LABEL[slot].title}</b><small className="muted">{SLOT_LABEL[slot].note}</small></div>
+            <div className="swatches">
+              <button className={`swatch stock ${worn ? "" : "on"}`} onClick={() => setGear({ cosmetics: { [slot]: null } })} title="Stock look">
+                <span className="swatch-dot" /><span>Stock</span>
+              </button>
+              {store.cosmetics.filter((c) => c.slot === slot).map((c) => {
+                const owned = store.owned.includes(c.id);
+                const on = worn === c.id;
+                return (
+                  <button key={c.id} className={`swatch tier-${c.tier} ${on ? "on" : ""}`} title={c.name}
+                    disabled={busy === c.id || (!owned && store.coins < c.price)}
+                    onClick={() => (on ? setGear({ cosmetics: { [slot]: null } }) : owned ? setGear({ cosmetics: { [slot]: c.id } }) : buyLook(c))}>
+                    <span className="swatch-dot" style={{ background: c.color }} />
+                    <span>{c.name}</span>
+                    <small>{on ? "Worn" : owned ? "Owned" : `${c.price}`}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
       <h3>Super Power Bats</h3>
       <p className="muted">Equip one. Each charge turns a clutch swing into a Super Swing: runners in scoring position, late innings, or two strikes.</p>

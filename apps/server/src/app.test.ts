@@ -335,3 +335,46 @@ test("player development: games earn XP, levels lift ratings, only the server wr
   const chem = team.chemistry.players.find((b: { playerId: number }) => b.playerId === star.id);
   assert.equal(inSim.batting.contact, (chem.skills.contact ?? grown.ratings.hitting.contact) + woodDeltas(DEFAULT_WOOD).contact);
 });
+
+test("cosmetics: colourways buy with coins, equip per slot, ride into the sim team as looks only", async () => {
+  const { res: su, cookie } = await signup("stylist", undefined, "10.0.0.13");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Stylists", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+
+  const store = (await app.inject({ url: "/api/store", headers })).json();
+  assert.ok(store.cosmetics.length >= 12);
+  const helmet = store.cosmetics.find((c: { slot: string }) => c.slot === "helmet");
+  const cleats = store.cosmetics.find((c: { slot: string; tier: string }) => c.slot === "cleats" && c.tier === "rare");
+
+  // Broke, unknown, and not-owned are all refused.
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: "helmet-nope" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { cosmetics: { helmet: helmet.id } } })).statusCode, 400);
+
+  const { getDb } = await import("./db/index.ts");
+  const { users } = await import("./db/schema.ts");
+  const { eq } = await import("drizzle-orm");
+  await getDb().update(users).set({ coins: 400 }).where(eq(users.username, "stylist"));
+  const bought = await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } });
+  assert.equal(bought.statusCode, 200, bought.body);
+  assert.equal(bought.json().coins, 400 - helmet.price);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } })).statusCode, 400); // owned
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: cleats.id } })).statusCode, 400); // rare, too poor now
+
+  // Wrong slot is refused; the right slot equips; null clears.
+  assert.equal((await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { cosmetics: { cleats: helmet.id } } })).statusCode, 400);
+  const on = await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { cosmetics: { helmet: helmet.id } } });
+  assert.equal(on.statusCode, 200, on.body);
+  assert.equal(on.json().cosmetics.helmet, helmet.id);
+  assert.equal(on.json().superBat, null); // untouched
+
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: pool().teams[1].id } })).json();
+  assert.equal(setup.teams.home.gear.cosmetics.helmet, helmet.id);
+  assert.equal(setup.teams.away.gear, undefined); // MLB clubs wear stock
+
+  const off = await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { cosmetics: { helmet: null } } });
+  assert.equal(off.json().cosmetics.helmet, null);
+});

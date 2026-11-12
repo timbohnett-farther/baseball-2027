@@ -125,6 +125,8 @@ export interface Gear {
   wood: WoodSpec;
   /** Equipped Super Power Bat id, if any. Must be owned. */
   superBat: string | null;
+  /** Cosmetic colourways (W14); each must be owned. */
+  cosmetics?: Cosmetics;
 }
 
 export interface StoreState {
@@ -132,8 +134,55 @@ export interface StoreState {
   owned: string[];
   gear: Gear;
   bats: SuperBat[];
+  cosmetics: Cosmetic[];
   wins: number;
 }
 
-export interface BuyRequest { batId: string }
-export interface GearRequest { wood?: WoodSpec; superBat?: string | null }
+export interface BuyRequest { batId?: string; cosmeticId?: string }
+export interface GearRequest { wood?: WoodSpec; superBat?: string | null; cosmetics?: Cosmetics }
+
+// --- Cosmetic gear (W14) ----------------------------------------------------------------
+// Pure looks: helmet, cleat and batting-glove colourways on your players' rigs. Zero rating effect,
+// so the sim never reads them. Names are the game's own (no real brands). Rare colourways cost more;
+// Legendary stays bats-only and milestone-only (see LEGENDARY_MILESTONES).
+
+export type CosmeticSlot = "helmet" | "cleats" | "gloves";
+export const COSMETIC_SLOTS: CosmeticSlot[] = ["helmet", "cleats", "gloves"];
+
+export interface Cosmetic {
+  id: string;
+  slot: CosmeticSlot;
+  name: string;
+  /** CSS hex colour painted on the rig. */
+  color: string;
+  tier: "common" | "rare";
+  price: number;
+}
+
+const cos = (slot: CosmeticSlot, id: string, name: string, color: string, tier: Cosmetic["tier"] = "common"): Cosmetic =>
+  ({ id: `${slot}-${id}`, slot, name, color, tier, price: tier === "rare" ? 350 : 120 });
+
+export const COSMETICS: Cosmetic[] = [
+  cos("helmet", "matte-black", "Matte Black", "#1c1c20"),
+  cos("helmet", "glacier", "Glacier White", "#eef0f2"),
+  cos("helmet", "cardinal", "Cardinal", "#b4232a"),
+  cos("helmet", "royal", "Royal", "#1f4fb6"),
+  cos("helmet", "chrome", "Chrome Flake", "#c9ced6", "rare"),
+  cos("helmet", "sunburst", "Sunburst", "#f0a62b", "rare"),
+  cos("cleats", "blackout", "Blackout", "#111114"),
+  cos("cleats", "whiteout", "Whiteout", "#f4f4f1"),
+  cos("cleats", "volt", "Volt", "#c8f03c"),
+  cos("cleats", "crimson", "Crimson", "#c72838"),
+  cos("cleats", "ice", "Ice Blue", "#8fd3f4", "rare"),
+  cos("cleats", "gold", "Gold Rush", "#d9a826", "rare"),
+  cos("gloves", "white", "Classic White", "#f1f1ee"),
+  cos("gloves", "black", "Night", "#1b1b1f"),
+  cos("gloves", "red", "Red Line", "#d1343c"),
+  cos("gloves", "navy", "Deep Navy", "#1d2a55"),
+  cos("gloves", "teal", "Tidewater", "#2aa9a1", "rare"),
+  cos("gloves", "pink", "Hot Pink", "#f04f9d", "rare"),
+];
+export const COSMETIC_BY_ID: Record<string, Cosmetic> = Object.fromEntries(COSMETICS.map((c) => [c.id, c]));
+
+/** Equipped colourway per slot; a missing or null slot means the team's stock look. */
+export type Cosmetics = Partial<Record<CosmeticSlot, string | null>>;

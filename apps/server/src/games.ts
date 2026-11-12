@@ -49,7 +49,10 @@ export function userSimTeam(name: string, color: string, players: Player[], seas
     name, abbr: teamAbbreviation(name), color,
     lineup: autoLineup(players.filter(isHitter).map((p) => sims.get(p.id)!)),
     pitchers: staff(players.filter((p) => isPitcher(p) || p.ratings.role === "TWP").map((p) => sims.get(p.id)!), roles, overall),
-    gear: { superBat: sb ? { id: sb.id, name: sb.name, charges: sb.charges, contact: sb.boost.contact, power: sb.boost.power } : null },
+    gear: {
+      superBat: sb ? { id: sb.id, name: sb.name, charges: sb.charges, contact: sb.boost.contact, power: sb.boost.power } : null,
+      cosmetics: gear?.cosmetics ?? {},
+    },
   };
 }
 

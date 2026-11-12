@@ -23,7 +23,7 @@ export interface SimTeam {
   /** Starter first, then the bullpen in the order they'll be used. */
   pitchers: SimPlayer[];
   /** Equipped Super Power Bat, snapshotted with the team so a replay sees the same gear. */
-  gear?: { superBat: SuperBatGear | null };
+  gear?: { superBat: SuperBatGear | null; cosmetics?: Partial<Record<"helmet" | "cleats" | "gloves", string | null>> };
 }
 
 /** A Super Power Bat as the engine sees it: charges per game and the rating boost of a Super Swing. */

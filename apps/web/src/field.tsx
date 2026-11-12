@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
+import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -157,12 +158,16 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
   const sleeveMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
   const capMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.55 });
   const pants = std(ump ? "#7d8089" : "#ecebe4"), skin = std(SKIN[seed % SKIN.length], 0.65), dark = std("#1a1a1e", 0.6);
+  // Cosmetic slots (W14): cleats, batting helmet and batting gloves get their own materials so a bought colourway can be painted on.
+  const cleatMat = std("#1a1a1e", 0.6);
+  const helmetMat = bat ? new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.4 }) : capMat;
+  const gloveMat = bat ? std(SKIN[seed % SKIN.length], 0.65) : skin;
 
   for (const s of [-1, 1]) {
     const hip = V(s * 0.12, 0.96, 0), knee = V(s * 0.17, 0.52, bat ? 0.04 : 0.06), foot = V(s * (bat ? 0.3 : 0.19), 0.07, bat ? 0 : 0.04);
     const ankle = foot.clone().lerp(knee, 0.3); // pants stop here, the stirrup sock runs to the cleat
     rig.add(limb(hip, knee, 0.085, pants, 0.072), limb(knee, ankle, 0.072, pants, 0.06), limb(ankle, foot, 0.06, ump ? dark : capMat, 0.052));
-    const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.29), dark);
+    const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.29), cleatMat);
     cleat.position.set(foot.x, 0.04, foot.z + 0.05); cleat.castShadow = true; rig.add(cleat);
   }
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.42, 6, 14), bodyMat);
@@ -176,12 +181,12 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
   rig.add(torso, belt, neck, head);
 
   // Headgear: fitted cap with a brim, or a batting helmet with the ear flap toward the pitcher.
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(bat ? 0.13 : 0.122, 20, 12, 0, Math.PI * 2, 0, bat ? Math.PI * 0.6 : Math.PI / 2), capMat);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(bat ? 0.13 : 0.122, 20, 12, 0, Math.PI * 2, 0, bat ? Math.PI * 0.6 : Math.PI / 2), helmetMat);
   cap.position.y = bat ? 1.7 : 1.69; cap.castShadow = true;
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.11), capMat);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.11), helmetMat);
   brim.position.set(0, bat ? 1.7 : 1.69, 0.15);
   rig.add(cap, brim);
-  if (bat) { const flap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.09), capMat); flap.position.set(0.12, 1.65, 0.01); rig.add(flap); }
+  if (bat) { const flap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.09), helmetMat); flap.position.set(0.12, 1.65, 0.01); rig.add(flap); }
 
   // Arms: jersey sleeve to the elbow, bare forearm, hand. Batter's hands meet at the back shoulder.
   const hands = bat ? V(-0.27, 1.43, -0.1) : null;
@@ -190,7 +195,7 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
     const elbow = bat ? V(s < 0 ? -0.4 : 0.12, 1.26, s < 0 ? -0.06 : 0.24) : V(s * 0.31, 1.17, 0.08);
     const hand = hands ? hands.clone().add(V(s * 0.03, 0, 0)) : V(s * 0.29, 0.92, 0.23);
     rig.add(limb(shoulder, elbow, 0.062, sleeveMat, 0.05), limb(elbow, hand, 0.05, skin, 0.04));
-    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), skin);
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), gloveMat);
     palm.position.copy(hand); rig.add(palm);
     if (!bat && !ump && s < 0) { const glove = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), std("#6d4327", 0.7)); glove.position.copy(hand).add(V(-0.03, -0.02, 0.05)); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; rig.add(glove); }
   }
@@ -207,19 +212,30 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
     rig.rotation.y = Math.PI / 2; // local +z (chest) now faces +x, across the plate
   }
   g.add(rig);
-  g.userData = { bodyMat, sleeveMat, capMat };
+  g.userData = { bodyMat, sleeveMat, capMat, cleatMat, helmetMat, gloveMat, skin: SKIN[seed % SKIN.length], bat };
   g.scale.setScalar(PLAYER_SCALE);
   return g;
 }
 
 /** Put a rig in a team's uniform: jersey texture (with the player's name/number when known), sleeves, cap, socks. */
 function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
-  const u = g.userData as { bodyMat: THREE.MeshStandardMaterial; sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial };
+  const u = g.userData as {
+    bodyMat: THREE.MeshStandardMaterial; sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial;
+    cleatMat: THREE.MeshStandardMaterial; helmetMat: THREE.MeshStandardMaterial; gloveMat: THREE.MeshStandardMaterial; skin: string; bat: boolean;
+  };
   u.bodyMat.map = jerseyTexture(team, player);
   u.bodyMat.color.set("#ffffff"); // colour lives in the texture now
   u.bodyMat.needsUpdate = true;
   u.sleeveMat.color.set(team.color);
   u.capMat.color.set(team.color).multiplyScalar(0.8);
+  // Bought colourways (only the user's team carries any); otherwise the stock look.
+  const look = (slot: CosmeticSlot) => COSMETIC_BY_ID[team.gear?.cosmetics?.[slot] ?? ""]?.color;
+  u.cleatMat.color.set(look("cleats") ?? "#1a1a1e");
+  if (u.bat) {
+    const helmet = look("helmet");
+    if (helmet) u.helmetMat.color.set(helmet); else u.helmetMat.color.set(team.color).multiplyScalar(0.8);
+    u.gloveMat.color.set(look("gloves") ?? u.skin);
+  }
 }
 
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
