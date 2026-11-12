@@ -33,4 +33,4 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
       After every push: `scripts/deploy-check.sh` (waits for /health to report the pushed SHA + all migrations). Two Railway
       projects (`baseball-2027` → baseball-2027-production.up.railway.app, `Baseball 2027` → web-production-6a936) both
       deploy main; the first is the one with the bucket vars and is the canonical URL.
-- [ ] W17 polish pass: loading states, empty states, error toasts, keyboard hints, accessibility audit.
+- [x] W17 polish pass: loading states, empty states, error toasts, keyboard hints, accessibility audit. (bbc47f7; apps/web/src/ui.tsx primitives, numpad aim in the duel zone, skip link + tab roles)
