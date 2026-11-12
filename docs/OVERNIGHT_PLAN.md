@@ -24,7 +24,7 @@ LAST_SEEN: 2026-11-11/21-49-21-fe1e5e03 (Baseball 9 research folder, already con
 - [x] W11 (c6eb250) season mode: 20-game schedule vs real teams, standings, playoff bracket, season rewards (server tables
       `seasons`, `season_games`; web Season tab). Coins only via server `payout()`.
 - [x] W12 player development (c3746af): XP per game for drafted players, level-ups raise ratings within caps; shown on My team.
-- [ ] W13 crowd + ballpark audio: procedural WebAudio bed (crowd murmur, bat crack, PA stings), mute toggle, respects
+- [x] W13 crowd + ballpark audio (426e920): procedural WebAudio bed (crowd murmur, bat crack, PA stings), mute toggle, respects
       reduced-motion/autoplay rules.
 - [ ] W14 cosmetic gear store: helmet/cleat/batting-glove colourways, applied to the rig; Legendary drops stay
       milestone-only per ARCHITECTURE.md.
