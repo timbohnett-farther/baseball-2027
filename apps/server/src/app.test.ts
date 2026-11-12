@@ -242,3 +242,57 @@ test("coins: games pay out, the store sells bats, gear equips", async () => {
   assert.equal(setup.teams.home.gear.superBat.id, "hornet");
   assert.equal(setup.teams.home.gear.superBat.charges, 3);
 });
+
+test("season: 20 games, playoffs if over .500, bonuses paid by the server", async () => {
+  const { res: su, cookie } = await signup("skipper", undefined, "10.0.0.11");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  assert.equal((await app.inject({ method: "POST", url: "/api/season", headers })).statusCode, 400); // no team yet
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Skippers", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  assert.equal((await app.inject({ url: "/api/season", headers })).statusCode, 404);
+
+  const started = await app.inject({ method: "POST", url: "/api/season", headers });
+  assert.equal(started.statusCode, 201, started.body);
+  let s = started.json();
+  assert.equal(s.number, 1);
+  assert.equal(s.status, "regular");
+  assert.equal(s.schedule.length, 20);
+  assert.equal(new Set(s.schedule.map((g: { opponent: { id: number } }) => g.opponent.id)).size, 20);
+  assert.equal(s.next.gameNo, 1);
+  assert.equal(s.standings.length, 31);
+  assert.equal((await app.inject({ method: "POST", url: "/api/season", headers })).statusCode, 400); // one at a time
+
+  // Only the next scheduled opponent counts for the season.
+  const wrong = s.schedule[1].opponent.id;
+  assert.equal((await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: wrong, seasonId: s.id } })).statusCode, 400);
+
+  let coins = 0, bonuses = 0;
+  for (let n = 0; n < 60 && s.status !== "done"; n++) {
+    const res = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: s.next.opponent.id, seasonId: s.id } });
+    assert.equal(res.statusCode, 201, res.body);
+    const g = res.json();
+    coins += g.reward.total;
+    bonuses += g.reward.coins.season ?? 0;
+    s = (await app.inject({ url: "/api/season", headers })).json();
+    const played = s.schedule.filter((x: { gameId: number | null }) => x.gameId !== null).length;
+    assert.equal(played, n + 1);
+  }
+  assert.equal(s.status, "done");
+  assert.equal(s.next, null);
+  const reg = s.schedule.filter((g: { round: number }) => g.round === 0);
+  assert.equal(reg.length, 20);
+  assert.equal(s.record.w + s.record.l + s.record.t, 20);
+  const madePlayoffs = s.record.w > s.record.l;
+  assert.equal(s.schedule.some((g: { round: number }) => g.round > 0), madePlayoffs);
+  assert.ok(bonuses >= 100 + (madePlayoffs ? 100 : 0), `bonuses ${bonuses}`);
+  assert.equal(s.rewardCoins, bonuses);
+  assert.equal(s.eliminated, !s.champion);
+  const me = (await app.inject({ url: "/api/me", headers })).json();
+  assert.equal(me.coins, coins);
+  // Season over: a new one can start, numbered 2.
+  const again = await app.inject({ method: "POST", url: "/api/season", headers });
+  assert.equal(again.statusCode, 201, again.body);
+  assert.equal(again.json().number, 2);
+});

@@ -221,7 +221,7 @@ export function ReelCard({ reel, game, finalText }: { reel: Reel; game: PlayedGa
   return null;
 }
 
-function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
+export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => void }) {
   const { events } = game.result;
   const [i, setI] = useState(0);
   const [speed, setSpeed] = useState(1);

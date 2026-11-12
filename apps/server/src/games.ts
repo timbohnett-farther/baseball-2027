@@ -6,6 +6,7 @@ import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, t
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
+import { seasonMatch, settleSeason, type SeasonRow } from "./season.ts";
 import { findPlayer, pool } from "./store.ts";
 import { playerFromDb } from "./team.ts";
 
@@ -125,10 +126,22 @@ function isInput(i: unknown): i is UserInput {
   return false;
 }
 
+/** Fold a season bonus (paid by settleSeason) into the game's reward line. */
+async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: number) {
+  if (bonus > 0) { reward.coins.season = bonus; reward.total += bonus; }
+}
+
 export async function gameRoutes(app: FastifyInstance) {
   /** Both lineups for a game against an MLB team, or the reason it can't be played yet. */
-  async function matchup(userId: number, opponentTeamId: unknown): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam }> {
+  async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null }> {
     const db = getDb();
+    // A season game must be the season's next scheduled one.
+    let season: SeasonRow | null = null;
+    if (seasonId != null) {
+      const sm = await seasonMatch(db, userId, seasonId, Number(opponentTeamId));
+      if ("error" in sm) return sm;
+      season = sm.season;
+    }
     const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, userId));
     if (!team) return { error: "Draft your team first." };
     if (team.status !== "ready") return { error: "Finish your draft before playing." };
@@ -142,13 +155,13 @@ export async function gameRoutes(app: FastifyInstance) {
       const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
       if (p) players.push(p);
     }
-    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear) };
+    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear), season };
   }
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
   // so all it needs from us is the two lineups and a seed.
-  app.post<{ Body: { opponentTeamId?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
-    const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
+    const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
     const id = Number(req.body!.opponentTeamId);
     const body: InteractiveSetup = {
@@ -160,16 +173,16 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // The game is over: replay the user's choices against the seed with today's lineups, and record
   // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
-  app.post<{ Body: { opponentTeamId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number } } }>(
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number } } }>(
     "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
       const db = getDb();
       const { seed, inputs, final } = req.body ?? {};
       if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
-      const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+      const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
       if ("error" in m) return reply.code(400).send({ error: m.error });
-      const { team, opponent, me } = m;
+      const { team, opponent, me, season } = m;
       const teams = { away: opponent, home: me };
       const { result } = playInteractive({ ...teams, seed: seed!, innings: DEFAULT_INNINGS, userSide: "home", inputs });
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
@@ -181,16 +194,17 @@ export async function gameRoutes(app: FastifyInstance) {
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: DEFAULT_INNINGS,
         userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
+      if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
       const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
       return reply.code(201).send(body);
     },
   );
 
-  app.post<{ Body: { opponentTeamId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
     const db = getDb();
-    const m = await matchup(req.user!.id, req.body?.opponentTeamId);
+    const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
-    const { team, opponent, me } = m;
+    const { team, opponent, me, season } = m;
     // You're the home team: you always get the last at-bat.
     const teams = { away: opponent, home: me };
     const seed = randomInt(0, 2 ** 31 - 1);
@@ -202,6 +216,7 @@ export async function gameRoutes(app: FastifyInstance) {
       userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: DEFAULT_INNINGS,
       userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
+    if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
     const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
     return reply.code(201).send(body);
   });

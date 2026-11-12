@@ -107,6 +107,38 @@ export const games = pgTable("games", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** A 20-game season vs real teams, then a three-round playoff if the record is winning. */
+export const seasons = pgTable("seasons", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
+  number: integer("number").notNull(),
+  seed: integer("seed").notNull(),
+  status: text("status").$type<"regular" | "playoffs" | "done">().notNull().default("regular"),
+  wins: integer("wins").notNull().default(0),
+  losses: integer("losses").notNull().default(0),
+  ties: integer("ties").notNull().default(0),
+  /** 0 during the regular season, then 1–3. */
+  playoffRound: integer("playoff_round").notNull().default(0),
+  playoffWins: integer("playoff_wins").notNull().default(0),
+  playoffLosses: integer("playoff_losses").notNull().default(0),
+  /** Season bonuses paid so far (regular-season completion, berth, round wins, title). */
+  rewardCoins: integer("reward_coins").notNull().default(0),
+  champion: boolean("champion").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+export const seasonGames = pgTable("season_games", {
+  seasonId: integer("season_id").notNull().references(() => seasons.id, { onDelete: "cascade" }),
+  gameNo: integer("game_no").notNull(),
+  /** 0 = regular season, 1–3 = playoff round. */
+  round: integer("round").notNull().default(0),
+  opponentTeamId: integer("opponent_team_id").notNull().references(() => mlbTeams.id),
+  gameId: integer("game_id").references(() => games.id, { onDelete: "set null" }),
+  result: text("result").$type<"W" | "L" | "T">(),
+}, (t) => [primaryKey({ columns: [t.seasonId, t.gameNo] })]);
+
 export const dataRefreshes = pgTable("data_refreshes", {
   id: serial("id").primaryKey(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),

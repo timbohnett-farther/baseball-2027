@@ -43,6 +43,13 @@
       "when": 1794466636635,
       "tag": "0005_store_gear",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794469412662,
+      "tag": "0006_season",
+      "breakpoints": true
     }
   ]
 }

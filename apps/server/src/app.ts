@@ -8,6 +8,7 @@ import { databaseStatus } from "./db/index.ts";
 import { webDist } from "./paths.ts";
 import { dataRefreshedAt, pool, teamPlayers, teamSummaries } from "./store.ts";
 import { gameRoutes } from "./games.ts";
+import { seasonRoutes } from "./season.ts";
 import { shopRoutes } from "./shop.ts";
 import { teamRoutes } from "./team.ts";
 
@@ -53,6 +54,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(teamRoutes);
   await app.register(gameRoutes);
   await app.register(shopRoutes);
+  await app.register(seasonRoutes);
 
   // Serve the built browser app; unknown non-API paths fall back to index.html for client routing.
   if (existsSync(webDist)) {

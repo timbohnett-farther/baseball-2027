@@ -126,7 +126,7 @@ function Pick<T extends string | number>({ label, options, value, onPick }: {
 
 /** "+120 coins · Win 100 · Shutout 50 ..." under a final band. */
 export function RewardLine({ reward }: { reward: NonNullable<import("@bb/sim").PlayedGame["reward"]> }) {
-  const names: Record<string, string> = { result: "Game", shutout: "Shutout", homers: "Homers", comeback: "Comeback", streak: "Streak" };
+  const names: Record<string, string> = { result: "Game", shutout: "Shutout", homers: "Homers", comeback: "Comeback", streak: "Streak", season: "Season bonus" };
   const parts = Object.entries(reward.coins).filter(([, v]) => v > 0).map(([k, v]) => `${names[k] ?? k} ${v}`);
   return (
     <div className="reward">
