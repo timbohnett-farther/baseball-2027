@@ -34,8 +34,29 @@ const MAX_INNINGS = 9;
  *      interactive games (its own seeded stream, so replays match), and Rally Breaker. A v7 log that never uses a team input at the
  *      "pro" difficulty with the computer's extras out of reach plays as v6 would; auto-sims (no user seat) are identical to v6.
  *  8 = W29: the throw-over limit (two) resets for every batter instead of lasting the whole match, for both sides.
+ *  9 = W29b: balance pass (TUNE9: shorter at-bats, more balls in play and hits, slower Rally fill) and, for new seasons, home/away alternation.
  */
-export const CURRENT_RULES: RulesVersion = 8;
+export const CURRENT_RULES: RulesVersion = 9;
+
+/**
+ * Every outcome knob rules 9 retunes, in one place (ARC 11.5-11.6 pace levers: at-bat length, contact/outcome mix, Rally fill).
+ * TUNE8 is the behaviour of rules 1-8 and must never change; TUNE9 is the W29b balance pass (docs/ACCEPTANCE.md, Soak).
+ */
+interface Tune {
+  /** Share of swung-at pitches that fouled off, in the zone and out of it (the user's own timing scales its foul chance by foulScale). */
+  foulZone: number; foulOff: number; foulScale: number;
+  /** Added to the contact chance on a swing. */
+  contactAdd: number;
+  /** Base chance a ball in play is a hit, and base home-run chance. */
+  hit: number; hr: number;
+  /** Added to the chance the pitcher throws a strike, and to the chance a batter swings at a strike (fewer walks and takes). */
+  zoneAdd: number; swingAdd: number;
+  /** Rally earned per positive Heat point (PUP 3.6 says 0.5). */
+  rallyGain: number;
+}
+const TUNE8: Tune = { foulZone: 0.42, foulOff: 0.5, foulScale: 1, contactAdd: 0, zoneAdd: 0, swingAdd: 0, hit: 0.29, hr: 0.05, rallyGain: 0.5 };
+const TUNE9: Tune = { foulZone: 0.25, foulOff: 0.32, foulScale: 0.65, contactAdd: 0.04, zoneAdd: 0.10, swingAdd: 0.08, hit: 0.35, hr: 0.06, rallyGain: 0.34 };
+const tuneOf = (c: Ctx): Tune => (c.rules >= 9 ? TUNE9 : TUNE8);
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -125,7 +146,7 @@ function award(c: Ctx, side: Side, id: number, base: number) {
   if (base === 0) return;
   const n = base > 0 && c.assist === side ? Math.round(base * ASSIST_MULT) : base;
   c.state.heat[id] = clamp((c.state.heat[id] ?? START_HEAT) + n, 0, HEAT_CAP);
-  if (base > 0) c.state.rally[side] = clamp(c.state.rally[side] + Math.floor(base * 0.5), 0, RALLY_CAP);
+  if (base > 0) c.state.rally[side] = clamp(c.state.rally[side] + Math.floor(base * tuneOf(c).rallyGain), 0, RALLY_CAP);
 }
 
 /** Heat for what one pitch did on its own. Strikeouts and walks also get their final award in playHeat. */
@@ -191,20 +212,21 @@ function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: Pi
   const tired = clamp((used - pitchLimit(pitcher)) / 15, 0, 1); // fades over ~15 pitches past the limit
   const stuff = z(p?.stuff) - tired, control = z(p?.control) - tired;
 
-  const zone = rng.next() < clamp(0.5 + 0.05 * control, 0.35, 0.65);
+  const t0 = tuneOf(c);
+  const zone = rng.next() < clamp(0.5 + 0.05 * control, 0.35, 0.65) + t0.zoneAdd;
   const swing = zone
-    ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye), 0.5, 0.85)
+    ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye), 0.5, 0.85) + t0.swingAdd
     : rng.next() < clamp(0.3 - 0.05 * z(b?.eye) + 0.03 * stuff, 0.1, 0.5);
   const fastball = rng.next() < 0.6;
   const mph = Math.round((fastball ? 93 + 0.3 * 10 * stuff : 85 + 0.2 * 10 * stuff) + (rng.next() - 0.5) * 4);
 
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
-  const mo = momentum(c, batter, pitcher);
+  const mo = momentum(c, batter, pitcher), t = tuneOf(c);
   const contact = zone
-    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff + mo, 0.6, 0.97)
-    : clamp(0.6 + 0.05 * z(b?.contact) - 0.06 * stuff + mo, 0.3, 0.85);
+    ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff + mo + t.contactAdd, 0.6, 0.97)
+    : clamp(0.6 + 0.05 * z(b?.contact) - 0.06 * stuff + mo + t.contactAdd, 0.3, 0.85);
   if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
-  const result = rng.next() < (zone ? 0.42 : 0.5) ? "foul" : "in_play";
+  const result = rng.next() < (zone ? t.foulZone : t.foulOff) ? "foul" : "in_play";
   return c.rules >= 3 ? { result, zone, mph, q: cpuContactQ(c, b?.contact, stuff) } : { result, zone, mph };
 }
 
@@ -343,7 +365,7 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     const prof = c.profile;
     const r = rng.next();
     type = pitchTypeFor(prof, r);
-    const zone = rng.next() < clamp((0.5 + 0.05 * control + prof.zone) / (cpuFx?.missScale ?? 1), 0.35, 0.65);
+    const zone = rng.next() < clamp((0.5 + 0.05 * control + prof.zone) / (cpuFx?.missScale ?? 1), 0.35, 0.65) + tuneOf(c).zoneAdd;
     const edge = () => (rng.next() < 0.5 ? -1 : 1) * (1.05 + rng.next() * 0.5);
     loc = zone ? zoneAim(prof, rng.next() * 2 - 1, rng.next() * 2 - 1)
       : rng.next() < 0.5 ? { x: edge(), y: (rng.next() * 2 - 1) * 1.4 } : { x: (rng.next() * 2 - 1) * 1.4, y: edge() };
@@ -369,7 +391,7 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   const edge = zone ? clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) - 0.6) / 0.4, 0, 1) : 0;
   const swing = swingKind
     ? swingKind !== "take"
-    : zone ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye) + c.profile.zoneSwing + (state.strikes === 2 ? c.profile.protect : 0), 0.5, 0.85)
+    : zone ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye) + c.profile.zoneSwing + (state.strikes === 2 ? c.profile.protect : 0), 0.5, 0.85) + tuneOf(c).swingAdd
       : rng.next() < clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) < 1.3 ? 0.4 : 0.22) - 0.05 * z(b?.eye) + 0.03 * stuff + c.profile.chase, 0.08, 0.55);
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
   // Rules v7: a computer batter may spend Heat on a bat ability once it has decided to swing (Comet needs a power swing, the rest a contact one).
@@ -379,17 +401,17 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     cpuPower = c.cpuActive?.def.id === "BAT_COMET";
   }
 
-  const mo = momentum(c, batter, pitcher);
+  const t = tuneOf(c), mo = momentum(c, batter, pitcher);
   const zc = z((b?.contact ?? 70) + (boost?.contact ?? 0));
   let contact = zone
-    ? clamp(0.85 + 0.04 * zc - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo, 0.5, 0.97)
-    : clamp(0.55 + 0.05 * zc - 0.06 * stuff - TYPE_WHIFF[type] + mo, 0.2, 0.8);
+    ? clamp(0.85 + 0.04 * zc - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo + t.contactAdd, 0.5, 0.97)
+    : clamp(0.55 + 0.05 * zc - 0.06 * stuff - TYPE_WHIFF[type] + mo + t.contactAdd, 0.2, 0.8);
   if (pfx) contact = Math.max(0.05, contact - pfx.whiffAdd);
-  let foul = zone ? 0.42 : 0.5;
+  let foul = zone ? t.foulZone : t.foulOff;
   if (swingKind) {
     // The user's timing decides most of it: a perfect swing is a very good one.
     contact = clamp(contact * (0.3 + 0.7 * q) + (swingKind === "contact" ? 0.06 : -0.04), 0.05, 0.97);
-    foul = clamp(0.55 - 0.35 * q, 0.15, 0.5);
+    foul = clamp(0.55 - 0.35 * q, 0.15, 0.5) * t.foulScale;
   }
   let cpuQ: number | undefined;
   const hitQ = () => (swingKind ? q : c.rules >= 3 ? (cpuQ ??= cpuContactQ(c, b?.contact, stuff)) : undefined);
@@ -422,8 +444,9 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
   const mo = momentum(c, batter, pitcher);
   const fx = swing?.fx;
   const popup = fx && swing!.q < fx.popupBelowQ ? 0.06 : 0; // Comet on a mistimed swing climbs too high
-  const hr = clamp(0.05 + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement) + (fx?.dHr ?? 0), 0.005, 0.28);
-  const hit = clamp(0.29 + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense + (fx?.dHit ?? 0) - popup, 0.12, 0.45);
+  const t = tuneOf(c);
+  const hr = clamp(t.hr + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement) + (fx?.dHr ?? 0), 0.005, 0.28);
+  const hit = clamp(t.hit + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense + (fx?.dHit ?? 0) - popup, 0.12, 0.45);
   let r = rng.next();
   if (r < hr) return "home_run";
   // One draw decides what kind of hit or out it is (drawn here so the fielding step below

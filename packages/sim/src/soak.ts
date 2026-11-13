@@ -1,8 +1,9 @@
 // AI-vs-AI soak for pace and balance numbers (W29). Not a test: `SOAK_N=200 node packages/sim/src/soak.ts`.
 // A bot (same policy as the computer, see makeBot) sits in the user seat against the engine's computer; the numbers
-// come from the event log. Teams are synthetic and even (rating 70), so win rates measure the bot, not the rosters.
+// come from the event log. Teams are synthetic and even (rating 70) unless SOAK_REAL=1 (MLB clubs from data/players.json).
+import { readFileSync } from "node:fs";
 import { createRng } from "./rng.ts";
-import { CURRENT_RULES, playInteractive } from "./game.ts";
+import { autoLineup, CURRENT_RULES, playInteractive } from "./game.ts";
 import { DIFFICULTIES, makeBot } from "./cpu.ts";
 import { blockingBudgetMs } from "../../../apps/web/src/presentation.ts";
 import type { Difficulty, GameEvent, RulesVersion, Side, SimPlayer, SimTeam, UserInput } from "./types.ts";
@@ -20,7 +21,27 @@ const team = (r: number, name: string): SimTeam => ({
   name, abbr: name.slice(0, 3).toUpperCase(), color: "#e0a458",
   lineup: [hitter(r, "C"), ...Array.from({ length: 8 }, () => hitter(r))], pitchers: [pitcher(r), pitcher(r)],
 });
-const away = team(70, "Away"), home = team(70, "Home");
+const synthAway = team(70, "Away"), synthHome = team(70, "Home");
+
+// SOAK_REAL=1: two different MLB clubs per game from the committed snapshot (data/players.json), each its best nine hitters
+// plus its best starter and two arms. Same shape as the server's mlbSimTeam, minus position slotting.
+interface Snap { teams: { id: number; name: string; abbreviation: string }[]; players: { id: number; name: string; lastName: string; position: string; bats: string; teamId: number; status: string; ratings: { overall: number; role: string; hitting: SimPlayer["batting"]; pitching: SimPlayer["pitching"] } }[] }
+const REAL = process.env.SOAK_REAL === "1";
+const snap: Snap | null = REAL ? JSON.parse(readFileSync(new URL("../../../data/players.json", import.meta.url), "utf8")) : null;
+function realTeam(teamId: number): SimTeam {
+  const t = snap!.teams.find((x) => x.id === teamId)!;
+  const roster = snap!.players.filter((p) => p.teamId === teamId && p.status === "Active").sort((a, b) => b.ratings.overall - a.ratings.overall);
+  const sim = (p: Snap["players"][number]): SimPlayer => ({ id: p.id, name: p.name, lastName: p.lastName, position: p.position, bats: p.bats === "L" || p.bats === "S" ? p.bats : "R", batting: p.ratings.hitting, pitching: p.ratings.pitching });
+  const hitters = roster.filter((p) => p.ratings.role === "H").slice(0, 9).map(sim);
+  const arms = roster.filter((p) => p.ratings.role === "SP" || p.ratings.role === "RP");
+  const sp = arms.find((p) => p.ratings.role === "SP") ?? arms[0];
+  return { name: t.name, abbr: t.abbreviation, color: "#b8bcc6", lineup: autoLineup(hitters), pitchers: [sp, ...arms.filter((p) => p !== sp).slice(0, 2)].map(sim) };
+}
+function teamsFor(seed: number): { away: SimTeam; home: SimTeam } {
+  if (!snap) return { away: synthAway, home: synthHome };
+  const ids = snap.teams.map((t) => t.id), a = seed % ids.length, b = (a + 1 + (Math.floor(seed / ids.length) % (ids.length - 1))) % ids.length;
+  return { away: realTeam(ids[a]), home: realTeam(ids[b]) };
+}
 
 const N = Number(process.env.SOAK_N ?? 200);
 const INNINGS = Number(process.env.SOAK_INNINGS ?? 3);
@@ -40,6 +61,7 @@ interface Row {
 const all: Row[] = [];
 
 function game(seed: number, bot: Difficulty, cpu: Difficulty, userSide: Side): Row {
+  const { away, home } = teamsFor(seed);
   const inputs: UserInput[] = [];
   const g = playInteractive({ away, home, seed, innings: INNINGS, rules: RULES, difficulty: cpu, userSide, inputs, auto: makeBot(bot, seed, userSide, { away, home }, INNINGS) });
   const r = g.result!;
@@ -63,7 +85,7 @@ function game(seed: number, bot: Difficulty, cpu: Difficulty, userSide: Side): R
   return row;
 }
 
-const out: string[] = [`soak: rules ${RULES}, ${INNINGS} innings, N=${N} per pairing, synthetic even teams (70/70)`];
+const out: string[] = [`soak: rules ${RULES}, ${INNINGS} innings, N=${N} per pairing, ${REAL ? "real MLB clubs (data/players.json)" : "synthetic even teams (70/70)"}`];
 for (const [bot, cpu] of PROFILE) {
   const rows: Row[] = [];
   const seedRng = createRng(0xC0FFEE + DIFFICULTIES.indexOf(bot) * 7 + DIFFICULTIES.indexOf(cpu));

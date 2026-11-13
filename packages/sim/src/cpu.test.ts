@@ -35,7 +35,7 @@ const replay = (seed: number, cpu: Difficulty, userSide: Side, inputs: UserInput
   playInteractive({ away, home, seed, innings: INNINGS, rules: 7, difficulty: cpu, userSide, inputs, startHeat });
 
 test("rules 8 is current and the profiles sit inside their bounds", () => {
-  assert.equal(CURRENT_RULES, 8);
+  assert.equal(CURRENT_RULES, 9);
   for (const d of DIFFICULTIES) for (const [k, [lo, hi]] of Object.entries(PROFILE_BOUNDS)) {
     const v = PROFILES[d][k as keyof typeof PROFILES.pro];
     const n = Array.isArray(v) ? v[0] : v; // mix is cumulative: its first cut is the fastball share

@@ -242,7 +242,7 @@ export async function gameRoutes(app: FastifyInstance) {
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
       const difficulty = req.body?.difficulty ?? "pro";
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7 && rules !== 8) || !isDifficulty(difficulty)) {
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7 && rules !== 8 && rules !== 9) || !isDifficulty(difficulty)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       const clientGameId = req.body?.clientGameId;

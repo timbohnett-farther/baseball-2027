@@ -161,7 +161,7 @@ test("rules 6: interactive logs replay to the same games", () => {
 
 // Golden tests for rules 7 (CPU abilities, Rally Breaker, throw-overs) and 8 (throw-over limit per batter). The user pitches as home
 // and throws over whenever allowed, so rules 8's reset shows up as a different game from rules 7 on the same seed and log policy.
-function cpuLog(seed: number, rules: 7 | 8, difficulty: "rookie" | "pro" | "allstar") {
+function cpuLog(seed: number, rules: 7 | 8 | 9, difficulty: "rookie" | "pro" | "allstar") {
   const inputs: UserInput[] = [];
   let pickoffs = 0;
   for (;;) {
@@ -178,7 +178,7 @@ function cpuLog(seed: number, rules: 7 | 8, difficulty: "rookie" | "pro" | "alls
         : { kind: "swing", swing: n % 7 === 0 ? "take" : n % 3 === 0 ? "power" : "contact", timing: ((n % 9) - 4) / 4, ...ability });
   }
 }
-const cpuRuns = (rules: 7 | 8) => (["rookie", "pro", "allstar"] as const).flatMap((d) => [1, 2, 3, 4].map((seed) => cpuLog(seed, rules, d)));
+const cpuRuns = (rules: 7 | 8 | 9) => (["rookie", "pro", "allstar"] as const).flatMap((d) => [1, 2, 3, 4].map((seed) => cpuLog(seed, rules, d)));
 
 test("rules 7: simulateGame output is unchanged", () => {
   const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 7 })));
@@ -202,4 +202,19 @@ test("rules 8: interactive logs replay to the same games, and the throw-over lim
   const throws = (rs: ReturnType<typeof cpuRuns>) => rs.reduce((n, r) => n + r.pickoffs, 0);
   assert.ok(throws(v8) > throws(v7), `v8 ${throws(v8)} throw-overs vs v7 ${throws(v7)}`);
   assert.equal(hash(v8.map((r) => r.result)), "57773509544fe732");
+});
+
+// Golden tests for rules 9 (W29b balance: shorter at-bats, more contact, slower Rally fill). Rules 1-8 above must not move.
+test("rules 9: simulateGame output differs from rules 8 and is pinned", () => {
+  const run = (rules: 8 | 9) => [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules })));
+  const pitches = (gs: ReturnType<typeof simulateGame>[][]) => gs.flat().reduce((n, g) => n + g.events.filter((e) => e.type === "pitch").length, 0);
+  const v8 = run(8), v9 = run(9);
+  assert.ok(pitches(v9) < pitches(v8), "rules 9 at-bats are shorter");
+  assert.equal(hash(v9.flat()), "2310cb20c5a78700");
+});
+
+test("rules 9: interactive logs replay to the same games and differ from rules 8", () => {
+  const v9 = cpuRuns(9);
+  assert.equal(hash(v9.map((r) => r.result)), "73c56815bb9e4a15");
+  assert.notEqual(hash(v9.map((r) => r.result)), hash(cpuRuns(8).map((r) => r.result)));
 });

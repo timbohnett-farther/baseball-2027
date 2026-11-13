@@ -23,7 +23,7 @@ const even = [team(70, 70, "Alpha"), team(70, 70, "Bravo")] as const;
 const sideOf = (s: GameState): Side => (s.half === "top" ? "away" : "home");
 const opp = (s: Side): Side => (s === "away" ? "home" : "away");
 const games = (n: number, away: SimTeam, home: SimTeam) =>
-  Array.from({ length: n }, (_, seed) => simulateGame({ away, home, seed, innings: 5 }));
+  Array.from({ length: n }, (_, seed) => simulateGame({ away, home, seed, innings: 5, rules: 8 }));
 /** What a base award pays: x1.25 rounded when the athlete's team trails by 3+ at the start of the pitch. */
 const pay = (base: number, assisted: boolean) => (assisted && base > 0 ? Math.round(base * 1.25) : base);
 const clamp100 = (n: number) => Math.max(0, Math.min(100, n));

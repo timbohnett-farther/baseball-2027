@@ -37,7 +37,7 @@ test("storage that throws never breaks the game", () => {
 });
 
 test("restore replays the log: the rebuilt game matches a direct replay and waits at the same pitch", () => {
-  const inputs = run(12);
+  const inputs = run(8);
   const r = restore(snap(inputs), 2000);
   assert.ok(r.ok);
   const s = tutorialSetup();

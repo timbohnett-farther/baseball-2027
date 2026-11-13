@@ -449,7 +449,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 9 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 10 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
