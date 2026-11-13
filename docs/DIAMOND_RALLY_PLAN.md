@@ -71,7 +71,7 @@ Working defaults (Tim to confirm or change): oldest device iPhone 12, 60fps with
 stylized realism, not full photoreal; stay on web Three.js; action shots default REDUCED with FULL/OFF settings;
 free/royalty-free rigs and motion libraries, no paid mocap.
 
-- [ ] W30 ROAD Work Order 0: audit of the current renderer, asset pipeline, presentation events and measured frame
+- [x] W30 ROAD Work Order 0: audit of the current renderer, asset pipeline, presentation events and measured frame
       cost. Report only, no feature code.
 - [ ] W31 ROAD WO1-2: quality harness (frame-time capture in the shot harness) + fidelity profiles/LOD tiers.
 - [ ] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
