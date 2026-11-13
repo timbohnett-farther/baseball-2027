@@ -1,9 +1,12 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { slotsFor, TEAM_COLORS, UNLOCKS, type ArcadeSeasonState, type Player } from "@bb/shared";
+import { eq } from "drizzle-orm";
+import { regularSide, slotsFor, TEAM_COLORS, UNLOCKS, type ArcadeSeasonState, type Player } from "@bb/shared";
 import { buildApp } from "./app.ts";
-import { closeDb, initDb } from "./db/index.ts";
+import { closeDb, getDb, initDb } from "./db/index.ts";
+import { games, seasonGames } from "./db/schema.ts";
+import { playInteractive, type SimTeam } from "@bb/sim";
 import { pool, startStore } from "./store.ts";
 
 let app: FastifyInstance;
@@ -110,4 +113,43 @@ test("arcade season: a full season pays what it reports, unlocks match the store
   assert.equal(career.seasons[0].format, 2);
   assert.equal(career.seasons[0].stars, stars);
   assert.equal((await app.inject({ url: "/api/season/career" })).statusCode, 401);
+});
+
+test("arcade season: sides alternate, new seasons start from the season number, legacy rows stay home", async () => {
+  const headers = await newManager("arc3", "10.0.2.3", TEAM_COLORS[2]);
+  const s = (await app.inject({ method: "POST", url: "/api/season", headers })).json() as ArcadeSeasonState;
+  const rows = await getDb().select().from(seasonGames).where(eq(seasonGames.seasonId, s.id)).orderBy(seasonGames.gameNo);
+  const sides = rows.map((r) => r.userSide);
+  sides.forEach((x, i) => { if (i) assert.notEqual(x, sides[i - 1]); });
+  assert.equal(sides[0], regularSide(1, s.number));
+  const setup = async () => (await app.inject({ method: "POST", url: "/api/games/interactive", headers, remoteAddress: "10.0.2.3", payload: { opponentTeamId: s.next!.opponent.id, seasonId: s.id } })).json() as { userSide: "home" | "away"; seed: number; innings: number; rules: number; difficulty: string; teams: { home: { name: string }; away: { name: string } } };
+  const first = await setup();
+  assert.equal(first.userSide, sides[0]);
+  assert.equal(first.teams[first.userSide].name, "arc3 club");
+  // A season started before alternation has null sides: the user is home, as before.
+  await getDb().update(seasonGames).set({ userSide: null }).where(eq(seasonGames.seasonId, s.id));
+  const legacy = await setup();
+  assert.equal(legacy.userSide, "home");
+  assert.equal(legacy.teams.home.name, "arc3 club");
+  // An away fixture plays end to end: the replay, the score and the win are the user's, not the home side's.
+  await getDb().update(seasonGames).set({ userSide: "away" }).where(eq(seasonGames.seasonId, s.id));
+  const away = await setup();
+  assert.equal(away.userSide, "away");
+  const inputs: unknown[] = [];
+  const play = () => playInteractive({ ...(away.teams as unknown as { away: SimTeam; home: SimTeam }), seed: away.seed, innings: away.innings, rules: away.rules as never, difficulty: away.difficulty as never, userSide: "away", inputs: inputs as never });
+  let out = play();
+  while (out.awaiting) {
+    inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : out.awaiting.role === "run" ? { kind: "run", action: "advance", send: [] }
+      : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out = play();
+  }
+  const fin = await app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, remoteAddress: "10.0.2.3", payload: { opponentTeamId: s.next!.opponent.id, seasonId: s.id, seed: away.seed, inputs, innings: away.innings, rules: away.rules, difficulty: away.difficulty, final: out.result!.final } });
+  assert.equal(fin.statusCode, 201, fin.body);
+  const g = fin.json() as { userSide: string; result: { final: { away: number; home: number } } };
+  assert.equal(g.userSide, "away");
+  const [saved] = await getDb().select().from(games).where(eq(games.id, (fin.json() as { id: number }).id));
+  assert.equal(saved!.userScore, out.result!.final.away);
+  assert.equal(saved!.opponentScore, out.result!.final.home);
+  assert.equal(saved!.result, out.result!.winner === null ? "T" : out.result!.winner === "away" ? "W" : "L");
 });

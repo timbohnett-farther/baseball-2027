@@ -13,7 +13,7 @@ export interface ObjectiveDef {
 }
 
 const sum = <T>(xs: T[], f: (x: T) => number) => xs.reduce((n, x) => n + f(x), 0);
-/** The user is always the home side. */
+/** Checks are written for a user on the home side; evaluateObjectives mirrors the game when the user played away. */
 const homePlays = (r: GameResult) => r.events.filter((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play" && e.state.half === "bottom");
 const homeRuns = (r: GameResult) => sum(r.box.batting.home, (b) => b.hr);
 const margin = (r: GameResult) => r.final.home - r.final.away;
@@ -74,7 +74,20 @@ export function pickObjectives(seed: number, gameNo: number, style: string, prev
   return ["win", scoutId, arcadeId];
 }
 
-/** Which of these objectives a finished game earned. */
-export function evaluateObjectives(ids: string[], result: GameResult): string[] {
-  return ids.filter((id) => BY_ID.get(id)?.check(result));
+const swap = <T>(o: { home: T; away: T }) => ({ home: o.away, away: o.home });
+
+/** The same game seen from the other dugout: sides, halves and ability sides flipped, so a home-side check reads the user's team. */
+function mirrored(r: GameResult): GameResult {
+  const flip = <S extends { half: "top" | "bottom" }>(s: S): S => ({ ...s, half: s.half === "top" ? "bottom" : "top" });
+  return {
+    ...r, winner: r.winner === null ? null : r.winner === "home" ? "away" : "home", final: swap(r.final),
+    box: { ...r.box, batting: swap(r.box.batting), pitching: swap(r.box.pitching), hits: swap(r.box.hits), linescore: swap(r.box.linescore) },
+    events: r.events.map((e) => ({ ...e, state: flip(e.state), ...(e.type === "ability" ? { side: e.side === "home" ? "away" : "home" } : {}) }) as GameEvent),
+  };
+}
+
+/** Which of these objectives a finished game earned for the user, who played `side` (the home side unless told otherwise). */
+export function evaluateObjectives(ids: string[], result: GameResult, side: "home" | "away" = "home"): string[] {
+  const r = side === "home" ? result : mirrored(result);
+  return ids.filter((id) => BY_ID.get(id)?.check(r));
 }

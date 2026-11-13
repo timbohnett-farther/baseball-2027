@@ -61,15 +61,16 @@ export function userSimTeam(name: string, color: string, players: Player[], seas
  * Pay out a finished game: coins by the rules in @bb/shared, plus a Legendary bat at win milestones.
  * The only place coins are ever added; the client never sends a coin amount.
  */
-async function payout(db: Db, userId: number, result: GameResult, outcome: "W" | "L" | "T"): Promise<NonNullable<PlayedGame["reward"]>> {
+async function payout(db: Db, userId: number, result: GameResult, outcome: "W" | "L" | "T", me: "home" | "away" = "home"): Promise<NonNullable<PlayedGame["reward"]>> {
   const history = await db.select({ result: games.result }).from(games).where(eq(games.userId, userId)).orderBy(desc(games.id));
   let streak = 0;
   for (const g of history) { if (g.result !== "W") break; streak++; }
   if (outcome === "W") streak++;
   const wins = history.filter((g) => g.result === "W").length + (outcome === "W" ? 1 : 0);
-  const trailedBy = Math.max(0, ...result.events.map((e) => e.state.score.away - e.state.score.home));
+  const opp = me === "home" ? "away" : "home";
+  const trailedBy = Math.max(0, ...result.events.map((e) => e.state.score[opp] - e.state.score[me]));
   const c = coinsFor({
-    result: outcome, shutout: result.final.away === 0, homers: result.box.batting.home.reduce((n, b) => n + b.hr, 0),
+    result: outcome, shutout: result.final[opp] === 0, homers: result.box.batting[me].reduce((n, b) => n + b.hr, 0),
     comeback: trailedBy >= 2, streak,
   });
   await db.update(users).set({ coins: sql`${users.coins} + ${c.total}` }).where(eq(users.id, userId));
@@ -156,9 +157,9 @@ async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: 
 }
 
 /** Settle a season game under whichever format the season uses and fold what it paid into the game's reward. */
-async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, reward: NonNullable<PlayedGame["reward"]>) {
+async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, reward: NonNullable<PlayedGame["reward"]>, side: "home" | "away" = "home") {
   if (season.format !== ARCADE_FORMAT) return addSeasonBonus(reward, await settleSeason(db, season, gameId, outcome));
-  const s = await settleArcade(db, season, gameId, outcome, result);
+  const s = await settleArcade(db, season, gameId, outcome, result, side);
   if (!s) return;
   await addSeasonBonus(reward, s.season);
   if (s.stars) reward.coins.stars = s.stars;
@@ -171,15 +172,15 @@ async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outco
  * Player development: everyone who appeared for the user earns XP (appearance, hits, homers,
  * strikeouts thrown, a win bonus). Levels come from XP alone, so a level-up is just a threshold crossed.
  */
-async function awardXp(db: Db, teamId: number, result: GameResult, outcome: "W" | "L" | "T"): Promise<NonNullable<NonNullable<PlayedGame["reward"]>["levelUps"]>> {
+async function awardXp(db: Db, teamId: number, result: GameResult, outcome: "W" | "L" | "T", me: "home" | "away" = "home"): Promise<NonNullable<NonNullable<PlayedGame["reward"]>["levelUps"]>> {
   const gained = new Map<number, { name: string; xp: number }>();
   const add = (id: number, name: string, xp: number) => {
     const g = gained.get(id) ?? { name, xp: 0 };
     g.xp += xp;
     gained.set(id, g);
   };
-  for (const b of result.box.batting.home) add(b.playerId, b.name, XP_RULES.appearance + b.h * XP_RULES.hit + b.hr * XP_RULES.homer);
-  for (const p of result.box.pitching.home) add(p.playerId, p.name, (gained.has(p.playerId) ? 0 : XP_RULES.appearance) + p.k * XP_RULES.strikeout);
+  for (const b of result.box.batting[me]) add(b.playerId, b.name, XP_RULES.appearance + b.h * XP_RULES.hit + b.hr * XP_RULES.homer);
+  for (const p of result.box.pitching[me]) add(p.playerId, p.name, (gained.has(p.playerId) ? 0 : XP_RULES.appearance) + p.k * XP_RULES.strikeout);
   if (outcome === "W") for (const g of gained.values()) g.xp += XP_RULES.win;
 
   const rows = await db.select({ playerId: userTeamPlayers.playerId, xp: userTeamPlayers.xp })
@@ -197,14 +198,15 @@ async function awardXp(db: Db, teamId: number, result: GameResult, outcome: "W" 
 
 export async function gameRoutes(app: FastifyInstance) {
   /** Both lineups for a game against an MLB team, or the reason it can't be played yet. */
-  async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown, develop = false): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null }> {
+  async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown, develop = false): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null; side: "home" | "away" }> {
     const db = getDb();
     // A season game must be the season's next scheduled one.
-    let season: SeasonRow | null = null;
+    let season: SeasonRow | null = null, side: "home" | "away" = "home";
     if (seasonId != null) {
       const sm = await seasonMatch(db, userId, seasonId, Number(opponentTeamId));
       if ("error" in sm) return sm;
       season = sm.season;
+      side = sm.side;
     }
     const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, userId));
     if (!team) return { error: "Draft your team first." };
@@ -213,7 +215,7 @@ export async function gameRoutes(app: FastifyInstance) {
     const players = await teamPlayers(db, team.id, develop);
     const opponent = mlbSimTeam(Number(opponentTeamId), new Set(players.map((p) => p.id)));
     if (!opponent) return { error: "Pick an MLB team to play." };
-    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear), season };
+    return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear), season, side };
   }
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
@@ -227,8 +229,8 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!isDifficulty(difficulty)) return reply.code(400).send({ error: "Pick Rookie, Pro or All-Star." });
     const id = Number(req.body!.opponentTeamId);
     const body: InteractiveSetup = {
-      seed: randomInt(0, 2 ** 31 - 1), innings: len.innings, rules: CURRENT_RULES, difficulty, userSide: "home",
-      opponent: { id, name: m.opponent.name, abbr: m.opponent.abbr }, teams: { away: m.opponent, home: m.me },
+      seed: randomInt(0, 2 ** 31 - 1), innings: len.innings, rules: CURRENT_RULES, difficulty, userSide: m.side,
+      opponent: { id, name: m.opponent.name, abbr: m.opponent.abbr }, teams: m.side === "home" ? { away: m.opponent, home: m.me } : { away: m.me, home: m.opponent },
     };
     return reply.code(201).send(body);
   });
@@ -256,28 +258,29 @@ export async function gameRoutes(app: FastifyInstance) {
       // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.
       const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId, rules < 3);
       if ("error" in m) return reply.code(400).send({ error: m.error });
-      const { team, opponent, me, season } = m;
+      const { team, opponent, me, season, side } = m;
       const len = matchInnings(req.body?.innings, season);
       if ("error" in len) return reply.code(400).send({ error: len.error });
       if (season?.format === ARCADE_FORMAT && rules < 7) return reply.code(400).send({ error: "Update the game to play this season." });
-      const teams = { away: opponent, home: me };
+      const other = side === "home" ? "away" : "home";
+      const teams = side === "home" ? { away: opponent, home: me } : { away: me, home: opponent };
       // A log that doesn't fit this seed, lineup or length throws mid-replay; that is a refusal, not a server fault.
       let result: GameResult | null = null;
-      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, difficulty, userSide: "home", inputs }).result; } catch { /* handled below */ }
+      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, difficulty, userSide: side, inputs }).result; } catch { /* handled below */ }
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
       const pace = cleanPace(req.body?.pace);
       if (pace) req.log.info({ pace, seed }, "match pace");
-      const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
-      const reward = await payout(db, req.user!.id, result, outcome);
+      const outcome = result.winner === null ? "T" : result.winner === side ? "W" : "L";
+      const reward = await payout(db, req.user!.id, result, outcome, side);
       const [row] = await db.insert(games).values({
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules, difficulty,
-        userSide: "home", teams, inputs, clientGameId, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
+        userSide: side, teams, inputs, clientGameId, userScore: result.final[side], opponentScore: result.final[other], result: outcome, coins: reward.total,
       }).returning();
-      if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward);
-      reward.levelUps = await awardXp(db, team.id, result, outcome);
-      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules, difficulty: row.difficulty };
+      if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward, side);
+      reward.levelUps = await awardXp(db, team.id, result, outcome, side);
+      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: side, teams, result, reward, rules: row.rules, difficulty: row.difficulty };
       return reply.code(201).send(body);
     },
   );

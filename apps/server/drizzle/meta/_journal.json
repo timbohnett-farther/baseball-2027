@@ -92,6 +92,13 @@
       "when": 1794776400000,
       "tag": "0012_games_client_id",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794862800000,
+      "tag": "0013_season_game_side",
+      "breakpoints": true
     }
   ]
 }

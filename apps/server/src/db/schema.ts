@@ -153,6 +153,8 @@ export const seasonGames = pgTable("season_games", {
   result: text("result").$type<"W" | "L" | "T">(),
   /** Format 2: the three objective ids for this fixture and the ones the game earned (null until played). */
   stars: jsonb("stars").$type<{ objectives: string[]; earned: string[] | null }>(),
+  /** Which dugout the user takes in this fixture. Null = home: seasons started before home/away alternation. */
+  userSide: text("user_side").$type<"home" | "away">(),
 }, (t) => [primaryKey({ columns: [t.seasonId, t.gameNo] })]);
 
 export const dataRefreshes = pgTable("data_refreshes", {

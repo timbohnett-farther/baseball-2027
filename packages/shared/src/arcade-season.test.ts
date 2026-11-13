@@ -123,3 +123,20 @@ test("unlocks: every three stars, items that exist in the store, nothing paid tw
   assert.deepEqual(unlocksBetween(27, 30).map((u) => u.coins), [100]);
   assert.deepEqual(unlocksBetween(30, 32), []);
 });
+
+test("home/away: seven fixtures alternate, the extra home game reverses next season", async () => {
+  const { regularSide, semiSide, finalSide } = await import("./arcade-season.ts");
+  const sides = (n: number) => Array.from({ length: 7 }, (_, i) => regularSide(i + 1, n));
+  for (const n of [1, 2, 3, 4]) {
+    const s = sides(n);
+    s.forEach((x, i) => { if (i) assert.notEqual(x, s[i - 1]); });
+  }
+  const home = (n: number) => sides(n).filter((x) => x === "home").length;
+  assert.deepEqual([home(1), home(2), home(3), home(4)], [4, 3, 4, 3]);
+  assert.equal(semiSide(0, 3), "home");
+  assert.equal(semiSide(2, 1), "away");
+  assert.equal(finalSide("home", "away", 0, 1), "away");
+  assert.equal(finalSide("away", "home", 1, 0), "home");
+  assert.equal(finalSide("home", "home", 2, 1), "away");
+  assert.equal(finalSide("away", "away", 0, 3), "home");
+});

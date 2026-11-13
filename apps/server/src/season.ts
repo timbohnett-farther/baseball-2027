@@ -28,12 +28,12 @@ async function nextGame(db: Db, seasonId: number) {
  * Before a game is played: the season must be the user's, still running, and its next game must be
  * against this opponent. Returns the season or the reason it can't be played.
  */
-export async function seasonMatch(db: Db, userId: number, seasonId: unknown, opponentTeamId: number): Promise<{ error: string } | { season: SeasonRow }> {
+export async function seasonMatch(db: Db, userId: number, seasonId: unknown, opponentTeamId: number): Promise<{ error: string } | { season: SeasonRow; side: "home" | "away" }> {
   const [season] = await db.select().from(seasons).where(and(eq(seasons.id, Number(seasonId)), eq(seasons.userId, userId)));
   if (!season || season.status === "done") return { error: "That season is over." };
   const next = await nextGame(db, season.id);
   if (!next || next.opponentTeamId !== opponentTeamId) return { error: "That's not your next season game." };
-  return { season };
+  return { season, side: next.userSide ?? "home" };
 }
 
 /** Playoff opponents by round: the 3rd, 2nd, then strongest club. */

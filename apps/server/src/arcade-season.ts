@@ -4,7 +4,7 @@
 import { randomInt } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import {
-  ARCADE_FORMAT, ARCADE_GAMES, ARCADE_REWARDS, MAX_SEASON_STARS, STYLE_INFO, UNLOCKS, buildLeague, computeStandings, cpuGame, cpuResults, semiPairs,
+  ARCADE_FORMAT, ARCADE_GAMES, ARCADE_REWARDS, MAX_SEASON_STARS, STYLE_INFO, UNLOCKS, buildLeague, computeStandings, cpuGame, cpuResults, finalSide, regularSide, semiPairs, semiSide,
   suggestedDifficulty, unlocksBetween,
   type ArcadeBracket, type ArcadeCareer, type ArcadeClub, type ArcadeFixture, type ArcadeLeague, type ArcadeOpponent, type ArcadeSeasonState, type ArcadeStanding,
   type BracketGame, type BracketSlot, type ClubProfile, type GameRow, type LifetimeTrack, type ObjectiveView, type SuggestedDifficulty, type Unlock,
@@ -50,7 +50,7 @@ export async function startArcadeSeason(db: Db, userId: number, teamId: number, 
   const rows = league.clubs.map((c, i) => {
     const objectives = objectivesFor(seed, i + 1, c.style, previous);
     previous = objectives;
-    return { seasonId: season!.id, gameNo: i + 1, round: 0, opponentTeamId: c.id, stars: { objectives, earned: null } satisfies Stars };
+    return { seasonId: season!.id, gameNo: i + 1, round: 0, opponentTeamId: c.id, userSide: regularSide(i + 1, number), stars: { objectives, earned: null } satisfies Stars };
   });
   await db.insert(seasonGames).values(rows);
   return season!;
@@ -172,23 +172,23 @@ export interface ArcadeSettled {
 }
 
 /** After a season game is recorded: credit its stars, advance the season, pay bonuses and grant unlocks. */
-export async function settleArcade(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult): Promise<ArcadeSettled | null> {
+export async function settleArcade(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, side: "home" | "away" = "home"): Promise<ArcadeSettled | null> {
   const league = season.league!;
   const [next] = await db.select().from(seasonGames).where(and(eq(seasonGames.seasonId, season.id), isNull(seasonGames.gameId))).orderBy(seasonGames.gameNo).limit(1);
   if (!next) return null;
   const objectives = next.stars?.objectives ?? ["win"];
   // A tied playoff game is replayed, so only the game that decides a fixture pays stars.
-  const earned = outcome === "T" && next.round > 0 ? [] : evaluateObjectives(objectives, result);
+  const earned = outcome === "T" && next.round > 0 ? [] : evaluateObjectives(objectives, result, side);
   const stars: Stars = { objectives, earned };
   const before = await lifetimeStars(db, season.userId);
   await db.update(seasonGames).set({ gameId, result: outcome, stars }).where(and(eq(seasonGames.seasonId, season.id), eq(seasonGames.gameNo, next.gameNo)));
 
   let bonus = 0;
   const patch: Partial<SeasonRow> = {};
-  const addRow = (gameNo: number, round: number, opponentTeamId: number) => {
+  const addRow = (gameNo: number, round: number, opponentTeamId: number, userSide: "home" | "away") => {
     const prev = objectives.filter((o) => o !== "win");
     const style = league.clubs.find((c) => c.id === opponentTeamId)!.style;
-    return db.insert(seasonGames).values({ seasonId: season.id, gameNo, round, opponentTeamId, stars: { objectives: round === next.round && outcome === "T" ? objectives : ["win", ...pickObjectives(season.seed, gameNo, style, prev).slice(1)], earned: null } });
+    return db.insert(seasonGames).values({ seasonId: season.id, gameNo, round, opponentTeamId, userSide, stars: { objectives: round === next.round && outcome === "T" ? objectives : ["win", ...pickObjectives(season.seed, gameNo, style, prev).slice(1)], earned: null } });
   };
 
   if (next.round === 0) {
@@ -203,7 +203,7 @@ export async function settleArcade(db: Db, season: SeasonRow, gameId: number, ou
       if (top.includes(0)) {
         bonus += ARCADE_REWARDS.berth;
         const [home, away] = semiPairs(top).find((p) => p.includes(0))!;
-        await addRow(ARCADE_GAMES + 1, 1, home === 0 ? away : home);
+        await addRow(ARCADE_GAMES + 1, 1, home === 0 ? away : home, semiSide(top.indexOf(0), top.indexOf(home === 0 ? away : home)));
         Object.assign(patch, { status: "playoffs", playoffRound: 1 });
       } else {
         Object.assign(patch, { status: "done", finishedAt: new Date() });
@@ -212,7 +212,7 @@ export async function settleArcade(db: Db, season: SeasonRow, gameId: number, ou
   } else {
     if (outcome === "T") {
       const [{ last }] = await db.select({ last: sql<number>`max(${seasonGames.gameNo})` }).from(seasonGames).where(eq(seasonGames.seasonId, season.id));
-      await addRow(Number(last) + 1, next.round, next.opponentTeamId);
+      await addRow(Number(last) + 1, next.round, next.opponentTeamId, side);
     } else if (outcome === "L") {
       Object.assign(patch, { status: "done", playoffLosses: season.playoffLosses + 1, finishedAt: new Date() });
     } else if (next.round === 1) {
@@ -225,7 +225,8 @@ export async function settleArcade(db: Db, season: SeasonRow, gameId: number, ou
       const [h, a] = pairs[otherIdx]!;
       const clubOf = (id: number) => league.clubs.find((c) => c.id === id)!;
       const r = cpuGame(season.seed, 10 + otherIdx, clubOf(h), clubOf(a));
-      await addRow(next.gameNo + 1, 2, r.homeScore > r.awayScore ? h : a);
+      const rival = r.homeScore > r.awayScore ? h : a;
+      await addRow(next.gameNo + 1, 2, rival, finalSide(side, rival === h ? "home" : "away", top.indexOf(0), top.indexOf(rival)));
       Object.assign(patch, { playoffRound: 2, playoffWins: 1 });
     } else {
       bonus += ARCADE_REWARDS.champion;

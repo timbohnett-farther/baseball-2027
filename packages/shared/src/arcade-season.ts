@@ -226,6 +226,30 @@ export function semiPairs(topFour: number[]): [[number, number], [number, number
   return [[topFour[0]!, topFour[3]!], [topFour[1]!, topFour[2]!]];
 }
 
+export type Side = "home" | "away";
+
+/**
+ * Regular-season side for fixture `gameNo` (1-7). Alternates; the parity flips with the season
+ * number, so one season's extra home game (4 home / 3 away) is an extra road game the next.
+ */
+export function regularSide(gameNo: number, seasonNumber: number): Side {
+  return (gameNo + seasonNumber) % 2 === 0 ? "home" : "away";
+}
+
+/** Semifinal side: the higher seed (listed first by semiPairs) hosts. */
+export function semiSide(userSeed: number, opponentSeed: number): Side {
+  return userSeed < opponentSeed ? "home" : "away";
+}
+
+/**
+ * Final side (neutral stadium): avoid repeating the semifinal assignment where possible; if both
+ * finalists had the same one, the higher seed is home.
+ */
+export function finalSide(userSemi: Side, opponentSemi: Side, userSeed: number, opponentSeed: number): Side {
+  if (userSemi !== opponentSemi) return userSemi === "home" ? "away" : "home";
+  return userSeed < opponentSeed ? "home" : "away";
+}
+
 // --- The unlock track ----------------------------------------------------------------------
 
 export interface Unlock {
