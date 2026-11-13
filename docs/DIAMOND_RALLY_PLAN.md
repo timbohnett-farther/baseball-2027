@@ -31,7 +31,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
 
 ## Waves
 
-- [ ] W18 Baseline + match rules (ARC WO0-1): write `docs/BASELINE.md` (current sim/input/replay/UI interfaces mapped
+- [x] W18 (42ecb22) Baseline + match rules (ARC WO0-1): write `docs/BASELINE.md` (current sim/input/replay/UI interfaces mapped
       to PRD contracts, adapters listed). Then `ruleset` versioning, match config 1/3/5 innings (season and playoff
       locked to 3), walk-off, ten-run rule (ARC 3.4), no ties (extra-inning tiebreaker per ARC 3.3, remove MAX_INNINGS tie).
 - [ ] W19 Progression realignment + Heat/Rally economy (PUP 3): numeric Heat per athlete and team Rally meter with the PUP
