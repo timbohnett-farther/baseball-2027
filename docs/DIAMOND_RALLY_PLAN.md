@@ -39,7 +39,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
       normalized sidegrades; XP stops raising ratings (keep the level badge).
 - [x] W20 (8a5f878) Activation service + pitch/bat abilities (PUP 4-8): ability catalog, arm/cancel/commit/expire state machine,
       modifier pipeline, Comet, Laser, Gap Master, Second Swing, Mirage, Vortex. Unit + replay tests.
-- [ ] W21 Tap-only batting/pitching UI (ARC 4-6, 9): four pitch buttons + 9-cell target grid, Contact/Power, power-up
+- [x] W21 (fb96d89) Tap-only batting/pitching UI (ARC 4-6, 9): four pitch buttons + 9-cell target grid, Contact/Power, power-up
       chips with plain-language disabled reasons, safe-area layout. Replaces the Super button.
 - [ ] W22 Fielding + throwing (ARC 7, PUP 9): automatic fielder selection, contextual action button, base targets,
       recommended throw; Wall Reaper, Acrobat, Cannon Arm.
