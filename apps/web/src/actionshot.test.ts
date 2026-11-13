@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { playInteractive, simulateGame, tutorialSetup, type GameEvent, type UserInput } from "@bb/sim";
 import {
-  ActionShotDirector, BASE_XZ, CATALOG, effectiveMode, holdWithShot, MIN_CAM_Y, MIN_FIGURE_GAP, scoreEvent, shotPose,
+  ActionShotDirector, BASE_XZ, CATALOG, effectiveMode, holdWithShot, MIN_CAM_Y, MIN_FIGURE_GAP, scoreEvent, shotPose, slideAxes,
   SHOT_CAP, SHOT_MAX_MS, SHOT_MIN_MS, SHOT_SKIP_MS, type ActionShotMode,
 } from "./actionshot.ts";
 import { ACTION_SHOT_MODES, getActionShots, setActionShots } from "./actionshots.ts";
@@ -203,6 +203,17 @@ test("camera poses stay above the ground and clear of every standing figure", ()
     }
   }
   assert.deepEqual(shotPose("contact", 0, true), shotPose("contact", 1, true), "still means no camera move");
+});
+
+test("every action camera looks toward -z, where the park is built", () => {
+  for (const p of [0, 0.5, 1]) {
+    for (const c of ["contact", "release"] as const) { const s = shotPose(c, p, false); assert.ok(s.look[2] < s.pos[2], `${c} ${p}`); }
+    for (let b = 0; b < 4; b++) {
+      const s = shotPose("slide", p, false, b), a = slideAxes(b);
+      assert.ok(s.look[2] < s.pos[2], `slide ${b} ${p}`);
+      assert.ok(a.nz > 0 && Math.abs(Math.hypot(a.dx, a.dz) - 1) < 1e-9 && Math.abs(a.dx * a.nx + a.dz * a.nz) < 1e-9, `axes ${b}`);
+    }
+  }
 });
 
 test("the actionShots setting defaults to reduced and round-trips", () => {

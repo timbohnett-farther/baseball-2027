@@ -1,5 +1,8 @@
 # Baseball 2027 — Architecture
 
+> **Authority.** Older examples in this document (any-contact home runs, nearly unhittable pitches, 4-6 s and 8-12 s cinematics) are historical.
+> Current rules live in `docs/DIAMOND_RALLY_PLAN.md` and `docs/ACCEPTANCE.md`: action shots run 0.75-1.2 s, are skippable after 250 ms, target 1-3 per match with a hard cap of 4; the probability-model sim stays.
+
 A web game where you draft real MLB players, play games with them, and earn
 rewards (coins and special items) for winning. Hosted on Railway.
 

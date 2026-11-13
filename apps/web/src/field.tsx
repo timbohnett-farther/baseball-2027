@@ -6,7 +6,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { getQuality, QUALITY_PROFILE } from "./quality.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
-import { holdWithShot, shotPose, type ShotPlan } from "./actionshot.ts";
+import { holdWithShot, shotPose, slideAxes, type ShotPlan } from "./actionshot.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -25,6 +25,10 @@ const FIELD_POS = [V(0, 0, -18.4), V(0, 0, 2.2), V(17, 0, -24), V(8, 0, -35), V(
 const HOME_LOOK = V(0, 1.2, -26);
 const FREEZE = 0.35; // contact freeze (s, real time) for tier 1-2 plays
 
+/** Plate-crossing point (metres, x across, y height) from a recorded pitch location; the zone is -1..1 and the strike zone is about 0.45 m wide and 0.5-1.1 m high. */
+const pitchSpot = (s: { x: number; y: number }): [number, number] => [s.x * 0.24, Math.max(0.1, 0.8 + s.y * 0.3)];
+/** Field angle (0 = straight to centre, + = first-base side) for a recorded spray: 0 left line .. 1 right line. */
+const sprayAngle = (spray: number) => (spray - 0.5) * 1.5;
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const rnd = (i: number, k: number) => { const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); };
 const polar = (r: number, a: number) => V(Math.sin(a) * r, 0, -Math.cos(a) * r);
@@ -34,7 +38,7 @@ interface Tween { t: number; delay: number; dur: number; fn: (p: number) => void
 // The named cameras of VISUAL_DESIGN 3.3. A big play queues a shot list; each shot runs on the
 // shot clock (playback seconds) and may slow or freeze the action under it. An empty queue is the
 // gameplay camera. `ride` ends early once the ball lands.
-type ShotKind = "barrel" | "dust" | "ride" | "drive" | "hero" | "dive" | "contact" | "release" | "slide";
+type ShotKind = "barrel" | "dust" | "ride" | "drive" | "hero" | "dive" | "contact" | "release" | "slide" | "broadcast";
 interface Shot { kind: ShotKind; dur: number; scale?: number | ((t: number) => number); target?: THREE.Object3D | null; still?: boolean; base?: number }
 const RAMP = (t: number) => 0.25 + Math.min(1, t / 0.6) * 0.75; // slow-mo easing back to full speed
 const barrel = (dur = FREEZE): Shot => ({ kind: "barrel", dur, scale: 0 });
@@ -352,6 +356,10 @@ class Director {
   private shake = 0;
   private plan: ShotPlan | null = null;
   private slideBase = 1;
+  private shotEvent: GameEvent | null = null; // the event the planned action shot replays
+  private lastPitch: Extract<GameEvent, { type: "pitch" }> | null = null;
+  private ump!: THREE.Group;
+  private staged: { kind: ShotKind; hidden: [THREE.Object3D, boolean][]; actors: THREE.Group[]; restore: (() => void)[] } | null = null;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
   private prof = QUALITY_PROFILE[getQuality()]; // graphics tier, read once per renderer
   private raf = 0; private last = performance.now();
@@ -399,7 +407,7 @@ class Director {
       this.fielders.push(f); this.scene.add(f);
     });
     // Plate umpire in navy, set behind the catcher; on-deck hitter waiting in the circle on the first-base side.
-    const ump = makePlayer(new THREE.Color("#1b2236"), false, 2, true);
+    const ump = this.ump = makePlayer(new THREE.Color("#1b2236"), false, 2, true);
     ump.position.set(0.35, 0, 3.4); ump.scale.y = PLAYER_SCALE * 0.78; ump.rotation.y = Math.PI;
     this.scene.add(ump);
     this.onDeck = makePlayer(this.colors.away, true, 4);
@@ -540,14 +548,16 @@ class Director {
       for (const w of batch) { w.fn(1); w.end?.(); }
     }
     this.ballFlying = false;
+    this.unstage();
     if (this.shots.length) this.cutTo([]); // hard cut back only if a sequence was running; routine events ease
   }
 
   /** Replace the shot list; the first shot (or the gameplay camera) starts with a hard cut. */
   private cutTo(shots: Shot[]) {
     const a = this.actionShot();
-    // The action shot owns the tail of the hold; the result sequence is fitted into whatever is left before it.
-    this.shots = a ? [...fitShots(shots, Math.max(0.12, this.budget - a.dur)), a] : fitShots(shots, this.budget);
+    // One owner per highlight: an eligible event gets the broadcast view for the result, then its action shot in the tail
+    // of the hold. The older barrel/dust/ride/hero sequence only runs when there is no action shot.
+    this.shots = a ? [{ kind: "broadcast", dur: Math.max(0.12, this.budget - a.dur), scale: 1 }, a] : fitShots(shots, this.budget);
     this.shotT = 0; this.cut = true;
   }
 
@@ -595,6 +605,8 @@ class Director {
     this.flush();
     this.view = cameraViewFor(e);
     this.plan = plan;
+    this.shotEvent = e;
+    if (e.type === "pitch") this.lastPitch = e;
     this.budget = holdWithShot(blockingBudgetMs(e), plan) / 1000 / this.speed;
     this.syncHalf(e);
     this.syncPitcher(e);
@@ -685,8 +697,9 @@ class Director {
     const dur = Math.min(0.5, Math.max(0.3, 0.55 - (e.mph - 70) * 0.006));
     const i = e.state.score.away * 7 + e.state.score.home * 3 + e.state.balls * 11 + e.state.strikes * 13 + e.state.outs * 17 + e.mph;
     const side = rnd(i, 3) < 0.5 ? -1 : 1;
-    const tx = e.zone ? (rnd(i, 1) - 0.5) * 0.4 : side * (0.3 + rnd(i, 2) * 0.35);
-    const ty = e.zone ? 0.5 + rnd(i, 4) * 0.6 : rnd(i, 5) < 0.5 ? 0.2 : 1.3;
+    let tx = e.zone ? (rnd(i, 1) - 0.5) * 0.4 : side * (0.3 + rnd(i, 2) * 0.35);
+    let ty = e.zone ? 0.5 + rnd(i, 4) * 0.6 : rnd(i, 5) < 0.5 ? 0.2 : 1.3;
+    if (e.shot) { [tx, ty] = pitchSpot(e.shot); } // recorded location when the event carries it
     const from = V(0.1, 1.95, -16.8), to = V(tx, ty, 0);
     const pitcher = this.fielders[0];
     this.tween(0.35, (p) => { pitcher.rotation.x = 0.35 * Math.sin(p * Math.PI); });
@@ -728,7 +741,7 @@ class Director {
     if (cinematic) { this.shake = o === "home_run" || o === "triple" ? 0.35 : 0.15; this.pop.intensity = 14; }
     this.burstDust.burst(V(0, 0.15, 0.2), cinematic ? 220 : 40, cinematic ? 7 : 3.5);
     this.swing(0, false);
-    const ang = (rnd(idx, 1) - 0.5) * 1.35;
+    const ang = e.shot ? sprayAngle(e.shot.spray) : (rnd(idx, 1) - 0.5) * 1.35;
     const side = ang < 0 ? -1 : 1;
     let outcomeFielder: THREE.Group | null = null;
     const trot = o === "home_run" && cinematic ? 1.1 : 0.5; // seconds per base; a homer is admired, not sprinted
@@ -788,6 +801,122 @@ class Director {
       : e.tier === 1 ? [on("hero", batter, 1.4), on("drive", batter, 0.8)]
       : [on("hero", batter, 0.9)];
     this.cutTo([barrel(), dust(e.tier === 1 ? 0.9 : 0.55), ride(o === "home_run" ? 3.4 : 2.4), ...closer]);
+  }
+
+  // --- action-shot staging ---------------------------------------------------------------
+  // By the time an action shot runs, the live scene has moved on (the batter is a runner, the ball is far away). Each
+  // shot re-enacts its moment from the event's recorded facts with fresh figures, posed every frame from the shot clock,
+  // and hides everything that would stand in the frame. Presentation only; nothing here touches the sim.
+
+  private stageIn(kind: ShotKind) {
+    const e = this.shotEvent;
+    if (!e) return;
+    const hidden: [THREE.Object3D, boolean][] = [];
+    const hide = (o: THREE.Object3D | null | undefined) => { if (o) { hidden.push([o, o.visible]); o.visible = false; } };
+    hide(this.batter); this.runners.forEach((r) => hide(r)); hide(this.onDeck); hide(this.fielders[1]); hide(this.ump);
+    const st: NonNullable<Director["staged"]> = this.staged = { kind, hidden, actors: [], restore: [] };
+    const side = this.battingSide(e), team = this.teams[side];
+    const actor = (id: number | null, bat: boolean) => {
+      const g = makePlayer(this.colors[side], bat, id ?? 0);
+      dress(g, team, id === null ? null : this.player(side, id));
+      this.scene.add(g); st.actors.push(g);
+      return g;
+    };
+    if (kind === "contact" && e.type === "play") {
+      const b = actor(e.batterId, true);
+      b.position.set(-0.95, 0, 0.3);
+    } else if (kind === "slide") {
+      const id = e.type === "run" ? e.runnerId : e.type === "play" ? e.batterId : null;
+      const grp = new THREE.Group();
+      const body = actor(id, false);
+      this.scene.remove(body); grp.add(body); this.scene.add(grp); st.actors.push(grp);
+      body.name = "slider";
+    }
+    const pf = (i: number) => {
+      const f = this.fielders[i];
+      const pos = f.position.clone(), rot = f.rotation.clone();
+      st.restore.push(() => { f.position.copy(pos); f.rotation.copy(rot); });
+      return f;
+    };
+    if (kind === "release") pf(0);
+    if (kind === "slide") pf({ 1: 2, 2: 3, 3: 5 }[Math.min(3, Math.max(1, this.slideBase)) as 1 | 2 | 3]);
+    this.ball.visible = true;
+    this.drift.points.visible = false; this.burstDust.points.visible = false;
+  }
+
+  private unstage() {
+    const st = this.staged;
+    if (!st) return;
+    this.staged = null;
+    st.actors.forEach((a) => this.scene.remove(a));
+    st.restore.forEach((r) => r());
+    st.hidden.forEach(([o, v]) => { o.visible = v; });
+    this.ball.visible = false;
+    this.drift.points.visible = true; this.burstDust.points.visible = true;
+  }
+
+  private syncStage() {
+    const s = this.shots[0];
+    const kind = s && (s.kind === "contact" || s.kind === "release" || s.kind === "slide") ? s.kind : null;
+    if (this.staged && this.staged.kind !== kind) this.unstage();
+    if (!kind || !s) return;
+    if (!this.staged) this.stageIn(kind);
+    if (!this.staged) return;
+    const q = s.still ? 0.5 : clamp01(this.shotT / s.dur);
+    if (kind === "contact") this.poseContact(q);
+    else if (kind === "release") this.poseRelease(q);
+    else this.poseSlide(q);
+  }
+
+  private poseContact(q: number) {
+    const e = this.shotEvent, b = this.staged?.actors[0];
+    if (!b || !e || e.type !== "play") return;
+    // Swing through: the contact frame sits at q = 0.3 (a still shot holds q = 0.5, a moment after contact).
+    const p = clamp01(0.55 + 0.45 * q / 0.6);
+    const bat = b.getObjectByName("bat");
+    b.rotation.y = 0.65 * p - 0.1; // chest stays turned toward the open-side camera (far enough round and it would show his back)
+    if (bat) { bat.rotation.z = -(0.41 + 0.8 * p); bat.rotation.x = -0.58; } // level through the zone, pointing out toward the pitcher
+    b.updateMatrixWorld(true);
+    const hit = bat ? bat.localToWorld(V(0, 0.75, 0)) : V(0, 1, 0);
+    const c0 = V(-0.2, 0.95, -0.15);
+    const t = q - 0.3;
+    if (t < 0) { this.ball.position.copy(c0).add(V(0.05, 0.1, -6 * t)).setY(c0.y + 0.15 - 0.5 * t); return; } // arriving from the pitcher
+    const sh = e.shot, ang = sh ? sprayAngle(sh.spray) : 0;
+    const kind = sh?.kind ?? "fly", str = sh?.strength ?? 1;
+    const v = 14 + 8 * str, vy = kind === "grounder" ? 1.2 : kind === "liner" ? 6 : 13 + 3 * str;
+    const tt = t * 0.7; // seconds of flight shown
+    this.ball.position.set(c0.x + Math.sin(ang) * v * tt, Math.max(0.15, c0.y + vy * tt - 4.9 * tt * tt), c0.z - Math.cos(ang) * v * tt);
+    if (t < 0.06) this.ball.position.lerp(hit, 1 - t / 0.06); // leaves the barrel
+  }
+
+  private poseRelease(q: number) {
+    const p = this.fielders[0];
+    const k = Math.min(1, q / 0.35);
+    p.rotation.order = "YXZ";
+    p.rotation.set(0.5 * Math.sin(k * Math.PI / 2), -0.7 * k, -0.3 * k); // lean, shoulders turned side-on, tilt over the front leg
+    p.position.set(0, 0, -18.4 + 0.9 * clamp01(q / 0.35));
+    const sh = this.lastPitch?.shot, [tx, ty] = sh ? pitchSpot(sh) : [0, 0.8];
+    const hand = V(p.position.x + 0.5, 2.0 - 0.2 * k, p.position.z + 0.5 + 0.2 * k);
+    if (q < 0.3) { this.ball.position.copy(hand).add(V(0, 0.2 * (0.3 - q), -0.5 * (0.3 - q))); return; } // cocked behind the hand
+    const f = clamp01((q - 0.3) / 0.7);
+    this.ball.position.lerpVectors(hand, V(tx, ty, 0), f);
+    this.ball.position.y -= 0.9 * f * f * (sh && sh.type === "curve" ? 1.4 : 1);
+  }
+
+  private poseSlide(q: number) {
+    const e = this.shotEvent, grp = this.staged?.actors[0];
+    if (!e || !grp) return;
+    const a = slideAxes(this.slideBase);
+    const body = grp.getObjectByName("slider");
+    grp.rotation.y = Math.atan2(-a.dx, -a.dz);
+    if (body) body.rotation.set(1.25, Math.PI, 0);
+    const run = 1.7 - 1.35 * q; // feet this far short of the bag: still sliding in, arriving as the shot ends
+    grp.position.set(a.bx - a.dx * run, 0.05, a.bz - a.dz * run);
+    const f = this.fielders[{ 1: 2, 2: 3, 3: 5 }[Math.min(3, Math.max(1, this.slideBase)) as 1 | 2 | 3]];
+    f.position.set(a.bx - a.nx * 0.6 + a.dx * 0.1, 0, a.bz - a.nz * 0.6 + a.dz * 0.1);
+    f.rotation.order = "YXZ";
+    f.rotation.set(0.5 + 0.15 * q, Math.atan2(a.nx, a.nz), 0);
+    this.ball.position.set(f.position.x + a.nx * 0.45, 0.6, f.position.z + a.nz * 0.45).lerp(V(a.bx - a.dx * run, 0.25, a.bz - a.dz * run), clamp01(q * 1.2));
   }
 
   private at(p: THREE.Vector3) { const o = new THREE.Object3D(); o.position.copy(p); return o; }
@@ -878,7 +1007,9 @@ class Director {
     this.pop.intensity *= Math.exp(-real * 9);
     const kind = this.shots[0]?.kind;
     this.rim.intensity = 1.2 + (kind === "barrel" || kind === "dust" ? 1.6 : 0);
-    this.ball.scale.setScalar(kind && kind !== "ride" ? 0.5 : 1); // oversized for the long gameplay lens only
+    // Oversized for the long gameplay lens only; every action shot keeps one size, whatever its camera.
+    this.ball.scale.setScalar(kind === "contact" || kind === "release" || kind === "slide" ? 0.7 : kind && kind !== "ride" && kind !== "broadcast" ? 0.5 : 1);
+    this.syncStage();
     this.updateCamera(real);
     this.renderer.render(this.scene, this.cam);
     if (SHOT_MODE) { this.publishStrikeZone(); this.publishStats(now); }

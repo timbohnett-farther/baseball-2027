@@ -267,20 +267,32 @@ export const BASE_XZ: [number, number][] = [[0, 0], [19.4, -19.4], [0, -38.8], [
 export const MIN_CAM_Y = 0.4;
 export const MIN_FIGURE_GAP = 1.2;
 
-/** `p` runs 0..1 over the shot; a `still` shot holds p at the midpoint so it is a plain cut with no camera move. */
+/** Geometry shared by the slide camera and the slide staging: travel direction d into the base and the camera side n (always toward +z, so the park is behind the shot). */
+export function slideAxes(base: number) {
+  const b = Math.min(3, Math.max(0, base));
+  const [bx, bz] = BASE_XZ[b], [px, pz] = BASE_XZ[(b + 3) % 4];
+  let dx = bx - px, dz = bz - pz;
+  const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+  let nx = -dz, nz = dx;
+  if (nz < 0) { nx = -nx; nz = -nz; }
+  return { bx, bz, dx, dz, nx, nz };
+}
+
+/**
+ * `p` runs 0..1 over the shot; a `still` shot holds p at the midpoint so it is a plain cut with no camera move.
+ * Every pose looks toward -z: the park (stands, wall, towers) is only built beyond the plate, so a camera that looks
+ * the other way sees black.
+ */
 export function shotPose(camera: ShotCamera, p: number, still: boolean, base = 1): ShotPose {
   const q = still ? 0.5 : Math.min(1, Math.max(0, p));
   switch (camera) {
-    case "contact": // ground level on the third-base side, across the plate and batter's box, slowly pushing in
-      return { pos: [-3.6 + 0.5 * q, MIN_CAM_Y + 0.05, -1.4 + 0.2 * q], look: [-0.2, 0.55, 0.3], fov: 32 };
-    case "release": // behind the mound, over the pitcher's shoulder toward the plate
-      return { pos: [0.9, 1.75, -21.1 + 0.6 * q], look: [0, 1.2, -2], fov: 24 };
-    case "slide": { // base level, outside the diamond, looking across the bag
-      const [bx, bz] = BASE_XZ[Math.min(3, Math.max(0, base))];
-      let ox = bx, oz = bz + 19.4; // outward from the diamond's centre
-      const len = Math.hypot(ox, oz) || 1; ox /= len; oz /= len;
-      const d = 3.4 - 0.4 * q;
-      return { pos: [bx + ox * d - oz * 1.6, MIN_CAM_Y, bz + oz * d + ox * 1.6], look: [bx, 0.45, bz], fov: 34 };
+    case "contact": // low, first-base side of the plate, looking across the open stance: swing-through, bat and ball with the stadium behind
+      return { pos: [3.6 - 0.3 * q, 1.0, 3.6 - 0.2 * q], look: [-0.7, 1.05, -1.1], fov: 30 };
+    case "release": // plate side, off the line to the mound: release pose and the ball in flight with the stands behind the pitcher
+      return { pos: [3.4, 1.4, -10.4 + 0.4 * q], look: [0.1, 1.3, -17.8], fov: 22 };
+    case "slide": { // low and outside, looking across the bag at runner and fielder
+      const a = slideAxes(base), d = 4.4 - 0.4 * q;
+      return { pos: [a.bx + a.nx * d, 0.6, a.bz + a.nz * d], look: [a.bx - a.dx * 0.4, 0.85, a.bz - a.dz * 0.4], fov: 34 };
     }
   }
 }

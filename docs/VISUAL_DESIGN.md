@@ -1,5 +1,8 @@
 # Baseball Game Visual Design PRD
 
+> **Authority.** Older examples in this document (any-contact home runs, nearly unhittable pitches, 4-6 s and 8-12 s cinematics) are historical.
+> Current rules live in `docs/DIAMOND_RALLY_PLAN.md` and `docs/ACCEPTANCE.md`: action shots run 0.75-1.2 s, are skippable after 250 ms, target 1-3 per match with a hard cap of 4; the probability-model sim stays.
+
 Nov 2, 2026 · Tim Bohnett
 
 This document tells the graphic designer what to build so that every screen in the game, from the home page to the box score to the walk-off replay, looks and feels like the four reference photos: a frozen instant of contact, shallow depth of field, dirt and chalk in the air, dark cinematic backgrounds with warm light on the player. Big plays get a dedicated close-up presentation system. Everything else borrows the same light, palette, and type so the game reads as one world.

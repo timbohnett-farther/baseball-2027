@@ -116,7 +116,7 @@ export function mlbSimTeam(teamId: number, exclude: Set<number> = new Set()): Si
 
 function played(row: typeof games.$inferSelect, opponent: { id: number; name: string; abbr: string }): PlayedGame {
   // rules: a game replays under the ruleset it was played with, so later rule changes never rewrite history.
-  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules, difficulty: row.difficulty };
+  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules, difficulty: row.difficulty, facts: true }; // facts: descriptive only, feeds Watch action shots
   // autoField: games saved before fielding taps existed have none in their log; the play stands as rolled.
   const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs, autoField: true }).result! : simulateGame(input);
   return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result, rules: row.rules, difficulty: row.difficulty };
@@ -266,7 +266,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const teams = side === "home" ? { away: opponent, home: me } : { away: me, home: opponent };
       // A log that doesn't fit this seed, lineup or length throws mid-replay; that is a refusal, not a server fault.
       let result: GameResult | null = null;
-      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, difficulty, userSide: side, inputs }).result; } catch { /* handled below */ }
+      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, difficulty, userSide: side, inputs, facts: true }).result; } catch { /* handled below */ }
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
@@ -295,7 +295,7 @@ export async function gameRoutes(app: FastifyInstance) {
     // You're the home team: you always get the last at-bat.
     const teams = { away: opponent, home: me };
     const seed = randomInt(0, 2 ** 31 - 1);
-    const result = simulateGame({ ...teams, seed, innings: len.innings, rules: CURRENT_RULES });
+    const result = simulateGame({ ...teams, seed, innings: len.innings, rules: CURRENT_RULES, facts: true });
     const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
     const reward = await payout(db, req.user!.id, result, outcome);
 

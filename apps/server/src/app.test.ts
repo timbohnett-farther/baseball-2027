@@ -176,12 +176,12 @@ test("play a game against an MLB team, then see it in your history", async () =>
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: yankees.id } })).json();
   assert.equal(setup.userSide, "home");
   const inputs: unknown[] = [];
-  let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: [] });
+  let out = playInteractive({ ...setup.teams, facts: true, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: [] });
   while (out.awaiting) {
     inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
       : out.awaiting.role === "run" ? { kind: "run", action: "advance", send: [] }
       : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
-    out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: inputs as never });
+    out = playInteractive({ ...setup.teams, facts: true, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: inputs as never });
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body }).then((r) => r);
   const bad = { opponentTeamId: yankees.id, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, final: { away: 99, home: 0 } };
@@ -191,7 +191,13 @@ test("play a game against an MLB team, then see it in your history", async () =>
   assert.equal(saved.statusCode, 201, saved.body);
   assert.deepEqual(saved.json().result.final, out.result!.final);
   const reloaded = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
-  assert.deepEqual(reloaded.result.events, out.result!.events);
+  assert.deepEqual(reloaded.result.events, JSON.parse(JSON.stringify(out.result!.events))); // JSON drops -0
+  // Facts are descriptive: with `shot` removed, the saved replay is byte-for-byte the log a facts-free engine plays.
+  const plain = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: inputs as never }).result!;
+  const noShot = (evs: object[]) => evs.map((e) => { const { shot: _shot, ...rest } = e as Record<string, unknown>; return rest; });
+  assert.deepEqual(noShot(reloaded.result.events), noShot(plain.events));
+  assert.ok(reloaded.result.events.some((e: { shot?: unknown }) => e.shot), "Watch replays carry shot facts");
+  assert.deepEqual({ ...reloaded.result, events: 0 }, { ...plain, events: 0 }, "final, winner and box are unchanged by facts");
 
   // The offline queue may upload the same finished game twice: the second try returns the first game and pays nothing.
   const coinsBefore = (await app.inject({ url: "/api/store", headers })).json().coins;
@@ -486,7 +492,7 @@ test("abilities: a rules 5 game with ability inputs replays and finishes; bad ab
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
-  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 5, userSide: "home", inputs: inputs as never });
+  const play = () => playInteractive({ ...setup.teams, facts: true, seed: setup.seed, innings: 3, rules: 5, userSide: "home", inputs: inputs as never });
   let out = play();
   while (out.awaiting) {
     const a = out.awaiting;
@@ -504,7 +510,7 @@ test("abilities: a rules 5 game with ability inputs replays and finishes; bad ab
   assert.equal(saved.statusCode, 201, saved.body);
   const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.equal(replay.rules, 5);
-  assert.deepEqual(replay.result.events, out.result!.events);
+  assert.deepEqual(replay.result.events, JSON.parse(JSON.stringify(out.result!.events))); // JSON drops -0
 });
 
 test("fielding: a rules 5 game with throw and ability choices on field inputs replays and finishes; a bad base is refused", async () => {
@@ -520,7 +526,7 @@ test("fielding: a rules 5 game with throw and ability choices on field inputs re
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
-  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 5, userSide: "home", inputs: inputs as never });
+  const play = () => playInteractive({ ...setup.teams, facts: true, seed: setup.seed, innings: 3, rules: 5, userSide: "home", inputs: inputs as never });
   let out = play();
   while (out.awaiting) {
     const a = out.awaiting;
@@ -536,7 +542,7 @@ test("fielding: a rules 5 game with throw and ability choices on field inputs re
   const saved = await finish(base);
   assert.equal(saved.statusCode, 201, saved.body);
   const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
-  assert.deepEqual(replay.result.events, out.result!.events);
+  assert.deepEqual(replay.result.events, JSON.parse(JSON.stringify(out.result!.events))); // JSON drops -0
 });
 
 test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs replays and finishes; bad run inputs are refused", async () => {
@@ -552,7 +558,7 @@ test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs repla
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: any[] = [];
-  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 6, userSide: "home", inputs: inputs as never });
+  const play = () => playInteractive({ ...setup.teams, facts: true, seed: setup.seed, innings: 3, rules: 6, userSide: "home", inputs: inputs as never });
   let out = play();
   let steals = 0, picks = 0;
   while (out.awaiting) {
@@ -573,7 +579,7 @@ test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs repla
   assert.equal(saved.statusCode, 201, saved.body);
   const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.equal(replay.rules, 6);
-  assert.deepEqual(replay.result.events, out.result!.events);
+  assert.deepEqual(replay.result.events, JSON.parse(JSON.stringify(out.result!.events))); // JSON drops -0
   assert.equal((await finish({ ...base, final: { away: 99, home: 0 } })).statusCode, 409);
   for (const bad of [{ kind: "run", action: "steal", from: "third" }, { kind: "run", action: "pickoff", at: "home" }, { kind: "run", action: "advance", send: ["home"] }, { kind: "run", action: "dive" }]) {
     assert.equal((await finish({ ...base, inputs: [bad] })).statusCode, 400, JSON.stringify(bad));
@@ -600,7 +606,7 @@ test("difficulty: a rules 7 game stores its CPU difficulty and replays with CPU 
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
-  const play = () => playInteractive({ ...setup.teams, seed: SEED, innings: 3, rules: 7, difficulty: "allstar", userSide: "home", inputs: inputs as never });
+  const play = () => playInteractive({ ...setup.teams, facts: true, seed: SEED, innings: 3, rules: 7, difficulty: "allstar", userSide: "home", inputs: inputs as never });
   let out = play();
   while (out.awaiting) {
     const a = out.awaiting;
@@ -620,5 +626,5 @@ test("difficulty: a rules 7 game stores its CPU difficulty and replays with CPU 
   assert.equal(saved.json().difficulty, "allstar");
   const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.equal(replay.difficulty, "allstar");
-  assert.deepEqual(replay.result.events, out.result!.events);
+  assert.deepEqual(replay.result.events, JSON.parse(JSON.stringify(out.result!.events))); // JSON drops -0
 });

@@ -26,10 +26,10 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 | PUP 17.6 MVP done | GAP | See Wall Reaper below; Anvil/Ricochet and others are candidates not built. Playtest explainability is EVIDENCE_MISSING. |
 | W32 action shots: replay outcome unchanged | PASS | actionshot.test.ts replay-hash invariance across the setting and director playback; shotfacts.test.ts; goldens 1-9 unchanged |
 | W32 action shots: budgets and skip | PASS | actionshot.test.ts: 0.75-1.2 s, skip after 250 ms, cap 4 (full) / 3 (reduced), no shot on routine plays or live ball; holdWithShot shared by duel.tsx and game.tsx |
-| W32 action shots: framing, no clipping | PASS (desktop) | pose clearance test; phone captures reviewed (shot-contact, shot-release, shot-slide); touch layout `--phone --check` 6/6 ok |
-| W32 action shots: draw calls < 250 | PASS (desktop headless Chromium) | `shot.mjs --perf`: contact 47, release 68, slide 108 (pitch 170 max); not device evidence |
+| W32 action shots: framing, no clipping | PARTIAL (desktop) | The earlier PASS rested on a pose test that did not look at the figures: shot-slide showed an empty base, and the park did not render. W32b restaged each shot from the event's `shot` facts, fixed the camera so the park renders, and reviewed after-captures (shots-w32b/after2, after3): slide shows runner low and fielder at the bag with the ball; release shows the pitcher leaning with the ball; contact shows the batter from the open side with the ball leaving, but the bat is mostly hidden behind the shoulder and the swing-through is not read (arms are baked into the merged rig). `--phone --check` duel-* 5/5 ok |
+| W32 action shots: draw calls < 250 | PASS (desktop headless Chromium) | W32b `shot.mjs --perf`: contact 77, release 55, slide 103; not device evidence |
 | W32 action shots: device feel, frame time on phone | EVIDENCE_MISSING | no device run |
-| W32 action shots: shots per match | PARTIAL | auto-sim 30 seeds: full mean 1.40 (max 4), reduced mean 0.80 (max 2), below the 1-3 target; server re-sim does not set facts, so Watch gets CONTACT only |
+| W32 action shots: shots per match | PARTIAL | auto-sim 30 seeds, no retune: full mean 1.40 (max 4), reduced mean 0.80 (max 2), below the 1-3 target. W32b: the server re-sim, immediate-finish and saved-replay all set `facts`, so Watch gets the same shots; tests show outcomes and hashes identical with `shot` removed |
 
 Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows). W29b changed no row status; the 17.3 row stays partial.
 

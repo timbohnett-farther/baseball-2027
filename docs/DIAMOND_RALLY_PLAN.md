@@ -77,6 +77,7 @@ free/royalty-free rigs and motion libraries, no paid mocap.
 - [x] W31 ROAD WO1-2: quality harness (frame-time capture in the shot harness) + fidelity profiles/LOD tiers. Shipped 47ba7a7: __renderStats + shot.mjs --perf, seeded cosmetic RNG, mesh merge (pitch 321 to 174 calls), High/Standard/Battery tiers.
 - [x] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
       W28's celebration budgets. Shipped 5be30fe (commits 9bc48b4, 792a4e6, 5be30fe): CONTACT, MOUND_RELEASE, SLIDE_TAG; `actionShots` setting (full/reduced/off).
+  W32b (fix): shots staged from the event's `shot` facts with fresh posed figures, hidden live actors and dust, cameras all looking -z so the park renders; one owner per eligible highlight (broadcast then action shot); server re-sim sets `facts`. Open: bat/swing-through read, Director begin/finish/skip not used by production (SkipPlay timer), shot-frequency retune dropped.
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
@@ -115,3 +116,18 @@ SLICE details folded into the waves (read 2026-11-13; prompts at SLICE 571-720, 
   grayscale), golden replays across render rates. Device numbers need a real iPhone.
 - SLICE WO14: real playtest (Tim + Micah). Not something an agent can pass.
 - Not adopted: the slice manifest that disables the season, Rally Breaker and the other 8 abilities (Tim keeps them).
+
+### Kimi audit of the W32 build (found 2026-11-13 15:25)
+
+`NEXT-BUILD-INSTRUCTIONS.md` and `evidence/work-orders/wo0-current-build/audit-and-next-plan.md` in the Kimi folder.
+Kimi audited a copy of this repo taken mid-W32 (before 5be30fe), so each finding needs checking against HEAD.
+It keeps Tim's decisions (MLB draft, all 11 abilities, Rally Breaker, full season, web/PWA, probability-model sim).
+Six packages, mapped to our waves:
+- A (green repo, one immediate-finish vs saved-replay response contract for `shot` facts, docs authority note) = W32b.
+- B/C (presentation-only transform recorder so a shot replays the recorded play; one lifecycle owner shared by
+  production and tests; no double cinematic with the older barrel/dust/ride/hero chain; no camera-dependent ball
+  scaling; scene-aware `canFrame`; early/mid/late capture fixtures per family) = W32b where small, rest W32c.
+- D (realistic rig + stadium) = W33/W34, still blocked on the rig source. E = W35. F = SLICE WO14 playtest.
+- Shot frequency (full 1.40, reduced 0.80 per match) and the 2.8-minute match estimate: no retuning and no added
+  delays until a real playtest.
+- Separate maintenance item: `npm ci` reports 8 dependency vulnerabilities (6 moderate, 2 high); no force upgrade.
