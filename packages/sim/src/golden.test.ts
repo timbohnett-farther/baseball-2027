@@ -25,7 +25,7 @@ const team = (r: number, name: string, superBat = false): SimTeam => ({
 const away = team(72, "Away"), home = team(68, "Home", true);
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 
-function scriptedLog(innings: number, rules: 1 | 2 | 3 | 4, abilities = false, startHeat?: number): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
+function scriptedLog(innings: number, rules: 1 | 2 | 3 | 4 | 5, abilities = false, startHeat?: number): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
   const inputs: UserInput[] = [];
   for (;;) {
     const out = playInteractive({ away, home, seed: 7, innings, rules, userSide: "home", inputs, ...(startHeat === undefined ? {} : { startHeat }) });
@@ -102,4 +102,47 @@ test("rules 4: an interactive log that spends abilities replays to the same game
   const { inputs, result } = scriptedLog(3, 4, true, 100);
   assert.ok(inputs.some((i) => i.kind !== "field" && i.ability));
   assert.equal(hash(result), "76368dd13ed556b4");
+});
+
+// Golden tests for ruleset 5 (fielding throws and field abilities), captured before baserunning and rules 6 existed.
+test("rules 5: simulateGame output is unchanged", () => {
+  const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 5 })));
+  assert.equal(hash(all.flat()), "2fe9c63061335065");
+});
+
+test("rules 5: an interactive input log replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 5);
+  assert.equal(inputs.length, 65);
+  assert.equal(hash(result), "e64775c8594cd0d4");
+});
+
+test("rules 5: an interactive log that spends abilities replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 5, true, 100);
+  assert.ok(inputs.some((i) => i.kind !== "field" && i.ability));
+  assert.equal(inputs.length, 65);
+  assert.equal(hash(result), "76368dd13ed556b4");
+});
+
+// The scripted log above never reaches a close ball, so this one pins the v5 field path (throws, glove taps, field abilities).
+function fieldLog(seed: number, abilities: boolean): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
+  const inputs: UserInput[] = [];
+  for (;;) {
+    const out = playInteractive({ away, home, seed, innings: 5, rules: 5, userSide: "home", inputs, startHeat: 100 });
+    if (!out.awaiting) return { inputs, result: out.result };
+    const n = inputs.length, a = out.awaiting;
+    const usable = abilities ? a.abilities.filter((x) => x.available && !x.needsDirection) : [];
+    const ability = usable.length ? { ability: { id: usable[0].id } } : {};
+    const throwTo = a.ball?.throws ? { throwTo: a.ball.throws.options[n % a.ball.throws.options.length] } : {};
+    inputs.push(a.role === "pitch" ? { kind: "pitch", type: (["fastball", "slider", "change", "curve"] as const)[n % 4], aim: { x: ((n * 7) % 11) / 5 - 1, y: ((n * 3) % 9) / 4 - 1 } }
+      : a.role === "field" ? { kind: "field", timing: ((n % 5) - 2) / 2, ...throwTo, ...ability }
+        : { kind: "swing", swing: n % 4 === 0 ? "take" : "contact", timing: ((n % 9) - 4) / 4 });
+  }
+}
+
+test("rules 5: interactive logs with glove taps, throws and field abilities replay to the same games", () => {
+  const runs = Array.from({ length: 30 }, (_, seed) => [fieldLog(seed, false), fieldLog(seed, true)]).flat();
+  const taps = runs.flatMap((r) => r.inputs).filter((i) => i.kind === "field");
+  assert.ok(taps.length > 10, `only ${taps.length} glove taps`);
+  assert.ok(taps.some((i) => i.kind === "field" && i.ability));
+  assert.equal(hash(runs.map((r) => r.result)), "6528f131100a1cb9");
 });
