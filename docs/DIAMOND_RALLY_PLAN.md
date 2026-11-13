@@ -75,8 +75,8 @@ free/royalty-free rigs and motion libraries, no paid mocap.
 - [x] W30 ROAD Work Order 0: audit of the current renderer, asset pipeline, presentation events and measured frame
       cost. Report only, no feature code.
 - [x] W31 ROAD WO1-2: quality harness (frame-time capture in the shot harness) + fidelity profiles/LOD tiers. Shipped 47ba7a7: __renderStats + shot.mjs --perf, seeded cosmetic RNG, mesh merge (pitch 321 to 174 calls), High/Standard/Battery tiers.
-- [ ] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
-      W28's celebration budgets.
+- [x] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
+      W28's celebration budgets. Shipped 5be30fe (commits 9bc48b4, 792a4e6, 5be30fe): CONTACT, MOUND_RELEASE, SLIDE_TAG; `actionShots` setting (full/reduced/off).
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.

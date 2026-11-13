@@ -24,6 +24,12 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 | PUP 17.4 integration | PASS (partial) | game.test.ts full games with and without abilities, soak AI-vs-AI 1000 games. Not covered: two-player local, pause-during-ability, low-perf render. |
 | PUP 17.5 presentation/accessibility | PASS (partial) | invariance.test.ts (reduced motion identical hashes), shot.mjs checks. Grayscale/colourblind not checked. |
 | PUP 17.6 MVP done | GAP | See Wall Reaper below; Anvil/Ricochet and others are candidates not built. Playtest explainability is EVIDENCE_MISSING. |
+| W32 action shots: replay outcome unchanged | PASS | actionshot.test.ts replay-hash invariance across the setting and director playback; shotfacts.test.ts; goldens 1-9 unchanged |
+| W32 action shots: budgets and skip | PASS | actionshot.test.ts: 0.75-1.2 s, skip after 250 ms, cap 4 (full) / 3 (reduced), no shot on routine plays or live ball; holdWithShot shared by duel.tsx and game.tsx |
+| W32 action shots: framing, no clipping | PASS (desktop) | pose clearance test; phone captures reviewed (shot-contact, shot-release, shot-slide); touch layout `--phone --check` 6/6 ok |
+| W32 action shots: draw calls < 250 | PASS (desktop headless Chromium) | `shot.mjs --perf`: contact 47, release 68, slide 108 (pitch 170 max); not device evidence |
+| W32 action shots: device feel, frame time on phone | EVIDENCE_MISSING | no device run |
+| W32 action shots: shots per match | PARTIAL | auto-sim 30 seeds: full mean 1.40 (max 4), reduced mean 0.80 (max 2), below the 1-3 target; server re-sim does not set facts, so Watch gets CONTACT only |
 
 Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows). W29b changed no row status; the 17.3 row stays partial.
 
