@@ -52,6 +52,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
       landscape.
 - [x] W28 (d142ed9) Pace + presentation (ARC 10, PUP 12): camera rules, score bug, celebration budgets, haptics, ability VFX/audio.
 - [x] W29 (4308676) Acceptance (ARC 17, PUP 17): golden replays, pace telemetry vs ARC 1.4 targets, balance report; see docs/ACCEPTANCE.md.
+- [x] W29b (e023966) Balance (rules 9) + acceptance gaps
 
 Each wave: verify `npm run typecheck && npm test && npm run build --workspace @bb/web`, commit, push
 (`env -u GITHUB_TOKEN -u GH_TOKEN git push origin main`), then `scripts/deploy-check.sh`. Tick the wave here with its SHA.
