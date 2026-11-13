@@ -71,6 +71,13 @@
       "when": 1794680906343,
       "tag": "0009_game_difficulty",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794684506343,
+      "tag": "0010_tutorial_status",
+      "breakpoints": true
     }
   ]
 }

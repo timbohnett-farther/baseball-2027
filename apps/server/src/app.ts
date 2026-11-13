@@ -11,6 +11,7 @@ import { gameRoutes } from "./games.ts";
 import { seasonRoutes } from "./season.ts";
 import { shopRoutes } from "./shop.ts";
 import { teamRoutes } from "./team.ts";
+import { tutorialRoutes } from "./tutorial.ts";
 
 /** Build the HTTP app. The database and player store must already be started. */
 export async function buildApp(opts: { logger?: boolean } = {}) {
@@ -56,6 +57,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(gameRoutes);
   await app.register(shopRoutes);
   await app.register(seasonRoutes);
+  await app.register(tutorialRoutes);
 
   // Serve the built browser app; unknown non-API paths fall back to index.html for client routing.
   if (existsSync(webDist)) {

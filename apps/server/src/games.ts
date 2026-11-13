@@ -124,7 +124,7 @@ const isAim = (a: unknown): a is Aim => !!a && typeof a === "object" && Number.i
 /** An ability request is optional; when present it has to name a real ability (its fit to the swing is the sim's call). */
 const isAbility = (a: unknown) => a === undefined || (!!a && typeof a === "object" && Object.hasOwn(ABILITIES, (a as AbilityRequest).id)
   && [undefined, "left", "right"].includes((a as AbilityRequest).direction));
-function isInput(i: unknown): i is UserInput {
+export function isInput(i: unknown): i is UserInput {
   if (!i || typeof i !== "object") return false;
   const u = i as Record<string, unknown>;
   if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim) && isAbility(u.ability);

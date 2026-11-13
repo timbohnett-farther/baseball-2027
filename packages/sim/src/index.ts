@@ -8,4 +8,5 @@ export type { AbilityDef, Actor, Effects, Ledger, Verdict } from "./ability.ts";
 export { CALLS } from "./text.ts";
 export { DIFFICULTIES, PROFILES, PROFILE_BOUNDS, isDifficulty, makeBot, profileOf } from "./cpu.ts";
 export type { Bot, CpuProfile } from "./cpu.ts";
+export { TUTORIAL_SEED, tutorialSetup } from "./tutorial.ts";
 export type * from "./types.ts";

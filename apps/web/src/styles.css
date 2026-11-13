@@ -556,3 +556,12 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
   .game:has(.tp) .run-go, .game:has(.tp) .run-burn { background: rgba(26, 31, 42, 0.62); min-height: 44px; }
   .game:has(.tp) .run-title { background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
 }
+
+/* Coach bubble: in flow under the panels on desktop; floats bottom-centre on a landscape phone, clear of the HUD. */
+.coach { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: rgba(11, 13, 18, 0.88); border: 1px solid var(--line, #2a3142); font-size: 13px; line-height: 1.25; pointer-events: none; }
+.coach p { margin: 0; flex: 1; }
+.coach-step { opacity: 0.6; font-size: 11px; }
+.coach button { pointer-events: auto; min-width: 44px; min-height: 44px; }
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .game:has(.tp) .coach { position: fixed; z-index: 4; left: 50%; transform: translateX(-50%); bottom: calc(38px + env(safe-area-inset-bottom)); width: min(300px, 36vw); margin: 0; padding: 2px 6px; font-size: 11px; }
+}

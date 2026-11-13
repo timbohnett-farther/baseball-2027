@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CURRENT_RULES, playInteractive, simulateGame, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
+import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
 import { FieldView } from "./field.tsx";
 import { DuelView } from "./duel.tsx";
 
@@ -64,12 +64,13 @@ function toMoment(setup: InteractiveSetup, stop: (a: NonNullable<ReturnType<type
 }
 
 /** `/?shot=duel-pitch` / `duel-swing` / `duel-field`: the real DuelView on a fixture setup, for checking the tap controls. */
-function DuelShot({ side, wait, kind }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal" }) {
+function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal"; coach?: "tutorial" | "hints" }) {
   const setup = useMemo(() => {
+    if (coach === "tutorial") return tutorialSetup();
     nextId = 1;
     const away = team("Harbor City", "HAR", "#1d4e89", AWAY), home = team("Ridgeback", "RDG", "#b3302a", HOME);
     return { seed: kind === "field" ? 2 : kind ? 3 : 7, innings: 3, rules: CURRENT_RULES, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
-  }, [side, kind]);
+  }, [side, kind, coach]);
   useEffect(() => {
     const t = setInterval(() => {
       if (document.querySelector(".tp") && document.querySelector(".field canvas")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
@@ -77,15 +78,21 @@ function DuelShot({ side, wait, kind }: { side: "home" | "away"; wait: number; k
     return () => clearInterval(t);
   }, [wait, side]);
   // Shot mode freezes the panels' auto-take, so the controls stay up however long the page takes to settle.
-  const shotInputs = useMemo(() => kind === "field" ? toMoment(setup, (a) => a.role === "field")
+  const shotInputs = useMemo(() => coach === "tutorial" && side === "away" ? toMoment(setup, (a) => a.role === "swing")
+    : coach === "hints" ? toMoment(setup, (a) => a.role === "swing" && a.state.strikes === 2)
+    : kind === "field" ? toMoment(setup, (a) => a.role === "field")
     : kind === "run" ? toMoment(setup, (a) => a.role === "run")
-    : kind === "steal" ? toMoment(setup, (a) => a.role === "swing" && !!a.run?.steal.length) : undefined, [setup, kind]);
-  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} shotInputs={shotInputs} /></div>;
+    : kind === "steal" ? toMoment(setup, (a) => a.role === "swing" && !!a.run?.steal.length) : undefined, [setup, kind, coach, side]);
+  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} onSkip={() => {}} shotInputs={shotInputs} coach={coach} /></div>;
 }
 
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
+  if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
+    if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }
+    return <DuelShot side={duel === "duel-tutorial-swing" || duel === "duel-hint" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} coach={duel === "duel-hint" ? "hints" : "tutorial"} />;
+  }
   if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal")
     return <DuelShot side={duel === "duel-pitch" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";

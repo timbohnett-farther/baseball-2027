@@ -29,7 +29,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-const toMe = (u: typeof users.$inferSelect): Me => ({ id: u.id, username: u.username, displayName: u.displayName, coins: u.coins });
+const toMe = (u: typeof users.$inferSelect): Me => ({ id: u.id, username: u.username, displayName: u.displayName, coins: u.coins, tutorial: u.tutorialStatus });
 
 declare module "fastify" {
   interface FastifyRequest { user: Me | null }

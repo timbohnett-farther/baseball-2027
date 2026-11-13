@@ -16,10 +16,10 @@ const phone = args.includes("--phone");
 const check = args.includes("--check");
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check");
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach" };
 const DUELS = Object.keys(CONTROLS);
 const moments = only.length ? only : check ? DUELS : ["pitch", "swing", "hr", "k", "single", "double", "final"];
-const HUD = ".scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .tp button, .tp .zone";
+const HUD = ".scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
   // The ballpark is a lazy chunk: wait for its canvas to exist and draw a few frames before sampling.
@@ -40,7 +40,7 @@ async function layoutCheck(page, m) {
       const b = vis[j];
       if (a.x < b.x + b.w - E && b.x < a.x + a.w - E && a.y < b.y + b.h - E && b.y < a.y + a.h - E) bad.push(`overlap: ${a.n} x ${b.n}`);
     }
-    if (phone && a.n.startsWith("") && /^(?:[^:]*button|tp-|pchip|swing|target|duel|approach|run-|chip|speed|link|primary)/.test(a.n) && Math.min(a.w, a.h) < 43.5 && a.w * a.h > 0) bad.push(`touch target <44px: ${a.n} ${a.w | 0}x${a.h | 0}`);
+    if (phone && a.n.startsWith("") && /^(?:[^:]*button|tp-|pchip|swing|target|duel|approach|run-|coach|chip|speed|link|primary)/.test(a.n) && Math.min(a.w, a.h) < 43.5 && a.w * a.h > 0) bad.push(`touch target <44px: ${a.n} ${a.w | 0}x${a.h | 0}`);
   }
   // Centre of the screen must be live ballpark pixels, not the flat page background.
   const cx = (vp.width / 2) | 0, cy = (vp.height / 2) | 0;

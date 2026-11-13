@@ -100,6 +100,9 @@ export interface CoinBreakdown {
   total: number;
 }
 
+/** One-time coins for finishing the Rookie Rally tutorial (ARC Appendix C: the completion badge). */
+export const TUTORIAL_REWARD = 100;
+
 export const COIN_RULES = {
   win: 100, loss: 20, tie: 40,
   shutout: 50,

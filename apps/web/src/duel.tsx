@@ -3,10 +3,12 @@
 // choices so far; each new choice reveals the next few events, which play out on the field.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { TutorialCompleteResponse } from "@bb/shared";
 import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
+import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
 import { AdvancePanel, RunStrip } from "./run.tsx";
 import { ABILITY_ICON, APPROACH_TEXT, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
@@ -34,7 +36,12 @@ const toPct = (v: number) => ((v + GRID) / (2 * GRID)) * 100;
 const SHOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("shot");
 
 /** `shotInputs` (dev screenshots only) starts the game already this far in, with every event shown. */
-export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[] }) {
+/**
+ * `coach` is Rookie Rally ("tutorial": guided lessons, no auto-take timers, completion goes to /api/tutorial/complete
+ * instead of the game record, and `onSkip` replaces Quit) or "hints" (one-time tips in a normal game).
+ */
+export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[]; coach?: "tutorial" | "hints"; onSkip?: () => void }) {
+  const tutorial = coach === "tutorial";
   const [inputs, setInputs] = useState<UserInput[]>(shotInputs ?? []);
   const [shown, setShown] = useState(shotInputs ? 1e6 : 0);
   const [speed, setSpeed] = useState(1);
@@ -48,7 +55,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
   }), [setup]);
 
   const g = useMemo(() => {
-    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs });
+    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, userSide: setup.userSide, inputs });
     shell.result = out.result ?? { ...shell.result, events: out.events };
     return out;
   }, [setup, inputs, shell]);
@@ -82,12 +89,18 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
   // Once it's over, the server replays our choices against the seed and records the game.
   const [saved, setSaved] = useState<"saving" | "saved" | string | null>(null);
   const [reward, setReward] = useState<PlayedGame["reward"]>(undefined);
+  const [badge, setBadge] = useState<number | null>(null);
   useEffect(() => {
     if (!g.result || saved) return;
     setSaved("saving");
+    if (tutorial) {
+      api<TutorialCompleteResponse>("/api/tutorial/complete", { body: { inputs } })
+        .then((r) => { setBadge(r.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
+      return;
+    }
     api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final } })
       .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
-  }, [g.result, saved, inputs, setup]);
+  }, [g.result, saved, inputs, setup, tutorial]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
 
   return (
@@ -100,7 +113,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
-          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : <button className="link" onClick={onDone}>Quit</button>}
+          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={onDone}>Quit</button>}
         </div>
       </div>
 
@@ -124,16 +137,18 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
           onThrow={(aim, ability) => submit(ability ? { kind: "pitch", type: pitchType, aim, ability } : { kind: "pitch", type: pitchType, aim })} />
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
-        <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
+        <SwingPanel still={tutorial} key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
           heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super} approach={approach} onApproach={setApproach}
           abilities={awaiting.abilities} actorId={awaiting.batterId}
           onSwing={(swing, timing, sup, ability) => submit({ kind: "swing", swing, timing, ...(sup ? { super: true } : {}), ...(ability ? { ability } : {}) })} />
       )}
       {awaiting?.role === "field" && awaiting.ball && (
-        <FieldPanel key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
+        <FieldPanel still={tutorial} key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
           kind={awaiting.ball.kind} throws={awaiting.ball.throws} heat={awaiting.state.heat[awaiting.ball.fielderId] ?? 0} abilities={awaiting.abilities}
           onGlove={(timing, throwTo, ability) => submit({ kind: "field", timing, ...(throwTo ? { throwTo } : {}), ...(ability ? { ability } : {}) })} />
       )}
+
+      {coach && !done && <Coach mode={coach} awaiting={awaiting} moveKey={inputs.length} />}
 
       {!awaiting && !done && lastCall && current.type !== "final" && (
         <p className="muted duel-note" aria-live="polite">{lastCall.text}</p>
@@ -146,9 +161,15 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
             <span>{(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text}</span>
           </div>
           {reward && <RewardLine reward={reward} />}
+          {tutorial && saved === "saved" && (
+            <div className="reward">
+              <span className="reward-total"><span className="coin" aria-hidden /> {badge ? `+${badge} coins` : "Rookie Rally done"}</span>
+              <small className="muted">{badge ? "Rookie Rally badge" : "You already have the badge."}</small>
+            </div>
+          )}
           {saved && saved !== "saving" && (
             <p className={`muted duel-note ${saved === "saved" ? "" : "bad"}`} aria-live="polite">
-              {saved === "saved" ? "Counted toward your record." : saved}
+              {saved === "saved" ? (tutorial ? "Practice games stay off your record." : "Counted toward your record.") : saved}
             </p>
           )}
           <BoxScoreView game={shell} />
@@ -334,7 +355,8 @@ function BreakerChip({ team, onGo }: { team: NonNullable<Awaiting["team"]>; onGo
   );
 }
 
-function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onApproach, onSwing, abilities, actorId }: {
+function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onApproach, onSwing, abilities, actorId, still }: {
+  /** Rookie Rally: nothing is taken for you. */ still?: boolean;
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType | null; mph: number; aim: Aim };
   sup: Awaiting["super"]; approach: Approach; onApproach: (a: Approach) => void;
   onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean, ability?: AbilityRequest) => void;
@@ -361,10 +383,10 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
 
   // No tap is a take (ARC 5.2): let it go by.
   useEffect(() => {
-    if (SHOT) return;
+    if (SHOT || still) return;
     const t = setTimeout(() => swing("take"), ms * 1.25);
     return () => clearTimeout(t);
-  }, [ms, swing]);
+  }, [ms, swing, still]);
 
   const pick = useCallback((a: Approach) => {
     onApproach(a);
@@ -429,7 +451,8 @@ const GLOVE_VERB = { grounder: "FIELD", liner: "DIVE", fly: "CATCH" } as const;
 const BASE_LABEL: Record<Base, string> = { first: "1B", second: "2B", third: "3B", home: "HOME" };
 
 /** A close ball on your defense: one timed tap, same gold window as a swing. Let it go and it drops in. On a force-play grounder you also pick the throw; the recommended base is pre-picked and pulses. */
-function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove }: {
+function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove, still }: {
+  still?: boolean;
   batter?: SimPlayer; fielder?: SimPlayer; kind: keyof typeof BALLS; throws?: { recommended: Base; options: Base[] };
   heat: number; abilities: AbilityStatus[]; onGlove: (timing: number, throwTo?: Base, ability?: AbilityRequest) => void;
 }) {
@@ -451,10 +474,10 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove }:
   }, [ms, armedRef]);
 
   useEffect(() => {
-    if (SHOT) return;
+    if (SHOT || still) return;
     const t = setTimeout(glove, ms * 1.25);
     return () => clearTimeout(t);
-  }, [ms, glove]);
+  }, [ms, glove, still]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -50,6 +50,8 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   passwordHash: text("password_hash").notNull(),
   coins: integer("coins").notNull().default(0),
+  /** Rookie Rally: null until the player finishes or skips it. */
+  tutorialStatus: text("tutorial_status").$type<"done" | "skipped">(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

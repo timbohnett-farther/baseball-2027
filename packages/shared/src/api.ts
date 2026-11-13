@@ -9,7 +9,13 @@ export interface Me {
   username: string;
   displayName: string;
   coins: number;
+  /** Rookie Rally tutorial: null = not yet played. */
+  tutorial: "done" | "skipped" | null;
 }
+
+/** Body of POST /api/tutorial/complete: the input log of the fixed tutorial game. */
+export interface TutorialCompleteRequest { inputs: unknown[] }
+export interface TutorialCompleteResponse { tutorial: "done"; coins: number; reward: number }
 
 export interface SignupRequest { username: string; password: string; displayName?: string }
 export interface LoginRequest { username: string; password: string }

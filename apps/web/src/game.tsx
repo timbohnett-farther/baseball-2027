@@ -1,13 +1,28 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import type { MyTeam, TeamSummary } from "@bb/shared";
-import { DIFFICULTIES, rallyAssist, type Difficulty, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
+import type { Me, MyTeam, TeamSummary } from "@bb/shared";
+import { DIFFICULTIES, rallyAssist, tutorialSetup, type Difficulty, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
+import { useCoachTips } from "./coach.tsx";
 import { Ovr } from "./players.tsx";
 import { RewardLine } from "./store.tsx";
 import { Empty, ErrorNote, Loading } from "./ui.tsx";
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
+
+const rookieSetup = tutorialSetup();
+
+/** The first-run offer (and, once played, nothing: replay lives next to Play it yourself). */
+function RookieRally({ status, onStart }: { status: Me["tutorial"] | undefined; onStart: () => void }) {
+  if (status !== null) return null;
+  return (
+    <section className="panel narrow">
+      <h3>New here? Try Rookie Rally</h3>
+      <p className="muted">One quick practice inning with tips on the screen. It does not count toward your record, and finishing earns a one-time coin bonus.</p>
+      <button className="primary" onClick={onStart}>Start Rookie Rally</button>
+    </section>
+  );
+}
 
 // --- Pick an opponent ------------------------------------------------------------------
 
@@ -21,10 +36,14 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
   const [busy, setBusy] = useState(false);
   const [innings, setInnings] = useState<number>(3);
   const [difficulty, setDifficulty] = useState<Difficulty>("pro");
+  const [tutorial, setTutorial] = useState<Me["tutorial"] | undefined>(undefined);
+  const [rookie, setRookie] = useState(false);
+  const [tips, toggleTips] = useCoachTips();
 
   const load = () => {
     api<MyTeam>("/api/my-team").then(setMyTeam).catch((e) => (e instanceof ApiError && e.status === 404 ? setMyTeam(null) : setError(e.message)));
     api<GameHistory>("/api/games").then(setHistory).catch(() => {});
+    api<Me>("/api/me").then((m) => setTutorial(m.tutorial)).catch(() => {});
   };
   useEffect(load, []);
 
@@ -41,22 +60,29 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
     try { setGame(await api<PlayedGame>(`/api/games/${id}`)); } catch (e) { setError((e as Error).message); }
   };
 
-  if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} onDone={() => { setDuel(null); load(); }} /></Suspense>;
+  const leaveRookie = () => { setRookie(false); load(); };
+  const skipRookie = () => { api("/api/tutorial/skip", { method: "POST" }).catch(() => {}); leaveRookie(); };
+  if (rookie) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={rookieSetup} coach="tutorial" onSkip={skipRookie} onDone={leaveRookie} /></Suspense>;
+  if (duel) return <Suspense fallback={<section className="panel">Taking the field…</section>}><DuelView setup={duel} coach={tips ? "hints" : undefined} onDone={() => { setDuel(null); load(); }} /></Suspense>;
   if (game) return <GameView game={game} onDone={() => { setGame(null); load(); }} />;
   if (myTeam === undefined) return error ? <section className="panel"><ErrorNote message={error} onRetry={load} /></section> : <Loading label="Checking your lineup…" />;
   if (!myTeam || myTeam.status !== "ready") {
     return (
+      <>
       <section className="panel narrow">
         <h2>Finish your team first</h2>
         <p className="muted">Draft 9 hitters and 3 pitchers, then press Finish draft. Then you can play any MLB team.</p>
         <button className="primary" onClick={onDraft}>Go to my team</button>
       </section>
+      <RookieRally status={tutorial} onStart={() => setRookie(true)} />
+      </>
     );
   }
 
   const sorted = [...teams].sort((a, b) => b.strength - a.strength);
   return (
     <>
+      {tutorial === null && <RookieRally status={tutorial} onStart={() => setRookie(true)} />}
       <section className="panel">
         <div className="team-title">
           <h2>Play ball</h2>
@@ -89,6 +115,10 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
         <p className="play-buttons">
           <button className="primary" disabled={!opponent || busy} onClick={() => play("duel")}>{busy ? "Warming up…" : "Play it yourself"}</button>
           <button disabled={!opponent || busy} onClick={() => play("sim")}>Watch the sim</button>
+        </p>
+        <p className="play-buttons">
+          <button className="link" onClick={() => setRookie(true)}>Replay Rookie Rally</button>
+          <button className="link" aria-pressed={tips} onClick={toggleTips}>Coach tips: {tips ? "on" : "off"}</button>
         </p>
       </section>
 
