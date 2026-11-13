@@ -100,3 +100,17 @@ gets settled in W29.
 W29 also checks the Kimi CLAUDE.md sections 3-6 against the build: touch sizes (primary 112x88pt, other controls
 56x56pt, base targets 64x64pt, 8pt gaps), stale/repeated taps spend nothing, windup taps ignored with a hint,
 separate seeded streams for gameplay, CPU and cosmetic RNG. Report gaps; fix the cheap ones.
+
+SLICE details folded into the waves (read 2026-11-13; prompts at SLICE 571-720, contracts at SLICE 163-246):
+- W29 adds SLICE 7.2 pace targets: match 5-8 min, half-inning transition <= 1.5s, no reward animation blocking
+  result/rematch > 2s; evidence per SLICE 5.4 (device gates with no device = EVIDENCE_MISSING, never PASS).
+- W32 = SLICE WO10: ActionShotDefinition/Catalog/Scorer/Director; CONTACT, MOUND_RELEASE, SLIDE_TAG from recorded
+  events; result + dead-ball guard; broadcast fallback; reduced-motion/off; never load heavy assets at the trigger.
+  Tests: live-ball suppression, continuing runners, duplicate events, skip/resume, camera clearance, replay hash
+  stable. Routine plays never trigger a shot. Runs on current figures first, re-pointed at the realistic rig later.
+- W33/W34 = SLICE WO9: needs an approved realistic athlete rig (art asset we do not have). Up to 13 active athletes,
+  LODs, PBR uniforms with team masks, baked stadium lighting, import validators. BLOCKED on the rig source.
+- W35 = SLICE WO13: worst-case stress, repeated rematches, accessibility matrix (left-handed controls, subtitles,
+  grayscale), golden replays across render rates. Device numbers need a real iPhone.
+- SLICE WO14: real playtest (Tim + Micah). Not something an agent can pass.
+- Not adopted: the slice manifest that disables the season, Rally Breaker and the other 8 abilities (Tim keeps them).
