@@ -72,7 +72,7 @@ function DuelShot({ side, wait, kind }: { side: "home" | "away"; wait: number; k
   }, [side, kind]);
   useEffect(() => {
     const t = setInterval(() => {
-      if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
+      if (document.querySelector(".tp") && document.querySelector(".field canvas")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
     }, 50);
     return () => clearInterval(t);
   }, [wait, side]);

@@ -509,17 +509,31 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
   .game:has(.tp) .rotate-hint, .game:has(.tp) .play-card { display: none; }
   .game:has(.tp) .tp { position: fixed; z-index: 3; inset: 0; margin: 0; pointer-events: none; }
   .game:has(.tp) .tp button, .game:has(.tp) .tp-note { pointer-events: auto; }
-  .game:has(.tp) .matchup { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(56px + env(safe-area-inset-top)); font-size: 11px; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+  /* Top bar: compact scoreboard left, at-bat/pitching + heat centred, speed/Quit right. Abilities are one row under it. */
+  .game:has(.tp) .game-top { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+  .game:has(.tp) .scorebug { min-width: 0; max-width: none; width: 212px; }
+  .game:has(.tp) .bug-row { padding: 1px 8px; gap: 6px; }
+  .game:has(.tp) .bug-abbr { font-size: 15px; width: 34px; }
+  .game:has(.tp) .bug-score { font-size: 18px; width: 20px; }
+  .game:has(.tp) .bug-rally { width: 28px; }
+  .game:has(.tp) .bug-assist { display: none; }
+  .game:has(.tp) .bug-state { padding: 1px 8px; gap: 1px 8px; }
+  .game:has(.tp) .bug-inning { font-size: 14px; }
+  .game:has(.tp) .bug-diamond { width: 26px; height: 18px; }
+  .game:has(.tp) .bug-count { font-size: 13px; }
+  .game:has(.tp) .game-controls { gap: 6px; background: rgba(11, 13, 18, 0.6); border-radius: 4px; padding: 0 4px; }
+  .game:has(.tp) .matchup { position: absolute; left: 50%; transform: translateX(-50%); top: calc(4px + env(safe-area-inset-top)); margin: 0; gap: 12px; flex-wrap: nowrap; white-space: nowrap; font-size: 12px; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
   .game:has(.tp) .tp-grid-layout { position: absolute; inset: 0; display: block; margin: 0; padding: 0; }
   .game:has(.tp) .tp-side { position: absolute; left: calc(8px + env(safe-area-inset-left)); bottom: calc(8px + env(safe-area-inset-bottom)); width: min(260px, 31vw); }
   .game:has(.tp) .tp-action { position: absolute; right: calc(8px + env(safe-area-inset-right)); bottom: calc(8px + env(safe-area-inset-bottom)); }
-  .game:has(.tp) .tp-chips { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(52px + env(safe-area-inset-top)); max-width: calc(100vw - 190px); flex-direction: row; flex-wrap: nowrap; align-items: flex-start; gap: 6px; }
-  .game:has(.tp) .tp-chips .heat-meter { width: 104px; padding: 2px 6px; background: rgba(11, 13, 18, 0.55); border-radius: 3px; }
-  .game:has(.tp) .tp-chip-row { flex-wrap: nowrap; gap: 6px; }
-  .game:has(.tp) .tp-note { flex-basis: 100%; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+  .game:has(.tp) .tp-chips { display: contents; }
+  .game:has(.tp) .tp-chips .heat-meter { position: absolute; left: 50%; transform: translateX(-50%); top: calc(26px + env(safe-area-inset-top)); width: 190px; padding: 2px 8px; background: rgba(11, 13, 18, 0.6); border-radius: 3px; }
+  .game:has(.tp) .tp-chip-row { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); display: flex; flex-wrap: nowrap; gap: 6px; }
+  .game:has(.tp) .tp-note { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom)); max-width: 290px; background: rgba(11, 13, 18, 0.8); padding: 2px 8px; border-radius: 3px; }
   .game:has(.tp) .pchip > button:first-child { min-height: 44px; padding: 2px 8px; gap: 0 6px; }
-  .game:has(.tp) .chip-main { flex-direction: row; align-items: baseline; gap: 6px; }
-  .game:has(.tp) .pchip { max-width: 128px; }
+  .game:has(.tp) .chip-main { flex-direction: row; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .game:has(.tp) .chip-main b { font-size: 12px; }
+  .game:has(.tp) .pchip { max-width: 150px; }
   .game:has(.tp) .chip-state { font-size: 10px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .game:has(.tp) .chip-icon { font-size: 16px; line-height: 1; }
   .game:has(.tp) .pchip > button:first-child, .game:has(.tp) .duel-type, .game:has(.tp) .approach button, .game:has(.tp) .tp-toggle { background: rgba(26, 31, 42, 0.62); }
@@ -537,7 +551,7 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .run-burn[aria-disabled="true"] { opacity: 0.6; }
 .run-confirm { min-height: 56px; min-width: 112px; padding: 8px 20px; font-size: 20px; }
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
-  .game:has(.tp) .run-strip .run-box, .game:has(.tp) .run-adv .run-box { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(92px + env(safe-area-inset-top)); flex-direction: column; flex-wrap: nowrap; width: min(180px, 26vw); margin: 0; }
+  .game:has(.tp) .run-strip .run-box, .game:has(.tp) .run-adv .run-box { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(58px + env(safe-area-inset-top)); flex-direction: column; flex-wrap: nowrap; width: min(180px, 26vw); margin: 0; }
   .game:has(.tp) .run-adv .run-box { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }
   .game:has(.tp) .run-go, .game:has(.tp) .run-burn { background: rgba(26, 31, 42, 0.62); min-height: 44px; }
   .game:has(.tp) .run-title { background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
