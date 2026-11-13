@@ -43,7 +43,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
-  assert.equal(res.json().migrations, 9, "every migration in drizzle/ should be applied at boot");
+  assert.equal(res.json().migrations, 10, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 
@@ -424,7 +424,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 7 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 8 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
@@ -523,7 +523,7 @@ test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs repla
   await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
   const opp = pool().teams.find((t) => t.id !== undefined)!;
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3 } })).json();
-  assert.equal(setup.rules, 6);
+  assert.equal(setup.rules, CURRENT_RULES);
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: any[] = [];
@@ -553,4 +553,44 @@ test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs repla
   for (const bad of [{ kind: "run", action: "steal", from: "third" }, { kind: "run", action: "pickoff", at: "home" }, { kind: "run", action: "advance", send: ["home"] }, { kind: "run", action: "dive" }]) {
     assert.equal((await finish({ ...base, inputs: [bad] })).statusCode, 400, JSON.stringify(bad));
   }
+});
+
+test("difficulty: a rules 7 game stores its CPU difficulty and replays with CPU abilities and Rally Breaker; bad difficulty is refused", async () => {
+  const { res: su, cookie } = await signup("difficulty", undefined, "10.0.0.31");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Difficulty", color: TEAM_COLORS[4] } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams.find((t) => t.id !== undefined)!;
+  const start = (difficulty?: string) => app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3, difficulty } });
+  assert.equal((await start("nightmare")).statusCode, 400);
+  assert.equal((await start()).json().difficulty, "pro");
+  const setup = (await start("allstar")).json();
+  assert.equal(setup.rules, 7);
+  assert.equal(setup.difficulty, "allstar");
+
+  const { playInteractive } = await import("@bb/sim");
+  const inputs: unknown[] = [];
+  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 7, difficulty: "allstar", userSide: "home", inputs: inputs as never });
+  let out = play();
+  while (out.awaiting) {
+    const a = out.awaiting;
+    if (a.team?.available && !a.team.needsConfirm && !inputs.some((i) => (i as { kind: string }).kind === "team")) inputs.push({ kind: "team", action: "rally_breaker" });
+    else if (a.role === "run") inputs.push({ kind: "run", action: "advance", send: a.run!.advance!.runners.map((r) => r.base) });
+    else inputs.push(a.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out = play();
+  }
+  assert.ok(out.events.some((e) => e.type === "ability" && e.phase === "committed"), "the CPU used an ability");
+  const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
+  const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 3, rules: 7, difficulty: "allstar", final: out.result!.final };
+  assert.equal((await finish({ ...base, difficulty: "nightmare" })).statusCode, 400);
+  assert.equal((await finish({ ...base, inputs: [{ kind: "team", action: "explode" }] })).statusCode, 400);
+  const saved = await finish(base);
+  assert.equal(saved.statusCode, 201, saved.body);
+  assert.equal(saved.json().difficulty, "allstar");
+  const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
+  assert.equal(replay.difficulty, "allstar");
+  assert.deepEqual(replay.result.events, out.result!.events);
 });

@@ -85,7 +85,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
   useEffect(() => {
     if (!g.result || saved) return;
     setSaved("saving");
-    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, final: g.result.final } })
+    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final } })
       .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
   }, [g.result, saved, inputs, setup]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
@@ -109,6 +109,9 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 
+      {(awaiting?.role === "pitch" || awaiting?.role === "swing") && awaiting.team?.available && (
+        <BreakerChip key={`b${inputs.length}`} team={awaiting.team} onGo={submit} />
+      )}
       {(awaiting?.role === "pitch" || awaiting?.role === "swing") && awaiting.run && (
         <RunStrip key={`r${inputs.length}`} run={awaiting.run} heat={awaiting.state.heat} players={players} onRun={submit} />
       )}
@@ -318,8 +321,21 @@ function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow, abilitie
   );
 }
 
+/** Rally Breaker: a team ability, so it sits outside the per-player chips. A second tap confirms when the targets have no Heat to lose. */
+function BreakerChip({ team, onGo }: { team: NonNullable<Awaiting["team"]>; onGo: (i: UserInput) => void }) {
+  const [armed, setArmed] = useState(false);
+  const go = () => { if (team.needsConfirm && !armed) setArmed(true); else onGo({ kind: "team", action: "rally_breaker" }); };
+  return (
+    <p className="play-buttons">
+      <button className="chip ready" onClick={go} title={team.summary}>
+        {armed ? "Tap again: their Heat is already 0" : `${team.name} (${team.cost} Rally)`}
+      </button>
+    </p>
+  );
+}
+
 function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onApproach, onSwing, abilities, actorId }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType; mph: number; aim: Aim };
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType | null; mph: number; aim: Aim };
   sup: Awaiting["super"]; approach: Approach; onApproach: (a: Approach) => void;
   onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean, ability?: AbilityRequest) => void;
   abilities: AbilityStatus[]; actorId: number;
@@ -369,7 +385,7 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
     return () => window.removeEventListener("keydown", onKey);
   }, [swing, pick, canSuper]);
 
-  const label = TYPES.find((t) => t.type === incoming.type)!.label;
+  const label = TYPES.find((t) => t.type === incoming.type)?.label ?? "???";
   return (
     <div className={`duel-panel tp ${lefty ? "lefty" : ""}`}>
       <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />

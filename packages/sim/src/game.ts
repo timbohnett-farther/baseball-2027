@@ -7,10 +7,11 @@
 
 import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
-import { ABILITIES, BOUNDS, arm as armAbility, cancel, combine, commit, expire, fieldContextOk, newLedger, statuses, type AbilityDef, type Effects, type FieldContext, type Ledger } from "./ability.ts";
+import { ABILITIES, BOUNDS, TEAM_RALLY_BREAKER, arm as armAbility, cancel, combine, commit, expire, fieldContextOk, newLedger, statuses, type AbilityDef, type Effects, type FieldContext, type Ledger } from "./ability.ts";
+import { PROFILES, chooseAbility, pitchTypeFor, profileOf, sceneOf, swingFor, zoneAim, type Bot, type CpuProfile } from "./cpu.ts";
 import type {
-  AbilityRequest, Aim, Awaiting, Base, Bases, BattingLine, BoxScore, DisabledReason, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
-  PitchingLine, PitchResult, PitchType, RulesVersion, RunnerOption, RunOptions, Side, SimPlayer, SimTeam, Tier, UserInput,
+  AbilityRequest, Aim, Awaiting, Base, Bases, BattingLine, BoxScore, DisabledReason, Difficulty, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
+  PitchingLine, PitchResult, PitchType, RulesVersion, RunnerOption, RunOptions, Side, SimPlayer, SimTeam, TeamStatus, Tier, UserInput,
 } from "./types.ts";
 
 export const DEFAULT_INNINGS = 3;
@@ -29,8 +30,11 @@ const MAX_INNINGS = 9;
  *  6 = ARC 8 baserunning: the user's runners can steal (batting) and the user's pitcher can throw over (pitching), and the user
  *      chooses who to send on a hit or tag up on a fly out. Afterburner rides on a steal or a send. Every extra choice is optional in
  *      a replay (autoField), so a v6 log with no run inputs plays exactly as v5. The computer never steals.
+ *  7 = ARC 11 / PUP 11+14: three CPU difficulties (cpu.ts), the computer spends Heat on abilities and steals and throws over in
+ *      interactive games (its own seeded stream, so replays match), and Rally Breaker. A v7 log that never uses a team input at the
+ *      "pro" difficulty with the computer's extras out of reach plays as v6 would; auto-sims (no user seat) are identical to v6.
  */
-export const CURRENT_RULES: RulesVersion = 6;
+export const CURRENT_RULES: RulesVersion = 7;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -65,9 +69,9 @@ interface Ctx {
   pitching: Record<Side, Map<number, PitchingLine>>;
   over: boolean;
   /** Interactive mode: the user's side and their input log. `autoField` replays logs recorded before fielding existed. */
-  user?: { side: Side; inputs: UserInput[]; cursor: number; autoField?: boolean };
+  user?: { side: Side; inputs: UserInput[]; cursor: number; autoField?: boolean; auto?: Bot };
   /** Interactive mode: how the user's last swing was timed, for the ball in play. */
-  lastSwing?: { power: boolean; q: number; boost?: { contact: number; power: number }; fx?: Effects };
+  lastSwing?: { power: boolean; q: number; boost?: { contact: number; power: number }; fx?: Effects; /** Rules v7: a computer batter's ability: its effects apply but its swing never moved the hit odds. */ fxOnly?: boolean };
   /** Interactive mode: Super Power Bat charges left, and whether this at-bat spent one. */
   superLeft: number;
   superUsed: boolean;
@@ -79,8 +83,19 @@ interface Ctx {
   ledger: Ledger;
   /** Rules v6: pickoff throws made to the current batter. */
   pickoffs: number;
-  active?: { def: AbilityDef; request: AbilityRequest; playerId: number; side: Side; fx: Effects; triggered: boolean };
+  active?: Active;
+  /** Rules v7: the same, for the computer's own ability on this pitch. */
+  cpuActive?: Active;
+  /** Rules v7: the computer's difficulty profile (always "pro" below v7), its own decision stream, and its throw-overs so far. */
+  difficulty: Difficulty;
+  profile: CpuProfile;
+  cpuRng: Rng;
+  cpuPickoffs: number;
+  /** Rules v7: Rally Breaker is once per side per match. */
+  breaker: Record<Side, boolean>;
 }
+
+interface Active { def: AbilityDef; request: AbilityRequest; playerId: number; side: Side; fx: Effects; triggered: boolean }
 
 /** Thrown in interactive mode when the log runs out; the caller turns it into "waiting for input". */
 class NeedInput extends Error {
@@ -214,19 +229,38 @@ function superInfo(c: Ctx, role: Awaiting["role"]): Awaiting["super"] {
   return { bat: bat.name, charges: c.superLeft, clutch: isClutch(c.state, c.innings) };
 }
 
+/** Rules v7: Rally Breaker as the user sees it. The targets are the opposing pitcher and the opposing batter now up (or next). */
+function breakerTargets(c: Ctx, opp: Side): SimPlayer[] {
+  const t = c.teams[opp], idx = c.lineupIdx[opp] - (battingSide(c) === opp ? 1 : 0);
+  return [pitcherOf(c, opp), t.lineup[idx % t.lineup.length]];
+}
+
+function teamStatus(c: Ctx): TeamStatus {
+  const side = c.user!.side, rally = c.state.rally[side], T = TEAM_RALLY_BREAKER;
+  const targets = breakerTargets(c, other(side)).map((p) => ({ id: p.id, heat: heatOf(c, p.id), loses: Math.min(T.heatDrain, heatOf(c, p.id)) }));
+  const [reason, message] = c.breaker[side] ? ["ALREADY_USED" as const, "Rally Breaker is once per match."] : rally < T.cost ? ["INSUFFICIENT_RALLY" as const, `Needs ${T.cost} Rally, you have ${rally}.`] : [undefined, undefined];
+  return { id: T.id, name: T.name, cost: T.cost, summary: T.summary, rally, available: !reason, ...(reason ? { reason, message } : {}), targets, needsConfirm: targets.every((t) => t.heat === 0) };
+}
+
+function buildAwaiting(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"], choice: AdvanceChoice | null): Awaiting {
+  const actor = role === "swing" ? { id: batter.id, role: "bat" as const } : role === "pitch" ? { id: pitcher.id, role: "pitch" as const }
+    : ball && c.rules >= 5 ? { id: ball.fielderId, role: "field" as const } : null;
+  let abilities = c.rules >= 4 && actor ? statuses(ABILITIES, c.ledger, { ...actor, heat: heatOf(c, actor.id) }) : [];
+  if (actor?.role === "field" && ball) {
+    const ctx: FieldContext = { kind: ball.kind, doublePlay: !!ball.throws };
+    abilities = abilities.map((a) => fieldContextOk(a.id, ctx) ? a : { ...a, available: false, reason: "WRONG_CONTEXT", message: "Not on this play." });
+  }
+  return { role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities, ...(c.rules >= 6 ? { run: runOptions(c, role, pitcher, choice) } : {}), ...(c.rules >= 7 && (role === "pitch" || role === "swing") ? { team: teamStatus(c) } : {}) };
+}
+
 function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null, choice: AdvanceChoice | null = null): UserInput {
   const u = c.user!;
-  const next = u.inputs[u.cursor];
-  if (!next) {
-    const actor = role === "swing" ? { id: batter.id, role: "bat" as const } : role === "pitch" ? { id: pitcher.id, role: "pitch" as const }
-      : ball && c.rules >= 5 ? { id: ball.fielderId, role: "field" as const } : null;
-    let abilities = c.rules >= 4 && actor ? statuses(ABILITIES, c.ledger, { ...actor, heat: heatOf(c, actor.id) }) : [];
-    if (actor?.role === "field" && ball) {
-      const ctx: FieldContext = { kind: ball.kind, doublePlay: !!ball.throws };
-      abilities = abilities.map((a) => fieldContextOk(a.id, ctx) ? a : { ...a, available: false, reason: "WRONG_CONTEXT", message: "Not on this play." });
-    }
-    throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities, ...(c.rules >= 6 ? { run: runOptions(c, role, pitcher, choice) } : {}) });
+  if (!u.inputs[u.cursor]) {
+    const aw = buildAwaiting(c, role, batter, pitcher, incoming, ball, choice);
+    if (!u.auto) throw new NeedInput(aw);
+    u.inputs.push(u.auto.pick(aw)); // a bot seat answers and logs, so the game is a plain input log afterwards
   }
+  const next = u.inputs[u.cursor];
   if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
   u.cursor++;
   return next;
@@ -237,7 +271,7 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
  * (wrong swing, not enough Heat, ...) costs nothing and just logs why; the pitch carries on without it.
  * Returns the bounded effects to apply, or null.
  */
-function useAbility(c: Ctx, role: "bat" | "pitch" | "field" | "run", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take", field?: FieldContext): Effects | null {
+function useAbility(c: Ctx, role: "bat" | "pitch" | "field" | "run", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take", field?: FieldContext, cpu = false): Effects | null {
   if (c.rules < 4 || !req) return null;
   const actor = { id: who.id, role, heat: heatOf(c, who.id) };
   const name = ABILITIES[req.id]?.name ?? "Ability";
@@ -255,16 +289,17 @@ function useAbility(c: Ctx, role: "bat" | "pitch" | "field" | "run", who: SimPla
   const dir = req.direction ? ` ${req.direction}` : "";
   c.state.heat[who.id] = done.heat;
   const fx = combine([done.def.effects(req.direction)]);
-  c.active = { def: done.def, request: req, playerId: who.id, side, fx, triggered: role === "pitch" || role === "run" };
+  const slot = { def: done.def, request: req, playerId: who.id, side, fx, triggered: role === "pitch" || role === "run" };
+  if (cpu) c.cpuActive = slot; else c.active = slot;
   note("committed", `${who.name} uses ${name}${dir}! ${done.def.cost} Heat spent.`);
   return fx;
 }
 
 /** Rules v4: close out the pitch's ability. It either took effect or fizzled, and the cost is spent either way (PUP 4.6). */
-function settleAbility(c: Ctx, inPlay: boolean) {
-  const a = c.active;
-  c.active = undefined;
-  if (a?.def.role === "field" || a?.def.role === "run") cancel(c.ledger); else expire(c.ledger); // a fielding or running play isn't a pitch: cooldowns don't tick
+function settleAbility(c: Ctx, inPlay: boolean, cpu = false) {
+  const a = cpu ? c.cpuActive : c.active;
+  if (cpu) c.cpuActive = undefined; else c.active = undefined;
+  if (cpu || a?.def.role === "field" || a?.def.role === "run") cancel(c.ledger); else expire(c.ledger); // a fielding or running play isn't a pitch: cooldowns don't tick (and the computer's use rides on the user's pitch tick)
   if (!a) return;
   const hit = a.triggered || (inPlay && a.def.role === "bat" && a.def.id !== "BAT_SECOND_SWING");
   const name = a.def.name;
@@ -274,8 +309,15 @@ function settleAbility(c: Ctx, inPlay: boolean) {
 
 const inZone = (a: Aim) => Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1;
 
+/** Rules v7: the computer decides on an ability for this pitch (own stream) and, if it takes one, pays for it like a person would. */
+function cpuUse(c: Ctx, role: "bat" | "pitch", who: SimPlayer, side: Side, batter: SimPlayer, pitcher: SimPlayer | null): Effects | null {
+  const scene = sceneOf(c.state, c.innings, role, side, heatOf(c, who.id), batter.batting, (pitcher ?? who).pitching, c.profile);
+  const req = chooseAbility(c.profile, c.cpuRng, scene);
+  return req ? useAbility(c, role, who, side, req, role === "bat" ? swingFor(req.id) : undefined, undefined, true) : null;
+}
+
 function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number; q?: number } {
-  const { rng } = c;
+  const { rng, state } = c;
   const b = batter.batting, p = pitcher.pitching;
   const used = c.pitchCount.get(pitcher.id) ?? 0;
   const tired = clamp((used - pitchLimit(pitcher)) / 15, 0, 1);
@@ -296,14 +338,19 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     mph = Math.round(TYPE_MPH[type] + 3 * stuff + (rng.next() - 0.5) * 4);
   } else {
     // The computer pitches. Roll the pitch first so the user can see it coming.
+    const cpuFx = c.rules >= 7 ? cpuUse(c, "pitch", pitcher, fieldingSide(c), batter, null) : null;
+    const prof = c.profile;
     const r = rng.next();
-    type = r < 0.55 ? "fastball" : r < 0.75 ? "slider" : r < 0.9 ? "change" : "curve";
-    const zone = rng.next() < clamp(0.5 + 0.05 * control, 0.35, 0.65);
+    type = pitchTypeFor(prof, r);
+    const zone = rng.next() < clamp((0.5 + 0.05 * control + prof.zone) / (cpuFx?.missScale ?? 1), 0.35, 0.65);
     const edge = () => (rng.next() < 0.5 ? -1 : 1) * (1.05 + rng.next() * 0.5);
-    loc = zone ? { x: (rng.next() * 2 - 1) * 0.95, y: (rng.next() * 2 - 1) * 0.95 }
+    loc = zone ? zoneAim(prof, rng.next() * 2 - 1, rng.next() * 2 - 1)
       : rng.next() < 0.5 ? { x: edge(), y: (rng.next() * 2 - 1) * 1.4 } : { x: (rng.next() * 2 - 1) * 1.4, y: edge() };
+    if (cpuFx) loc = { x: loc.x + cpuFx.locShift, y: loc.y };
     mph = Math.round(TYPE_MPH[type] + 3 * stuff + (rng.next() - 0.5) * 4);
-    const inp = takeInput(c, "swing", batter, pitcher, { type, mph, aim: loc }) as Extract<UserInput, { kind: "swing" }>;
+    pfx = cpuFx;
+    // Mirage: the label is hidden from the user's batter until the ball is nearly on them.
+    const inp = takeInput(c, "swing", batter, pitcher, { type: c.cpuActive?.def.id === "PITCH_MIRAGE" ? null : type, mph, aim: loc }) as Extract<UserInput, { kind: "swing" }>;
     swingKind = inp.swing;
     q = 1 - Math.min(1, Math.abs(inp.timing));
     bfx = useAbility(c, "bat", batter, battingSide(c), inp.ability, swingKind);
@@ -321,9 +368,15 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   const edge = zone ? clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) - 0.6) / 0.4, 0, 1) : 0;
   const swing = swingKind
     ? swingKind !== "take"
-    : zone ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye), 0.5, 0.85)
-      : rng.next() < clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) < 1.3 ? 0.4 : 0.22) - 0.05 * z(b?.eye) + 0.03 * stuff, 0.08, 0.55);
+    : zone ? rng.next() < clamp(0.68 + 0.03 * z(b?.eye) + c.profile.zoneSwing + (state.strikes === 2 ? c.profile.protect : 0), 0.5, 0.85)
+      : rng.next() < clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) < 1.3 ? 0.4 : 0.22) - 0.05 * z(b?.eye) + 0.03 * stuff + c.profile.chase, 0.08, 0.55);
   if (!swing) return { result: zone ? "called_strike" : "ball", zone, mph };
+  // Rules v7: a computer batter may spend Heat on a bat ability once it has decided to swing (Comet needs a power swing, the rest a contact one).
+  let cpuFx: Effects | null = null, cpuPower = false;
+  if (!swingKind && c.rules >= 7) {
+    cpuFx = cpuUse(c, "bat", batter, battingSide(c), batter, pitcher);
+    cpuPower = c.cpuActive?.def.id === "BAT_COMET";
+  }
 
   const mo = momentum(c, batter, pitcher);
   const zc = z((b?.contact ?? 70) + (boost?.contact ?? 0));
@@ -337,14 +390,18 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     contact = clamp(contact * (0.3 + 0.7 * q) + (swingKind === "contact" ? 0.06 : -0.04), 0.05, 0.97);
     foul = clamp(0.55 - 0.35 * q, 0.15, 0.5);
   }
-  const hitQ = () => (swingKind ? q : c.rules >= 3 ? cpuContactQ(c, b?.contact, stuff) : undefined);
+  let cpuQ: number | undefined;
+  const hitQ = () => (swingKind ? q : c.rules >= 3 ? (cpuQ ??= cpuContactQ(c, b?.contact, stuff)) : undefined);
   if (rng.next() >= contact) {
     // Second Swing turns a badly mistimed miss into a foul. It never makes contact that was not there.
     if (bfx && q < bfx.rescueQ && c.active) { c.active.triggered = true; return { result: "foul", zone, mph, q: hitQ() }; }
+    // The computer's own Second Swing reads a drawn timing (drawn only when it paid for the ability).
+    if (cpuFx && cpuFx.rescueQ > 0 && (hitQ() ?? 1) < cpuFx.rescueQ && c.cpuActive) { c.cpuActive.triggered = true; return { result: "foul", zone, mph, q: hitQ() }; }
     return { result: "swinging_strike", zone, mph };
   }
   if (rng.next() < foul) return { result: "foul", zone, mph, q: hitQ() };
   if (swingKind) c.lastSwing = { power: swingKind === "power", q, boost, fx: bfx ?? undefined };
+  else if (cpuFx) c.lastSwing = { power: cpuPower, q: hitQ() ?? 0.5, fx: cpuFx, fxOnly: true };
   return { result: "in_play", zone, mph, q: hitQ() };
 }
 
@@ -359,8 +416,8 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
     : batter.batting;
   const defense = (teamDefense(c.teams[fieldingSide(c)]) - 70) / 10;
   // A swing the user timed well helps; Power trades hits for homers, Contact the other way.
-  const dHr = swing ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
-  const dHit = swing ? (swing.power ? -0.02 : 0.05 * swing.q) - 0.08 * (1 - swing.q) : 0;
+  const dHr = swing && !swing.fxOnly ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
+  const dHit = swing && !swing.fxOnly ? (swing.power ? -0.02 : 0.05 * swing.q) - 0.08 * (1 - swing.q) : 0;
   const mo = momentum(c, batter, pitcher);
   const fx = swing?.fx;
   const popup = fx && swing!.q < fx.popupBelowQ ? 0.06 : 0; // Comet on a mistimed swing climbs too high
@@ -514,40 +571,96 @@ function runOptions(c: Ctx, role: Awaiting["role"], pitcher: SimPlayer, choice: 
   return { steal, pickoff, pickoffsLeft: batting ? 0 : left, advance };
 }
 
+/** A steal attempt by the batting side's runner on `from`. The user's and the computer's share the roll; the computer draws nothing extra. */
+function stealAttempt(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine: PitchingLine, from: "first" | "second", ability: AbilityRequest | undefined, cpu: boolean) {
+  const b = c.state.bases, to = from === "first" ? "second" : "third", id = b[from];
+  if (id === null || b[to] !== null) return;
+  const runner = findPlayer(c, id);
+  const fx = useAbility(c, "run", runner, bSide, ability, undefined, undefined, cpu);
+  const safe = c.rng.next() < Math.min(RUN_CAP, stealChance(c, id, from, pitcher, fSide) + (fx?.run ?? 0));
+  if (cpu ? c.cpuActive : c.active) settleAbility(c, false, cpu);
+  b[from] = null;
+  if (safe) b[to] = id; else { c.state.outs++; pLine.outs++; }
+  award(c, bSide, id, safe ? 15 : -12);
+  c.events.push({ type: "run", state: snapshot(c.state), action: safe ? "steal" : "caught", side: bSide, runnerId: id,
+    text: safe ? `${runner.name} steals ${to}!` : `${runner.name} is caught stealing ${to}.` });
+}
+
+function pickoffThrow(c: Ctx, bSide: Side, pitcher: SimPlayer, pLine: PitchingLine, at: RunBase) {
+  const b = c.state.bases, id = b[at];
+  if (id === null) return;
+  const runner = findPlayer(c, id);
+  const out = c.rng.next() < pickoffChance(c, id, pitcher);
+  if (out) { b[at] = null; c.state.outs++; pLine.outs++; award(c, bSide, id, -12); }
+  c.events.push({ type: "run", state: snapshot(c.state), action: out ? "pickoff" : "hold", side: bSide, runnerId: id,
+    text: out ? `${pitcher.name} picks ${runner.name} off ${at}!` : `${pitcher.name} throws over to ${at}. ${runner.name} is back in time.` });
+}
+
 /**
- * Steals and pickoff throws the user logged just before a pitch. They are optional: with none in the log
+ * Rules v7, Rally Breaker (PUP 4.5): spend all 100 Rally, once per side per match, only between pitches. Any armed ability is released
+ * first, then the opposing pitcher and the opposing batter now up each lose 40 Heat (not below zero). Nothing else on the field changes.
+ * A request that can't happen is dropped, like a late steal.
+ */
+function useBreaker(c: Ctx, side: Side) {
+  const T = TEAM_RALLY_BREAKER;
+  if (c.rules < 7 || c.breaker[side] || c.state.rally[side] < T.cost || c.state.outs >= 3) return;
+  cancel(c.ledger);
+  c.breaker[side] = true;
+  c.state.rally[side] -= T.cost;
+  const names = breakerTargets(c, other(side)).map((p) => {
+    c.state.heat[p.id] = Math.max(0, heatOf(c, p.id) - T.heatDrain);
+    return p.name;
+  });
+  c.events.push({ type: "team", state: snapshot(c.state), side, action: "rally_breaker",
+    text: `${c.teams[side].name} use Rally Breaker! ${names.join(" and ")} lose up to ${T.heatDrain} Heat.` });
+}
+
+/**
+ * Steals, throw-overs and Rally Breaker the user logged just before a pitch. They are optional: with none in the log
  * nothing is drawn, so the pitch plays exactly as it did without them. A request that can't happen is skipped.
  */
 function runExtras(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine: PitchingLine) {
   const u = c.user!;
   for (;;) {
     const inp = u.inputs[u.cursor];
-    if (inp?.kind !== "run" || inp.action === "advance") return;
+    if (!inp || (inp.kind !== "run" && inp.kind !== "team") || (inp.kind === "run" && inp.action === "advance")) return;
     u.cursor++;
     if (c.state.outs >= 3) continue; // the half is over: late requests are dropped
-    const b = c.state.bases;
+    if (inp.kind === "team") { useBreaker(c, u.side); continue; }
     if (inp.action === "steal") {
-      const to = inp.from === "first" ? "second" : "third", id = b[inp.from];
-      if (u.side !== bSide || id === null || b[to] !== null) continue;
-      const runner = findPlayer(c, id);
-      const fx = useAbility(c, "run", runner, bSide, inp.ability);
-      const safe = c.rng.next() < Math.min(RUN_CAP, stealChance(c, id, inp.from, pitcher, fSide) + (fx?.run ?? 0));
-      if (c.active) settleAbility(c, false);
-      b[inp.from] = null;
-      if (safe) b[to] = id; else { c.state.outs++; pLine.outs++; }
-      award(c, bSide, id, safe ? 15 : -12);
-      c.events.push({ type: "run", state: snapshot(c.state), action: safe ? "steal" : "caught", side: bSide, runnerId: id,
-        text: safe ? `${runner.name} steals ${to}!` : `${runner.name} is caught stealing ${to}.` });
+      if (u.side !== bSide) continue;
+      stealAttempt(c, bSide, fSide, pitcher, pLine, inp.from, inp.ability, false);
     } else {
-      const id = b[inp.at];
-      if (u.side !== fSide || id === null || c.pickoffs >= PICKOFF_LIMIT) continue;
+      if (u.side !== fSide || c.state.bases[inp.at] === null || c.pickoffs >= PICKOFF_LIMIT) continue;
       c.pickoffs++;
-      const runner = findPlayer(c, id);
-      const out = c.rng.next() < pickoffChance(c, id, pitcher);
-      if (out) { b[inp.at] = null; c.state.outs++; pLine.outs++; award(c, bSide, id, -12); }
-      c.events.push({ type: "run", state: snapshot(c.state), action: out ? "pickoff" : "hold", side: bSide, runnerId: id,
-        text: out ? `${pitcher.name} picks ${runner.name} off ${inp.at}!` : `${pitcher.name} throws over to ${inp.at}. ${runner.name} is back in time.` });
+      pickoffThrow(c, bSide, pitcher, pLine, inp.at);
     }
+  }
+}
+
+/**
+ * Rules v7: the computer's own pre-pitch choices, all from its own stream. Batting, it sends the best-odds runner (with Afterburner when
+ * the policy wants it); pitching, it throws over at the most dangerous runner, at most twice a match. Rally Breaker fires when the
+ * meter is full and the two targets still hold enough Heat to be worth it.
+ */
+function cpuPrePitch(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine: PitchingLine) {
+  const u = c.user!, p = c.profile, cpuSide = other(u.side), r = c.cpuRng;
+  const T = TEAM_RALLY_BREAKER;
+  if (!c.breaker[cpuSide] && c.state.rally[cpuSide] >= T.cost) {
+    const heat = breakerTargets(c, u.side).reduce((n, t) => n + heatOf(c, t.id), 0);
+    if (heat >= p.breakerHeat && r.next() < p.breakerRate) useBreaker(c, cpuSide);
+  }
+  const b = c.state.bases;
+  if (cpuSide === bSide) {
+    const cands = (["first", "second"] as const).filter((k) => b[k] !== null && b[k === "first" ? "second" : "third"] === null);
+    const best = cands.map((k) => ({ k, chance: stealChance(c, b[k]!, k, pitcher, fSide) })).sort((x, y) => y.chance - x.chance)[0];
+    if (best && best.chance >= p.stealMin && r.next() < p.stealRate) {
+      const id = b[best.k]!, fx = chooseAbility(p, r, sceneOf(c.state, c.innings, "run", cpuSide, heatOf(c, id), findPlayer(c, id).batting, pitcher.pitching, p));
+      stealAttempt(c, bSide, fSide, pitcher, pLine, best.k, fx, true);
+    }
+  } else if (c.cpuPickoffs < PICKOFF_LIMIT && r.next() < p.pickoffRate) {
+    const at = (["third", "second", "first"] as const).find((k) => b[k] !== null);
+    if (at) { c.cpuPickoffs++; pickoffThrow(c, bSide, pitcher, pLine, at); }
   }
 }
 
@@ -706,7 +819,10 @@ function plateAppearance(c: Ctx) {
   let lastMph = 0, contactQ: number | undefined;
   while (!outcome) {
     if (c.user && c.rules >= 6) {
+      const u = c.user;
+      if (u.auto && u.cursor >= u.inputs.length && c.rules >= 7) u.inputs.push(...u.auto.pre(buildAwaiting(c, u.side === bSide ? "swing" : "pitch", batter, pitcher, null, null, null)));
       runExtras(c, bSide, fSide, pitcher, pLine);
+      if (c.rules >= 7 && state.outs < 3) cpuPrePitch(c, bSide, fSide, pitcher, pLine);
       if (state.outs >= 3) { c.lineupIdx[bSide]--; return; } // caught stealing for the last out: the batter leads off next time
     }
     c.assist = c.rules >= 3 ? rallyAssist(state) : null;
@@ -719,12 +835,13 @@ function plateAppearance(c: Ctx) {
     else if (pitch.result === "foul" && state.strikes < 2) state.strikes++;
     if (c.rules >= 3) { contactQ = pitch.q; pitchHeat(c, bSide, fSide, batter, pitcher, pitch.result, pitch.q); }
     c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone });
-    if (c.user && c.rules >= 4) settleAbility(c, pitch.result === "in_play");
+    if (c.user && c.rules >= 4) { settleAbility(c, pitch.result === "in_play"); if (c.cpuActive) settleAbility(c, pitch.result === "in_play", true); }
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
     else if (pitch.result === "in_play") {
       outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined;
       if (c.active) settleAbility(c, true);
+      if (c.cpuActive) settleAbility(c, true, true);
     }
   }
 
@@ -841,6 +958,8 @@ type GameInput = {
   maxExtraInnings?: number;
   /** Test hook: override the starting Heat (rules v3). */
   startHeat?: number;
+  /** Rules v7: the computer's difficulty (default "pro"). */
+  difficulty?: Difficulty;
 };
 
 export function simulateGame(input: GameInput): GameResult {
@@ -851,8 +970,9 @@ export function simulateGame(input: GameInput): GameResult {
  * Play a game where `userSide` makes the pitching and batting choices. Pass the inputs made so
  * far; the game replays from the seed and stops at the first moment it needs another one.
  */
-export function playInteractive(input: GameInput & { userSide: Side; inputs: UserInput[]; autoField?: boolean }): InteractiveGame {
-  const { events, awaiting, result } = run(input, { side: input.userSide, inputs: input.inputs, cursor: 0, autoField: input.autoField });
+/** `auto` seats a bot in the user chair (the soak test): it answers every prompt and its answers are appended to `inputs`, so the log replays on its own. */
+export function playInteractive(input: GameInput & { userSide: Side; inputs: UserInput[]; autoField?: boolean; auto?: Bot }): InteractiveGame {
+  const { events, awaiting, result } = run(input, { side: input.userSide, inputs: input.inputs, cursor: 0, autoField: input.autoField, auto: input.auto });
   return { events, awaiting, result };
 }
 
@@ -889,6 +1009,11 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     assist: null,
     ledger: newLedger(),
     pickoffs: 0,
+    difficulty: rules >= 7 ? input.difficulty ?? "pro" : "pro",
+    profile: profileOf(rules >= 7 ? input.difficulty : undefined),
+    cpuRng: createRng((input.seed ^ 0x5bd1e995) >>> 0),
+    cpuPickoffs: 0,
+    breaker: { away: false, home: false },
   };
   const s = c.state;
 

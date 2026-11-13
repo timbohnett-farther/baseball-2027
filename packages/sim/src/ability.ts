@@ -91,7 +91,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     id: "PITCH_MIRAGE", name: "Mirage", role: "pitch", cost: 40, swings: [], needsDirection: false, cooldownPitches: 0,
     summary: "Hides the pitch type from the batter until it is almost on top of them.",
     // PRD: hides the type label until 200 ms after release; no physics change. So no numbers move: it only
-    // matters to a hitter who reads the label, which the computer batter does not (W24).
+    // matters to a hitter who reads the label. A computer pitcher's Mirage blanks Awaiting.incoming.type for the user (W24).
     effects: () => ({}),
   },
   PITCH_VORTEX: {
@@ -224,3 +224,14 @@ export function statuses(catalog: Record<string, AbilityDef>, ledger: Ledger, ac
     return { id: d.id, name: d.name, cost: d.cost, summary: d.summary, needsDirection: d.needsDirection, swings: d.swings, available: v.ok, ...(v.ok ? {} : { reason: v.reason, message: v.message }) };
   });
 }
+
+/**
+ * Rally Breaker (PUP 4.5 and 11), rules v7. A team ability, so it lives outside ABILITIES: it is paid in Rally (the meter
+ * Rally has had no other use since v3), not Heat, and it is once per side per match. The PRD effect is exact, with nothing to translate:
+ * the opposing pitcher and the opposing batter now up each lose `heatDrain` Heat, floored at zero. It moves no probability and draws
+ * nothing from the RNG; game.ts applies it between pitches.
+ */
+export const TEAM_RALLY_BREAKER = {
+  id: "TEAM_RALLY_BREAKER" as const, name: "Rally Breaker", cost: 100, heatDrain: 40,
+  summary: "Spend a full Rally meter to drain 40 Heat from the pitcher and the batter you face. Once a match.",
+};

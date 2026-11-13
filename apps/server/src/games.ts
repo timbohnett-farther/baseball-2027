@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
-import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
+import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, isDifficulty, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
@@ -114,10 +114,10 @@ export function mlbSimTeam(teamId: number, exclude: Set<number> = new Set()): Si
 
 function played(row: typeof games.$inferSelect, opponent: { id: number; name: string; abbr: string }): PlayedGame {
   // rules: a game replays under the ruleset it was played with, so later rule changes never rewrite history.
-  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules };
+  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules, difficulty: row.difficulty };
   // autoField: games saved before fielding taps existed have none in their log; the play stands as rolled.
   const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs, autoField: true }).result! : simulateGame(input);
-  return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result, rules: row.rules };
+  return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result, rules: row.rules, difficulty: row.difficulty };
 }
 
 const isAim = (a: unknown): a is Aim => !!a && typeof a === "object" && Number.isFinite((a as Aim).x) && Number.isFinite((a as Aim).y);
@@ -136,6 +136,7 @@ function isInput(i: unknown): i is UserInput {
     if (u.action === "advance") return Array.isArray(u.send) && u.send.length <= 3 && u.send.every((b) => bases.includes(b as string)) && isAbility(u.ability);
     return false;
   }
+  if (u.kind === "team") return u.action === "rally_breaker";
   if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1 && (u.throwTo === undefined || ["first", "second", "third", "home"].includes(u.throwTo as string)) && isAbility(u.ability);
   return false;
 }
@@ -204,14 +205,16 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
   // so all it needs from us is the two lineups and a seed.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; innings?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; innings?: number; difficulty?: string } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
     const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
     const len = matchInnings(req.body?.innings, m.season);
     if ("error" in len) return reply.code(400).send({ error: len.error });
+    const difficulty = req.body?.difficulty ?? "pro";
+    if (!isDifficulty(difficulty)) return reply.code(400).send({ error: "Pick Rookie, Pro or All-Star." });
     const id = Number(req.body!.opponentTeamId);
     const body: InteractiveSetup = {
-      seed: randomInt(0, 2 ** 31 - 1), innings: len.innings, rules: CURRENT_RULES, userSide: "home",
+      seed: randomInt(0, 2 ** 31 - 1), innings: len.innings, rules: CURRENT_RULES, difficulty, userSide: "home",
       opponent: { id, name: m.opponent.name, abbr: m.opponent.abbr }, teams: { away: m.opponent, home: m.me },
     };
     return reply.code(201).send(body);
@@ -219,13 +222,14 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // The game is over: replay the user's choices against the seed with today's lineups, and record
   // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number } }>(
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number; difficulty?: string } }>(
     "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
       const db = getDb();
       const { seed, inputs, final } = req.body ?? {};
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6)) {
+      const difficulty = req.body?.difficulty ?? "pro";
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7) || !isDifficulty(difficulty)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.
@@ -237,19 +241,19 @@ export async function gameRoutes(app: FastifyInstance) {
       const teams = { away: opponent, home: me };
       // A log that doesn't fit this seed, lineup or length throws mid-replay; that is a refusal, not a server fault.
       let result: GameResult | null = null;
-      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, userSide: "home", inputs }).result; } catch { /* handled below */ }
+      try { result = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, difficulty, userSide: "home", inputs }).result; } catch { /* handled below */ }
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
       const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
       const reward = await payout(db, req.user!.id, result, outcome);
       const [row] = await db.insert(games).values({
-        userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules,
+        userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules, difficulty,
         userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
       if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
       reward.levelUps = await awardXp(db, team.id, result, outcome);
-      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules };
+      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules, difficulty: row.difficulty };
       return reply.code(201).send(body);
     },
   );

@@ -1,0 +1,1 @@
+ALTER TABLE "games" ADD COLUMN "difficulty" text DEFAULT 'pro' NOT NULL;

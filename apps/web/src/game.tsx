@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MyTeam, TeamSummary } from "@bb/shared";
-import { rallyAssist, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
+import { DIFFICULTIES, rallyAssist, type Difficulty, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { Ovr } from "./players.tsx";
@@ -20,6 +20,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [innings, setInnings] = useState<number>(3);
+  const [difficulty, setDifficulty] = useState<Difficulty>("pro");
 
   const load = () => {
     api<MyTeam>("/api/my-team").then(setMyTeam).catch((e) => (e instanceof ApiError && e.status === 404 ? setMyTeam(null) : setError(e.message)));
@@ -32,7 +33,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
     setBusy(true);
     setError(null);
     try {
-      if (mode === "duel") setDuel(await api<InteractiveSetup>("/api/games/interactive", { body: { opponentTeamId: opponent, innings } }));
+      if (mode === "duel") setDuel(await api<InteractiveSetup>("/api/games/interactive", { body: { opponentTeamId: opponent, innings, difficulty } }));
       else setGame(await api<PlayedGame>("/api/games", { body: { opponentTeamId: opponent, innings } }));
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
@@ -68,6 +69,11 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
         <p className="play-buttons">
           {[1, 3, 5].map((n) => (
             <button key={n} className={`chip ${innings === n ? "ready" : ""}`} aria-pressed={innings === n} onClick={() => setInnings(n)}>{n} {n === 1 ? "inning" : "innings"}</button>
+          ))}
+        </p>
+        <p className="play-buttons">
+          {DIFFICULTIES.map((d) => (
+            <button key={d} className={`chip ${difficulty === d ? "ready" : ""}`} aria-pressed={difficulty === d} onClick={() => setDifficulty(d)}>{d === "allstar" ? "All-Star" : d[0].toUpperCase() + d.slice(1)}</button>
           ))}
         </p>
         <div className="opponents">
@@ -129,6 +135,7 @@ export function holdFor(e: GameEvent): number {
     case "half_start": return 1300;
     case "pitching_change": return 1400;
     case "ability": return 500;
+    case "team": return 500;
     case "run": return 700;
     case "final": return 0;
     case "play": {
@@ -326,7 +333,7 @@ function FeedItem({ e }: { e: GameEvent }) {
   if (e.type === "half_start") return <li className="feed-inning">{e.text}</li>;
   if (e.type === "pitching_change") return <li className="feed-change">{e.text}</li>;
   if (e.type === "final") return <li className="feed-final">{e.text}</li>;
-  if (e.type === "run") return <li className="feed-change">{e.text}</li>;
+  if (e.type === "run" || e.type === "team") return <li className="feed-change">{e.text}</li>;
   if (e.type !== "play") return null;
   return (
     <li className={`feed-play tier-${e.tier}`}>

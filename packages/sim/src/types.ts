@@ -32,7 +32,10 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2 | 3 | 4 | 5 | 6;
+export type RulesVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+/** Rules v7: how the computer plays, chosen per game and stored with it. Absent = "pro". Ignored below v7. */
+export type Difficulty = "rookie" | "pro" | "allstar";
 
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
@@ -81,6 +84,8 @@ export type GameEvent =
   | { type: "final"; state: GameState; text: string }
   /** Rules v6: a baserunning decision played out (steal, pickoff, send or hold on contact, tag-up). `runnerId` is the runner it was about. */
   | { type: "run"; state: GameState; action: "steal" | "caught" | "pickoff" | "advance" | "hold" | "thrown_out"; side: Side; runnerId: number; text: string }
+  /** Rules v7: a team ability (Rally Breaker) was used. */
+  | { type: "team"; state: GameState; side: Side; action: "rally_breaker"; text: string }
   /** Rules v4: an ability request was committed, took effect, fizzled, or was refused (and cost nothing). */
   | {
       type: "ability"; state: GameState; phase: "committed" | "triggered" | "expired" | "rejected";
@@ -116,6 +121,8 @@ export interface PlayedGame {
   result: GameResult;
   /** The ruleset it was played under; absent on a live in-browser game, whose setup carries it. */
   rules?: RulesVersion;
+  /** Rules v7: the computer's difficulty. Absent on older games, which play as "pro". */
+  difficulty?: Difficulty;
   /** What the game paid out, on the response to a just-finished game only. */
   reward?: {
     total: number; coins: Record<string, number>; drop: { id: string; name: string } | null;
@@ -151,7 +158,7 @@ export type AbilityDirection = "left" | "right";
 /** What the user committed with a pitch or swing (arming and cancelling happen client-side and are never logged). Rules v4 only. */
 export interface AbilityRequest { id: AbilityId; direction?: AbilityDirection }
 /** PUP 4.3: why an ability can't be used right now. */
-export type DisabledReason = "WRONG_CONTEXT" | "INSUFFICIENT_HEAT" | "COOLDOWN" | "SELECT_DIRECTION" | "ALREADY_USED" | "WRONG_SWING" | "INELIGIBLE_ACTOR";
+export type DisabledReason = "WRONG_CONTEXT" | "INSUFFICIENT_HEAT" | "COOLDOWN" | "SELECT_DIRECTION" | "ALREADY_USED" | "WRONG_SWING" | "INELIGIBLE_ACTOR" | "INSUFFICIENT_RALLY";
 /** One ability chip for the UI. `reason`/`message` are set when `available` is false. */
 export interface AbilityStatus {
   id: AbilityId; name: string; cost: number; summary: string; needsDirection: boolean; swings: ("contact" | "power")[];
@@ -173,7 +180,9 @@ export type UserInput =
    */
   | { kind: "run"; action: "steal"; from: "first" | "second"; ability?: AbilityRequest }
   | { kind: "run"; action: "pickoff"; at: "first" | "second" | "third" }
-  | { kind: "run"; action: "advance"; send: ("first" | "second" | "third")[]; ability?: AbilityRequest };
+  | { kind: "run"; action: "advance"; send: ("first" | "second" | "third")[]; ability?: AbilityRequest }
+  /** Rules v7: a team ability, logged just before the pitch it happens on. Costs 100 Rally, once per match. */
+  | { kind: "team"; action: "rally_breaker" };
 
 export type Base = "first" | "second" | "third" | "home";
 
@@ -184,7 +193,7 @@ export interface Awaiting {
   pitcherId: number;
   state: GameState;
   /** When batting: the pitch that is on its way. */
-  incoming: { type: PitchType; mph: number; aim: Aim } | null;
+  incoming: { type: PitchType | null; mph: number; aim: Aim } | null;
   /** When fielding a close one: what's coming and who has to make the play. */
   ball: { kind: "grounder" | "liner" | "fly"; fielderId: number; /** Rules v5: the force-play throw choices, when there is one. */ throws?: { recommended: Base; options: Base[] } } | null;
   /** When batting with a Super Power Bat: charges left this game, and whether this is a clutch spot (the only time a charge can be spent). */
@@ -193,6 +202,18 @@ export interface Awaiting {
   abilities: AbilityStatus[];
   /** Rules v6: the baserunning options at this moment. Absent before v6. */
   run?: RunOptions;
+  /** Rules v7: Rally Breaker, offered on pitch and swing only. */
+  team?: TeamStatus;
+}
+
+/** Rules v7: Rally Breaker as the UI shows it. `targets` are the Heat the opposing pitcher and batter would lose it from. */
+export interface TeamStatus {
+  id: "TEAM_RALLY_BREAKER"; name: string; cost: number; summary: string; rally: number;
+  available: boolean; reason?: DisabledReason; message?: string;
+  /** Heat removed from each target (never below 0), and how much each has now. */
+  targets: { id: number; heat: number; loses: number }[];
+  /** Both targets are already at 0: confirm before spending Rally for nothing. */
+  needsConfirm: boolean;
 }
 
 /** A runner the user can act on, with the Afterburner chip as it stands for that runner (null when the runner has no Heat to spend or v6 is off). */
@@ -222,6 +243,8 @@ export interface InteractiveSetup {
   seed: number;
   innings: number;
   rules: RulesVersion;
+  /** Rules v7: the computer's difficulty. Absent = "pro". */
+  difficulty?: Difficulty;
   userSide: Side;
   opponent: { id: number; name: string; abbr: string };
   teams: Record<Side, SimTeam>;
