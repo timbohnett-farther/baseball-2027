@@ -6,7 +6,9 @@ export { autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, isClutch, 
 export { ABILITIES, BOUNDS, TEAM_RALLY_BREAKER, arm, cancel, check, combine, commit, expire, newLedger, statuses } from "./ability.ts";
 export type { AbilityDef, Actor, Effects, Ledger, Verdict } from "./ability.ts";
 export { CALLS } from "./text.ts";
+export { TUTORIAL_SEED, tutorialSetup } from "./tutorial.ts";
 export { DIFFICULTIES, PROFILES, PROFILE_BOUNDS, isDifficulty, makeBot, profileOf } from "./cpu.ts";
 export type { Bot, CpuProfile } from "./cpu.ts";
-export { TUTORIAL_SEED, tutorialSetup } from "./tutorial.ts";
+export { evaluateObjectives, objectiveDef, pickObjectives } from "./objectives.ts";
+export type { ObjectiveDef } from "./objectives.ts";
 export type * from "./types.ts";

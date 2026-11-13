@@ -1,11 +1,12 @@
 import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
+import { ARCADE_FORMAT, BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
 import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, isDifficulty, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
+import { settleArcade } from "./arcade-season.ts";
 import { seasonMatch, settleSeason, type SeasonRow } from "./season.ts";
 import { pool } from "./store.ts";
 import { teamPlayers } from "./team.ts";
@@ -154,6 +155,18 @@ async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: 
   if (bonus > 0) { reward.coins.season = bonus; reward.total += bonus; }
 }
 
+/** Settle a season game under whichever format the season uses and fold what it paid into the game's reward. */
+async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, reward: NonNullable<PlayedGame["reward"]>) {
+  if (season.format !== ARCADE_FORMAT) return addSeasonBonus(reward, await settleSeason(db, season, gameId, outcome));
+  const s = await settleArcade(db, season, gameId, outcome, result);
+  if (!s) return;
+  await addSeasonBonus(reward, s.season);
+  if (s.stars) reward.coins.stars = s.stars;
+  if (s.unlockCoins) reward.coins.unlock = s.unlockCoins;
+  reward.total += s.stars + s.unlockCoins;
+  reward.arcade = { objectives: s.objectives.map((o) => ({ id: o.id, label: o.label, earned: o.earned })), stars: s.objectives.filter((o) => o.earned).length, unlocks: s.unlocks.map((u) => ({ stars: u.stars, label: u.label })), lifetimeStars: s.lifetimeStars };
+}
+
 /**
  * Player development: everyone who appeared for the user earns XP (appearance, hits, homers,
  * strikeouts thrown, a win bonus). Levels come from XP alone, so a level-up is just a threshold crossed.
@@ -238,6 +251,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const { team, opponent, me, season } = m;
       const len = matchInnings(req.body?.innings, season);
       if ("error" in len) return reply.code(400).send({ error: len.error });
+      if (season?.format === ARCADE_FORMAT && rules !== CURRENT_RULES) return reply.code(400).send({ error: "Update the game to play this season." });
       const teams = { away: opponent, home: me };
       // A log that doesn't fit this seed, lineup or length throws mid-replay; that is a refusal, not a server fault.
       let result: GameResult | null = null;
@@ -251,7 +265,7 @@ export async function gameRoutes(app: FastifyInstance) {
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules, difficulty,
         userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
-      if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
+      if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward);
       reward.levelUps = await awardXp(db, team.id, result, outcome);
       const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules, difficulty: row.difficulty };
       return reply.code(201).send(body);
@@ -276,7 +290,7 @@ export async function gameRoutes(app: FastifyInstance) {
       userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: len.innings, rules: CURRENT_RULES,
       userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
-    if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
+    if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward);
     reward.levelUps = await awardXp(db, team.id, result, outcome);
     const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules };
     return reply.code(201).send(body);

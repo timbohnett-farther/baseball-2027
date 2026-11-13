@@ -4,8 +4,9 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { DEFAULT_WOOD, slotsFor, TEAM_COLORS, woodDeltas, type MyTeam, type Player } from "@bb/shared";
 import { CURRENT_RULES } from "@bb/sim";
 import { buildApp } from "./app.ts";
-import { closeDb, initDb } from "./db/index.ts";
-import { pool, startStore } from "./store.ts";
+import { closeDb, getDb, initDb } from "./db/index.ts";
+import { seasonGames, seasons } from "./db/schema.ts";
+import { pool, startStore, teamSummaries } from "./store.ts";
 
 let app: FastifyInstance;
 
@@ -43,7 +44,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
-  assert.equal(res.json().migrations, 11, "every migration in drizzle/ should be applied at boot");
+  assert.equal(res.json().migrations, 12, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 
@@ -246,7 +247,17 @@ test("coins: games pay out, the store sells bats, gear equips", async () => {
   assert.equal(setup.teams.home.gear.superBat.charges, 3);
 });
 
-test("season: 20 games, playoffs if over .500, bonuses paid by the server", async () => {
+/** A season as the 20-game format wrote it (no `format`, no `league`): what a player mid-season before W26 still has. */
+async function startLegacySeason(headers: { cookie: string }) {
+  const me = (await app.inject({ url: "/api/me", headers })).json();
+  const team = (await app.inject({ url: "/api/my-team", headers })).json();
+  const db = getDb();
+  const [season] = await db.insert(seasons).values({ userId: me.id, teamId: team.id, number: 1, seed: 12345 }).returning();
+  await db.insert(seasonGames).values(teamSummaries().slice(0, 20).map((t, i) => ({ seasonId: season!.id, gameNo: i + 1, round: 0, opponentTeamId: t.id })));
+  return season!;
+}
+
+test("legacy season (format 1): 20 games, playoffs if over .500, bonuses paid by the server", async () => {
   const { res: su, cookie } = await signup("skipper", undefined, "10.0.0.11");
   assert.equal(su.statusCode, 201, su.body);
   const headers = { cookie };
@@ -256,9 +267,9 @@ test("season: 20 games, playoffs if over .500, bonuses paid by the server", asyn
   await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
   assert.equal((await app.inject({ url: "/api/season", headers })).statusCode, 404);
 
-  const started = await app.inject({ method: "POST", url: "/api/season", headers });
-  assert.equal(started.statusCode, 201, started.body);
-  let s = started.json();
+  await startLegacySeason(headers);
+  let s = (await app.inject({ url: "/api/season", headers })).json();
+  assert.equal(s.format, 1);
   assert.equal(s.number, 1);
   assert.equal(s.status, "regular");
   assert.equal(s.schedule.length, 20);
@@ -298,6 +309,7 @@ test("season: 20 games, playoffs if over .500, bonuses paid by the server", asyn
   const again = await app.inject({ method: "POST", url: "/api/season", headers });
   assert.equal(again.statusCode, 201, again.body);
   assert.equal(again.json().number, 2);
+  assert.equal(again.json().format, 2); // new seasons are arcade seasons
 });
 
 test("player development: games earn XP, levels are a badge, only the server writes XP", async () => {

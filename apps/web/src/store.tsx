@@ -3,6 +3,7 @@ import {
   COSMETIC_SLOTS, LEGENDARY_MILESTONES, woodDeltas,
   type BatLength, type BatWeight, type Cosmetic, type CosmeticSlot, type Gear, type StoreState, type SuperBat, type Wood,
 } from "@bb/shared";
+import { StarSummary } from "./arcade.tsx";
 import { api } from "./api.ts";
 import { ErrorNote, Loading, toast } from "./ui.tsx";
 
@@ -168,12 +169,13 @@ function Pick<T extends string | number>({ label, options, value, onPick }: {
 
 /** "+120 coins · Win 100 · Shutout 50 ..." under a final band. */
 export function RewardLine({ reward }: { reward: NonNullable<import("@bb/sim").PlayedGame["reward"]> }) {
-  const names: Record<string, string> = { result: "Game", shutout: "Shutout", homers: "Homers", comeback: "Comeback", streak: "Streak", season: "Season bonus" };
+  const names: Record<string, string> = { result: "Game", shutout: "Shutout", homers: "Homers", comeback: "Comeback", streak: "Streak", season: "Season bonus", stars: "Stars", unlock: "Unlock" };
   const parts = Object.entries(reward.coins).filter(([, v]) => v > 0).map(([k, v]) => `${names[k] ?? k} ${v}`);
   return (
     <div className="reward">
       <span className="reward-total"><span className="coin" aria-hidden /> +{reward.total} coins</span>
       <small className="muted">{parts.join(" · ")}</small>
+      {reward.arcade && <StarSummary arcade={reward.arcade} />}
       {reward.drop && <span className="chip ready">New Legendary bat: {reward.drop.name}</span>}
       {reward.levelUps?.map((u) => <span key={u.id} className="chip ready">{u.name} reached level {u.level}</span>)}
     </div>

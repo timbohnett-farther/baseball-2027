@@ -1,5 +1,5 @@
 import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
-import type { Gear, HittingRatings, PitchingRatings, Role } from "@bb/shared";
+import type { ArcadeLeague, Gear, HittingRatings, PitchingRatings, Role } from "@bb/shared";
 import type { SimTeam, UserInput } from "@bb/sim";
 
 export const mlbTeams = pgTable("mlb_teams", {
@@ -133,6 +133,10 @@ export const seasons = pgTable("seasons", {
   /** Season bonuses paid so far (regular-season completion, berth, round wins, title). */
   rewardCoins: integer("reward_coins").notNull().default(0),
   champion: boolean("champion").notNull().default(false),
+  /** 1 = the original 20-game season (kept as it was); 2 = the arcade season. */
+  format: integer("format").notNull().default(1),
+  /** Format 2: the seven opponents, styles and rival as they stood at the start. */
+  league: jsonb("league").$type<ArcadeLeague>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
@@ -145,6 +149,8 @@ export const seasonGames = pgTable("season_games", {
   opponentTeamId: integer("opponent_team_id").notNull().references(() => mlbTeams.id),
   gameId: integer("game_id").references(() => games.id, { onDelete: "set null" }),
   result: text("result").$type<"W" | "L" | "T">(),
+  /** Format 2: the three objective ids for this fixture and the ones the game earned (null until played). */
+  stars: jsonb("stars").$type<{ objectives: string[]; earned: string[] | null }>(),
 }, (t) => [primaryKey({ columns: [t.seasonId, t.gameNo] })]);
 
 export const dataRefreshes = pgTable("data_refreshes", {

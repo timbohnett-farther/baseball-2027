@@ -40,6 +40,8 @@ export interface Standing {
 }
 
 export interface SeasonState {
+  /** 1 = the original 20-game season. */
+  format: 1;
   id: number;
   number: number;
   status: SeasonStatus;

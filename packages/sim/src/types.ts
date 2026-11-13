@@ -128,6 +128,8 @@ export interface PlayedGame {
     total: number; coins: Record<string, number>; drop: { id: string; name: string } | null;
     /** Drafted players who reached a new development level in this game. */
     levelUps?: { id: number; name: string; level: number }[];
+    /** Arcade season games: this game's three-star objectives, the unlocks it reached and the lifetime star count. */
+    arcade?: { objectives: { id: string; label: string; earned: boolean | null }[]; stars: number; unlocks: { stars: number; label: string }[]; lifetimeStars: number };
   };
 }
 

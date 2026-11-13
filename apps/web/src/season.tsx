@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { PLAYOFF_ROUNDS, SEASON_LENGTH, type SeasonGame, type SeasonState } from "@bb/shared";
+import { SEASON_LENGTH, type ArcadeSeasonState, type SeasonGame, type SeasonState, type SuggestedDifficulty } from "@bb/shared";
 import type { InteractiveSetup, PlayedGame } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
+import { ArcadeHub, ArcadeOver } from "./arcade.tsx";
 import { GameView } from "./game.tsx";
 import { ErrorNote, Loading } from "./ui.tsx";
 const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
@@ -10,14 +11,14 @@ const ROUND_NAMES = ["", "Wild Card", "League Series", "World Series"];
 
 /** Season tab: a 20-game schedule vs real clubs, standings, then a best-of-3 playoff run. */
 export function SeasonView({ onDraft }: { onDraft: () => void }) {
-  const [season, setSeason] = useState<SeasonState | null | undefined>(undefined);
+  const [season, setSeason] = useState<SeasonState | ArcadeSeasonState | null | undefined>(undefined);
   const [game, setGame] = useState<PlayedGame | null>(null);
   const [duel, setDuel] = useState<InteractiveSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    api<SeasonState>("/api/season").then(setSeason).catch((e) => (e instanceof ApiError && e.status === 404 ? setSeason(null) : setError(e.message)));
+    api<SeasonState | ArcadeSeasonState>("/api/season").then(setSeason).catch((e) => (e instanceof ApiError && e.status === 404 ? setSeason(null) : setError(e.message)));
   };
   useEffect(load, []);
 
@@ -26,10 +27,10 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
     setError(null);
     try { then(await f()); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  const start = () => run(() => api<SeasonState>("/api/season", { method: "POST" }), setSeason);
-  const play = (mode: "sim" | "duel") => {
+  const start = () => run(() => api<SeasonState | ArcadeSeasonState>("/api/season", { method: "POST" }), setSeason);
+  const play = (mode: "sim" | "duel", difficulty?: SuggestedDifficulty) => {
     if (!season?.next) return;
-    const body = { opponentTeamId: season.next.opponent.id, seasonId: season.id };
+    const body = { opponentTeamId: season.next.opponent.id, seasonId: season.id, ...(mode === "duel" && difficulty ? { difficulty } : {}) };
     if (mode === "duel") run(() => api<InteractiveSetup>("/api/games/interactive", { body }), setDuel);
     else run(() => api<PlayedGame>("/api/games", { body }), setGame);
   };
@@ -41,12 +42,12 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
   if (season === null || season.status === "done") {
     return (
       <>
-        {season && <SeasonOver season={season} />}
+        {season && (season.format === 2 ? <ArcadeOver season={season} /> : <SeasonOver season={season} />)}
         <section className="panel narrow">
           <h2>{season ? `Season ${season.number + 1}` : "Start a season"}</h2>
           <p className="muted">
-            {SEASON_LENGTH} games against real MLB clubs. Finish over .500 and you're into a {PLAYOFF_ROUNDS}-round playoff, best of 3 each.
-            Season bonuses are paid on top of every game's coins.
+            Seven games against seven MLB clubs, with a rival waiting in game 4. The top four meet in a semifinal and a final.
+            Earn stars in every game to unlock new gear. Season bonuses are paid on top of every game's coins.
           </p>
           <ErrorNote message={error} />
           <p className="play-buttons">
@@ -54,10 +55,12 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
             <button onClick={onDraft}>My team</button>
           </p>
         </section>
-        {season && <Standings season={season} />}
+        {season && (season.format === 2 ? <ArcadeHub season={season} busy={busy} error={null} onPlay={play} /> : <Standings season={season} />)}
       </>
     );
   }
+
+  if (season.format === 2) return <ArcadeHub season={season} busy={busy} error={error} onPlay={play} />;
 
   const { record, next } = season;
   const regular = season.schedule.filter((g) => g.round === 0);

@@ -18,7 +18,9 @@ const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach" };
 const DUELS = Object.keys(CONTROLS);
-const moments = only.length ? only : check ? DUELS : ["pitch", "swing", "hr", "k", "single", "double", "final"];
+// Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
+const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
+const moments = only.length ? only : check ? [...DUELS, ...Object.keys(HUBS)] : ["pitch", "swing", "hr", "k", "single", "double", "final"];
 const HUD = ".scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
@@ -58,7 +60,21 @@ async function layoutCheck(page, m) {
   for (const b of bad) console.log("   - " + b);
   return bad.length;
 }
-const port = 5199;
+async function hubCheck(page, m) {
+  const vp = page.viewportSize();
+  const bad = [];
+  for (const sel of HUBS[m]) if (!(await page.locator(sel).first().isVisible().catch(() => false))) bad.push(`missing or hidden: ${sel}`);
+  const r = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    small: [...document.querySelectorAll("button")].map((b) => { const q = b.getBoundingClientRect(); return { t: (b.textContent || "").trim().slice(0, 16), w: q.width, h: q.height }; }).filter((b) => b.w * b.h > 0 && Math.min(b.w, b.h) < 43.5),
+  }));
+  if (r.overflow > 0) bad.push(`horizontal page overflow ${r.overflow}px`);
+  if (phone) for (const b of r.small) bad.push(`touch target <44px: button "${b.t}" ${b.w | 0}x${b.h | 0}`);
+  console.log(`${bad.length ? "FAIL" : "ok  "} ${m}: ${vp.width}x${vp.height}`);
+  for (const b of bad) console.log("   - " + b);
+  return bad.length;
+}
+const port = Number(process.env.SHOT_PORT) || 5199;
 mkdirSync(outDir, { recursive: true });
 
 const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort"], { cwd: web, stdio: ["ignore", "pipe", "inherit"] });
@@ -79,6 +95,13 @@ try {
     if (CONTROLS[m]) {
       const n = await page.locator(CONTROLS[m]).count();
       if (!n) throw new Error(`${m}: controls (${CONTROLS[m]}) missing from the shot`);
+    }
+    if (HUBS[m]) {
+      if (check) { failures += await hubCheck(page, m); continue; }
+      const file = join(outDir, `${m}${phone ? "-phone" : "-desktop"}.jpg`);
+      await page.screenshot({ path: file, type: "jpeg", quality: 82, fullPage: true });
+      console.log(file);
+      continue;
     }
     if (check) { failures += await layoutCheck(page, m); continue; }
     await page.waitForSelector(".field canvas", { timeout: 15000 }); // the ballpark is a lazy chunk; never shoot before it mounts

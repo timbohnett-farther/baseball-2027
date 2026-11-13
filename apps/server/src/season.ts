@@ -1,8 +1,8 @@
-import { randomInt } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { PLAYOFF_ROUNDS, ROUND_WINS, SEASON_LENGTH, SEASON_REWARDS, type SeasonGame, type SeasonState, type Standing } from "@bb/shared";
+import { ARCADE_FORMAT, PLAYOFF_ROUNDS, ROUND_WINS, SEASON_LENGTH, SEASON_REWARDS, type SeasonGame, type SeasonState, type Standing } from "@bb/shared";
 import { createRng } from "@bb/sim";
+import { arcadeCareer, arcadeState, startArcadeSeason } from "./arcade-season.ts";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, seasonGames, seasons, users, userTeams } from "./db/schema.ts";
@@ -135,6 +135,7 @@ async function state(db: Db, season: SeasonRow): Promise<SeasonState> {
   const [team] = await db.select({ name: userTeams.name }).from(userTeams).where(eq(userTeams.id, season.teamId));
   const regularPlayed = schedule.filter((g) => g.round === 0 && g.gameId !== null).length;
   return {
+    format: 1,
     id: season.id, number: season.number, status: season.status,
     record: { w: season.wins, l: season.losses, t: season.ties },
     playoffRound: season.playoffRound, playoffWins: season.playoffWins, playoffLosses: season.playoffLosses,
@@ -150,10 +151,12 @@ export async function seasonRoutes(app: FastifyInstance) {
     const db = getDb();
     const season = await latest(db, req.user!.id);
     if (!season) return reply.code(404).send({ error: "No season yet." });
-    return state(db, season);
+    return season.format === ARCADE_FORMAT ? arcadeState(db, season) : state(db, season);
   });
 
-  // Start a season: 20 clubs drawn from the league by the season seed.
+  app.get("/api/season/career", { preHandler: requireUser }, async (req) => arcadeCareer(getDb(), req.user!.id));
+
+  // Start a season: seven clubs, one game each, then a top-4 bracket. Seasons begun before this stay on the 20-game format.
   app.post("/api/season", { preHandler: requireUser }, async (req, reply) => {
     const db = getDb();
     const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, req.user!.id));
@@ -162,12 +165,7 @@ export async function seasonRoutes(app: FastifyInstance) {
     const current = await latest(db, req.user!.id);
     if (current && current.status !== "done") return reply.code(400).send({ error: "Finish your current season first." });
 
-    const seed = randomInt(0, 2 ** 31 - 1);
-    const rng = createRng(seed);
-    const ids = teamSummaries().map((t) => t.id);
-    for (let i = ids.length - 1; i > 0; i--) { const j = rng.int(0, i); [ids[i], ids[j]] = [ids[j]!, ids[i]!]; }
-    const [season] = await db.insert(seasons).values({ userId: req.user!.id, teamId: team.id, number: (current?.number ?? 0) + 1, seed }).returning();
-    await db.insert(seasonGames).values(ids.slice(0, SEASON_LENGTH).map((opponentTeamId, i) => ({ seasonId: season!.id, gameNo: i + 1, round: 0, opponentTeamId })));
-    return reply.code(201).send(await state(db, season!));
+    const season = await startArcadeSeason(db, req.user!.id, team.id, (current?.number ?? 0) + 1);
+    return reply.code(201).send(await arcadeState(db, season));
   });
 }

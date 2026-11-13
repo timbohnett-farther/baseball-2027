@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
+import { UNLOCKS, type ArcadeFixture, type ArcadeSeasonState, type ArcadeStanding, type BracketGame, type ClubStyle, type SuggestedDifficulty } from "@bb/shared";
+import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
 import { DuelView } from "./duel.tsx";
 
@@ -86,9 +88,82 @@ function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: nu
   return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} onSkip={() => {}} shotInputs={shotInputs} coach={coach} /></div>;
 }
 
+const CLUBS: { name: string; abbr: string; style: ClubStyle; star: string }[] = [
+  { name: "Ridgeback", abbr: "RDG", style: "balanced", star: "your drafted lineup" },
+  { name: "Harbor City", abbr: "HAR", style: "power", star: "Rowan Hale" },
+  { name: "Lakeshore", abbr: "LKS", style: "speed", star: "Idris Cole" },
+  { name: "Iron Valley", abbr: "IRV", style: "defense", star: "Mateo Reyes" },
+  { name: "Summit", abbr: "SUM", style: "pitch", star: "Kenji Ito" },
+  { name: "Redwood", abbr: "RWD", style: "counter", star: "Dario Vance" },
+  { name: "Bayfront", abbr: "BAY", style: "rival", star: "Elias Ward" },
+  { name: "Prairie", abbr: "PRA", style: "balanced", star: "Theo Marsh" },
+];
+const STYLE_TEXT: Record<string, [string, string]> = {
+  balanced: ["Balanced", "No weak spots. Win the small things."], power: ["Power", "Mistakes leave the park. Keep the ball down."],
+  speed: ["Speed", "They run on anything. Hold runners close."], defense: ["Defense", "Gloves everywhere. Hit it where they are not."],
+  pitch: ["Pitching", "Arms over bats. Be patient at the plate."], counter: ["Counter-puncher", "They adjust late. Score early."], rival: ["Rival", "Same division, same grudge."],
+};
+const opp = (i: number) => { const c = CLUBS[i + 1]!; const [styleLabel, scouting] = STYLE_TEXT[c.style]!; return { id: i + 2, name: c.name, abbr: c.abbr, style: c.style, styleLabel, scouting, star: c.star, rival: i === 3 }; };
+const OBJ = [["win", "Win the game"], ["scout", "Allow 1 home run or fewer"], ["arc", "Score in the 1st inning"]] as const;
+const SUGGEST: SuggestedDifficulty[] = ["rookie", "rookie", "pro", "pro", "pro", "allstar", "allstar"];
+function fixtureRow(i: number, played: number, got: number[]): ArcadeFixture {
+  const done = i < played;
+  return {
+    gameNo: i + 1, round: 0, label: `Game ${i + 1}`, opponent: opp(i), gameId: done ? i + 1 : null, result: done ? (i % 3 === 1 ? "L" : "W") : null,
+    userScore: done ? 5 - (i % 3) : null, opponentScore: done ? 2 + (i % 3) : null,
+    objectives: OBJ.map(([id, label], k) => ({ id: `${id}-${i}`, label, kind: k === 0 ? "result" : k === 1 ? "scout" : "arcade", earned: done ? k < (got[i] ?? 0) : null })),
+    stars: done ? got[i] ?? 0 : 0, difficulty: done ? SUGGEST[i]! : null, suggested: SUGGEST[i]!,
+  };
+}
+const standingRows = (playoffs: boolean): ArcadeStanding[] => CLUBS.map((c, i) => ({
+  id: i + 1, rank: i + 1, w: 6 - i + (i > 5 ? 0 : 0), l: i + 1, t: 0, rf: 40 - i * 3, ra: 20 + i * 2, diff: 20 - i * 5, gb: i * 0.5,
+  why: i === 1 ? "Won the head-to-head" : i === 2 ? "Lost the head-to-head" : "", name: c.name, abbr: c.abbr, you: i === 0, rival: c.style === "rival",
+  seed: playoffs && i < 4 ? i + 1 : null, inPlayoffs: i < 4,
+}));
+const lifetime = (stars: number) => ({ stars, track: UNLOCKS.map((u) => ({ ...u, earned: u.stars <= stars })), next: UNLOCKS.find((u) => u.stars > stars) ?? null });
+const slot = (i: number, score: number | null) => ({ id: i + 1, name: CLUBS[i]!.name, abbr: CLUBS[i]!.abbr, you: i === 0, score });
+function arcadeFixture(kind: "hub" | "bracket"): ArcadeSeasonState {
+  const got = [3, 2, 3, 1, 2, 3, 2];
+  const playoffs = kind === "bracket";
+  const played = playoffs ? 7 : 3;
+  const schedule = Array.from({ length: 7 }, (_, i) => fixtureRow(i, played, got));
+  const semis: BracketGame[] = [
+    { label: "Semifinal 1", home: slot(0, playoffs ? 4 : null), away: slot(3, playoffs ? 2 : null), winner: playoffs ? 1 : null },
+    { label: "Semifinal 2", home: slot(1, playoffs ? 3 : null), away: slot(2, playoffs ? 5 : null), winner: playoffs ? 3 : null },
+  ];
+  const next: ArcadeFixture | null = playoffs
+    ? { ...fixtureRow(0, 0, []), gameNo: 9, round: 2, label: "Final", opponent: opp(1), suggested: "allstar" }
+    : schedule[3]!;
+  if (playoffs) schedule.push({ ...fixtureRow(0, 1, [3]), gameNo: 8, round: 1, label: "Semifinal", opponent: opp(3) }, next!);
+  return {
+    format: 2, id: 1, number: 2, status: playoffs ? "playoffs" : "regular", record: playoffs ? { w: 5, l: 2, t: 0 } : { w: 2, l: 1, t: 0 }, played,
+    schedule, next, standings: standingRows(playoffs), bracket: playoffs ? { semis, final: { label: "Final", home: slot(0, null), away: slot(2, null), winner: null } } : null,
+    champion: false, placement: null, rewardCoins: 0, stars: { season: playoffs ? 14 : 8, max: 27 }, highestDifficulty: "pro", lifetime: lifetime(playoffs ? 14 : 8),
+  };
+}
+
+function HubShot({ moment }: { moment: string }) {
+  useEffect(() => { const t = setTimeout(() => { (window as any).__shotReady = true; }, 300); return () => clearTimeout(t); }, []);
+  const noop = () => {};
+  if (moment === "season-stars") {
+    return (
+      <div className="page">
+        <section className="panel final-band win"><span className="display">W 5-2</span></section>
+        <div className="reward">
+          <span className="reward-total"><span className="coin" aria-hidden /> +230 coins</span>
+          <StarSummary arcade={{ objectives: [{ id: "win", label: "Win the game", earned: true }, { id: "s", label: "Allow 1 home run or fewer", earned: true }, { id: "a", label: "Score in the 1st inning", earned: false }], stars: 2, unlocks: [{ stars: 9, label: "Red Line gloves" }], lifetimeStars: 9 }} />
+        </div>
+        <ArcadeOver season={{ ...arcadeFixture("bracket"), status: "done", next: null, champion: true, placement: { place: 1, label: "Champions!" }, rewardCoins: 650 }} />
+      </div>
+    );
+  }
+  return <div className="page"><ArcadeHub season={arcadeFixture(moment === "season-bracket" ? "bracket" : "hub")} busy={false} error={null} onPlay={noop} /></div>;
+}
+
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
+  if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }
     return <DuelShot side={duel === "duel-tutorial-swing" || duel === "duel-hint" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} coach={duel === "duel-hint" ? "hints" : "tutorial"} />;

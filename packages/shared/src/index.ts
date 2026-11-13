@@ -68,3 +68,4 @@ export * from "./names.ts";
 export * from "./items.ts";
 export * from "./season.ts";
 export * from "./progress.ts";
+export * from "./arcade-season.ts";
