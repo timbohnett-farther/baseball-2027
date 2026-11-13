@@ -41,7 +41,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
       modifier pipeline, Comet, Laser, Gap Master, Second Swing, Mirage, Vortex. Unit + replay tests.
 - [x] W21 (fb96d89) Tap-only batting/pitching UI (ARC 4-6, 9): four pitch buttons + 9-cell target grid, Contact/Power, power-up
       chips with plain-language disabled reasons, safe-area layout. Replaces the Super button.
-- [ ] W22 Fielding + throwing (ARC 7, PUP 9): automatic fielder selection, contextual action button, base targets,
+- [x] W22 (631545c) Fielding + throwing (ARC 7, PUP 9): automatic fielder selection, contextual action button, base targets,
       recommended throw; Wall Reaper, Acrobat, Cannon Arm.
 - [ ] W23 Baserunning (ARC 8, PUP 10): fixed leads, steal/pickoff, tag-ups, selected-runner commands; Afterburner.
 - [ ] W24 Rally Breaker + CPU (PUP 11, 14; ARC 11): Rally Breaker, three CPU difficulty profiles, CPU ability use, AI-vs-AI soak test.
