@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 
@@ -150,6 +151,30 @@ function limb(from: THREE.Vector3, to: THREE.Vector3, r: number, mat: THREE.Mate
 }
 
 /**
+ * Bake a parent's direct child meshes into one mesh per (material, shadow flags): same pixels, far fewer draw calls.
+ * Materials stay the same instances, so later colour changes (dress()) still reach every merged piece.
+ */
+function mergeByMaterial(parent: THREE.Object3D) {
+  const buckets = new Map<string, THREE.Mesh[]>();
+  for (const c of parent.children) {
+    if (!(c instanceof THREE.Mesh) || Array.isArray(c.material)) continue;
+    const key = `${c.material.uuid}|${+c.castShadow}${+c.receiveShadow}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), c]);
+  }
+  for (const meshes of buckets.values()) {
+    if (meshes.length < 2) continue;
+    const baked = meshes.map((m) => { m.updateMatrix(); return m.geometry.clone().applyMatrix4(m.matrix); });
+    const geo = mergeGeometries(baked);
+    baked.forEach((b) => b.dispose());
+    if (!geo) continue; // attribute mismatch: leave these meshes as they were
+    const out = new THREE.Mesh(geo, meshes[0].material);
+    out.castShadow = meshes[0].castShadow; out.receiveShadow = meshes[0].receiveShadow;
+    parent.add(out);
+    for (const m of meshes) { parent.remove(m); m.geometry.dispose(); }
+  }
+}
+
+/**
  * Pro-proportioned player, 1.85 m, built in a local frame facing +z: team-colour jersey and cap, white pants,
  * belt and cleats, posed limbs. Batters get a helmet, a bat held at the back shoulder and the frame turned to
  * face the plate (right-handed). Fielders get a glove. Generic faces only, no likenesses.
@@ -215,6 +240,7 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
     rig.add(b);
     rig.rotation.y = Math.PI / 2; // local +z (chest) now faces +x, across the plate
   }
+  mergeByMaterial(rig); // the bat group is not a Mesh, so it stays separate and keeps animating
   g.add(rig);
   g.userData = { bodyMat, sleeveMat, capMat, cleatMat, helmetMat, gloveMat, skin: SKIN[seed % SKIN.length], bat };
   g.scale.setScalar(PLAYER_SCALE);
@@ -443,11 +469,12 @@ class Director {
     const face = new THREE.Mesh(new THREE.PlaneGeometry(28, 8.4), new THREE.MeshBasicMaterial({ map: signTexture("BASEBALL 2027", "#0a0d14", "#f2e3c6", 1024, 300) }));
     face.position.set(0, 24, -(WALL_R + 11.25)); this.scene.add(face);
     const glow = softSprite("rgba(255,241,214,1)");
+    const bankMat = new THREE.MeshBasicMaterial({ color: "#fff6e3" });
     for (const a of [-1.3, -0.85, -0.35, 0.35, 0.85, 1.3]) {
       const r = WALL_R + 42, x = Math.sin(a) * r, z = -Math.cos(a) * r;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.7, 56, 8), concrete);
       pole.position.set(x, 28, z); this.scene.add(pole);
-      const bank = new THREE.Mesh(new THREE.BoxGeometry(11, 4.5, 0.6), new THREE.MeshBasicMaterial({ color: "#fff6e3" }));
+      const bank = new THREE.Mesh(new THREE.BoxGeometry(11, 4.5, 0.6), bankMat);
       bank.position.set(x, 54, z); bank.rotation.y = -a; bank.rotation.x = 0.5; this.scene.add(bank);
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
       s.position.set(x, 54, z); s.scale.setScalar(34); this.scene.add(s);
@@ -461,6 +488,7 @@ class Director {
       s.scale.setScalar(2 + rand() * 4);
       this.scene.add(s);
     }
+    mergeByMaterial(this.scene); // static park only: nothing else is in the scene yet
   }
 
   /** A deck full of people as coloured points along the seating slope. */
