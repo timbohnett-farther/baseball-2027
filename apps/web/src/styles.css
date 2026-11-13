@@ -626,3 +626,13 @@ tr.in td { background: rgba(224, 164, 60, 0.05); }
 @media (prefers-reduced-motion: reduce) { .ability-cue { animation-name: ability-cue-flat; } @keyframes ability-cue-flat { 0%, 85% { opacity: 1; } 100% { opacity: 0; } } }
 .shot .ability-cue { animation: none; opacity: 1; }
 .shot .big-play { position: fixed; left: 12px; right: 12px; bottom: 44px; margin: 0; z-index: 2; }
+
+/* --- Resume / PWA (W27) --------------------------------------------------------------- */
+.resume-bar, .update-bar { position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; padding: 10px 16px calc(10px) 16px; background: var(--surface-raised); border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.12)); color: var(--text-1, inherit); font-size: 14px; }
+.pause-gate { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(11, 13, 18, 0.88); text-align: center; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.pause-gate .display { font-size: 28px; }
+.pause-gate button { min-height: 56px; min-width: 160px; font-size: 19px; }
+@media (max-width: 640px) and (orientation: portrait) and (hover: none) {
+  .rotate-hint { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; margin: 0; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5); pointer-events: none; }
+  .rotate-hint::before { content: "\21BB  "; font-size: 18px; }
+}

@@ -85,6 +85,13 @@
       "when": 1794690000000,
       "tag": "0011_arcade_season",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794776400000,
+      "tag": "0012_games_client_id",
+      "breakpoints": true
     }
   ]
 }

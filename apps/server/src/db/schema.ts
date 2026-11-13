@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { ArcadeLeague, Gear, HittingRatings, PitchingRatings, Role } from "@bb/shared";
 import type { SimTeam, UserInput } from "@bb/sim";
 
@@ -112,8 +112,10 @@ export const games = pgTable("games", {
   result: text("result").$type<"W" | "L" | "T">().notNull(),
   /** Coins this game paid out (0 for games before the store existed). */
   coins: integer("coins").notNull().default(0),
+  /** Browser-made id for a finished interactive game, so a retried upload (offline queue) can't pay out twice. */
+  clientGameId: text("client_game_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("games_user_client_game_idx").on(t.userId, t.clientGameId)]);
 
 /** A 20-game season vs real teams, then a three-round playoff if the record is winning. */
 export const seasons = pgTable("seasons", {

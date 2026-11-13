@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
 import { useSound, useVolume } from "./audio.ts";
 import { hapticsSupported, useHaptics } from "./haptics.ts";
+import { flush, readOutbox } from "./outbox.ts";
+import { clearSnapshot, loadSnapshot, restore, type Restored } from "./resume.ts";
 import { AuthPanel } from "./auth.tsx";
 import { MyTeamView } from "./draft.tsx";
 import { PlayView } from "./game.tsx";
@@ -10,6 +12,8 @@ import { Ovr, PlayerBoard, PlayerTable } from "./players.tsx";
 import { SeasonView } from "./season.tsx";
 import { StoreView } from "./store.tsx";
 import { Empty, Loading, Toaster, toast } from "./ui.tsx";
+
+const DuelView = lazy(() => import("./duel.tsx").then((m) => ({ default: m.DuelView })));
 
 const DIVISION_ORDER = [
   "American League East", "American League Central", "American League West",
@@ -28,6 +32,41 @@ export function App() {
   const [view, setView] = useState<View>({ kind: "teams" });
   const [offline, setOffline] = useState(false);
 
+  const [update, setUpdate] = useState<(() => void) | null>(null);
+  // A game that was in progress when the page went away: shown as a prompt until the player resumes or lets it go.
+  const [resumable, setResumable] = useState<Extract<Restored, { ok: true }> | null>(null);
+  const [resumed, setResumed] = useState<Extract<Restored, { ok: true }>["snapshot"] | null>(null);
+
+  useEffect(() => {
+    const on = (e: Event) => setUpdate(() => (e as CustomEvent<() => void>).detail);
+    window.addEventListener("bb-update", on);
+    return () => window.removeEventListener("bb-update", on);
+  }, []);
+
+  // Games finished without a connection go up as soon as we're signed in and online.
+  useEffect(() => {
+    if (!me) return;
+    const send = () => {
+      if (!readOutbox().length) return;
+      flush((body) => api("/api/games/interactive/finish", { body })).then((r) => {
+        if (r.sent) toast(r.sent === 1 ? "Your saved game is on the books." : `${r.sent} saved games are on the books.`);
+        if (r.dropped) toast("A saved game couldn't be counted because your lineup changed.", "bad");
+      });
+    };
+    send();
+    window.addEventListener("online", send);
+    return () => window.removeEventListener("online", send);
+  }, [me]);
+
+  useEffect(() => {
+    if (!me) return;
+    const raw = loadSnapshot();
+    if (!raw) return;
+    const r = restore(raw);
+    if (r.ok) setResumable(r);
+    else { clearSnapshot(); toast(r.message, "bad"); }
+  }, [me]);
+
   const loadTeams = () => {
     setOffline(false);
     return fetch("/api/teams").then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then(setData)
@@ -45,11 +84,31 @@ export function App() {
     <button role="tab" aria-selected={view.kind === kind || (kind === "teams" && view.kind === "team")} className={view.kind === kind || (kind === "teams" && view.kind === "team") ? "on" : ""} onClick={() => setView({ kind } as View)}>{label}</button>
   );
 
+  if (resumed) {
+    const leave = () => { setResumed(null); setResumable(null); };
+    return (
+      <>
+        <Toaster />
+        <Suspense fallback={<section className="panel">Taking the field…</section>}>
+          <DuelView setup={resumed.setup} seasonId={resumed.seasonId} resume={{ gameId: resumed.gameId, inputs: resumed.inputs }} onDone={leave} />
+        </Suspense>
+      </>
+    );
+  }
+
   return (
     <>
     <a className="skip" href="#main">Skip to content</a>
     <Atmosphere />
     <Toaster />
+    {update && <div className="update-bar" role="status">A new version is ready. <button className="link" onClick={update}>Update</button></div>}
+    {resumable && (
+      <div className="resume-bar" role="dialog" aria-label="Resume game">
+        <span><b>Game in progress</b> · {resumable.snapshot.setup.teams.away.abbr} {resumable.score.away} - {resumable.score.home} {resumable.snapshot.setup.teams.home.abbr}, {resumable.half === "top" ? "Top" : "Bottom"} {resumable.inning}, {resumable.balls}-{resumable.strikes}, {resumable.outs} out</span>
+        <button className="primary" onClick={() => setResumed(resumable.snapshot)}>Resume game</button>
+        <button className="link" onClick={() => { clearSnapshot(); setResumable(null); }}>Start over</button>
+      </div>
+    )}
     <div className="page">
       <header className="hero">
         <div className="userbar">

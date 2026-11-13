@@ -16,7 +16,7 @@ const phone = args.includes("--phone");
 const check = args.includes("--check");
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check");
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
 const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
@@ -32,7 +32,7 @@ async function layoutCheck(page, m) {
   const boxes = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => {
     const r = e.getBoundingClientRect(), s = getComputedStyle(e);
     return { n: (e.className && e.className.baseVal === undefined ? e.className : e.tagName).toString().split(" ").slice(0, 2).join(".") + ":" + (e.textContent || "").trim().slice(0, 14), x: r.left, y: r.top, w: r.width, h: r.height, vis: r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0" };
-  }), HUD);
+  }), m === "duel-resume" ? ".pause-gate button" : HUD);
   // Skip wrappers that contain another listed box (a chip's inner span is not listed; the container .scorebug contains no listed box).
   const vis = boxes.filter((b) => b.vis);
   const bad = [];
@@ -65,7 +65,8 @@ async function layoutCheck(page, m) {
     const c = await page.evaluate(() => { const r = document.querySelector(".coach")?.getBoundingClientRect(); return r && r.width ? [r.left, r.top, r.width, r.height] : null; });
     if (c && c[0] < px + pw && px < c[0] + c[2] && c[1] < py + ph && py < c[1] + c[3]) bad.push(`coach covers the plate/batter: [${c.map(Math.round)}] vs plate [${plate}]`);
   }
-  if (spread < 6) bad.push(`centre pixels are flat (${spread} colours): ballpark not rendered`);
+  // The resume gate dims the whole field on purpose, so only its own button is measured.
+  if (spread < 6 && m !== "duel-resume") bad.push(`centre pixels are flat (${spread} colours): ballpark not rendered`);
   console.log(`${bad.length ? "FAIL" : "ok  "} ${m}: ${vis.length} HUD boxes, centre colours ${spread}`);
   for (const b of bad) console.log("   - " + b);
   return bad.length;

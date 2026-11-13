@@ -5,7 +5,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TutorialCompleteResponse } from "@bb/shared";
 import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
-import { api } from "./api.ts";
+import { api, ApiError } from "./api.ts";
+import { dequeue, enqueue, isFinal } from "./outbox.ts";
+import { clearSnapshot, newGameId, saveSnapshot, SNAPSHOT_SCHEMA } from "./resume.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { hapticFor, vibrate } from "./haptics.ts";
 import { PaceTracker } from "./pace.ts";
@@ -42,10 +44,21 @@ const SHOT = typeof location !== "undefined" && new URLSearchParams(location.sea
  * `coach` is Rookie Rally ("tutorial": guided lessons, no auto-take timers, completion goes to /api/tutorial/complete
  * instead of the game record, and `onSkip` replaces Quit) or "hints" (one-time tips in a normal game).
  */
-export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[]; coach?: "tutorial" | "hints"; onSkip?: () => void }) {
+export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, resume, shotPaused }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[]; coach?: "tutorial" | "hints"; onSkip?: () => void; resume?: { gameId: string; inputs: UserInput[] }; shotPaused?: boolean }) {
   const tutorial = coach === "tutorial";
-  const [inputs, setInputs] = useState<UserInput[]>(shotInputs ?? []);
-  const [shown, setShown] = useState(shotInputs ? 1e6 : 0);
+  const [gameId] = useState(() => resume?.gameId ?? newGameId());
+  const start = shotInputs ?? resume?.inputs;
+  const [inputs, setInputs] = useState<UserInput[]>(start ?? []);
+  const [shown, setShown] = useState(start ? 1e6 : 0);
+  // A resumed game (or one the app lost sight of) waits for a tap before the next pitch, so nothing happens while you look away.
+  const [paused, setPaused] = useState(!!resume || !!shotPaused);
+  useEffect(() => {
+    const stop = () => { if (document.visibilityState === "hidden") setPaused(true); };
+    const hide = () => setPaused(true);
+    document.addEventListener("visibilitychange", stop);
+    window.addEventListener("pagehide", hide);
+    return () => { document.removeEventListener("visibilitychange", stop); window.removeEventListener("pagehide", hide); };
+  }, []);
   const [speed, setSpeed] = useState(1);
   const [pitchType, setPitchType] = useState<PitchType>("fastball");
   const [approach, setApproach] = useState<Approach>("contact");
@@ -72,10 +85,10 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
   // Play out newly revealed events, one after another.
   const caughtUp = shown >= events.length - 1;
   useEffect(() => {
-    if (caughtUp) return;
+    if (caughtUp || paused) return;
     const t = setTimeout(() => setShown((n) => n + 1), holdFor(events[shown]) / speed);
     return () => clearTimeout(t);
-  }, [shown, caughtUp, speed, events]);
+  }, [shown, caughtUp, speed, events, paused]);
 
   const submit = useCallback((input: UserInput) => setInputs((prev) => [...prev, input]), []);
   const current = events[Math.min(shown, events.length - 1)];
@@ -95,7 +108,14 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
   const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);
   const youWon = g.result?.winner === setup.userSide;
   const done = !!g.result && caughtUp;
-  const awaiting = caughtUp ? g.awaiting : null;
+  const awaiting = caughtUp && !paused ? g.awaiting : null;
+
+  // Every time the game stops to ask you something, remember how to get back here. Tutorials and dev shots never save.
+  useEffect(() => {
+    if (tutorial || SHOT || !caughtUp || !g.awaiting) return;
+    saveSnapshot({ schema: SNAPSHOT_SCHEMA, gameId, seasonId, setup, inputs, at: Date.now() });
+  }, [caughtUp, g.awaiting, tutorial, gameId, seasonId, setup, inputs]);
+  const quit = () => { clearSnapshot(); onDone(); };
 
   // Once it's over, the server replays our choices against the seed and records the game.
   const [saved, setSaved] = useState<"saving" | "saved" | string | null>(null);
@@ -109,9 +129,16 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
         .then((r) => { setBadge(r.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
       return;
     }
-    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final, pace: pace.current!.report(Date.now()) } })
-      .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
-  }, [g.result, saved, inputs, setup, tutorial]);
+    // Queue first, so a dead connection at the last out (or closing the tab right now) can't lose the game.
+    const body = { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final, pace: pace.current!.report(Date.now()), clientGameId: gameId };
+    enqueue({ gameId, body });
+    clearSnapshot();
+    api<PlayedGame>("/api/games/interactive/finish", { body })
+      .then((p) => { dequeue(gameId); setReward(p.reward); setSaved("saved"); }, (e: Error) => {
+        if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); setSaved(e.message); }
+        else setSaved("Saved on this device. It will upload when you're back online.");
+      });
+  }, [g.result, saved, inputs, setup, tutorial, gameId, seasonId]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
 
   return (
@@ -124,11 +151,19 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
-          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={onDone}>Quit</button>}
+          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={quit}>Quit</button>}
         </div>
       </div>
 
       <p className="rotate-hint" aria-hidden>Turn your phone sideways for the full field.</p>
+      {paused && !done && (
+        <div className="pause-gate" role="dialog" aria-label="Game paused">
+          <b className="display">{resume && inputs === resume.inputs ? "Welcome back" : "Paused"}</b>
+          <span>{setup.teams.away.abbr} {current.state.score.away} - {current.state.score.home} {setup.teams.home.abbr}</span>
+          <small>Picks up at the start of the pitch.</small>
+          <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
+        </div>
+      )}
       <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />

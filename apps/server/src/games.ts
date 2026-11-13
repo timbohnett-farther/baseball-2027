@@ -235,7 +235,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // The game is over: replay the user's choices against the seed with today's lineups, and record
   // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number; difficulty?: string; pace?: unknown } }>(
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number; difficulty?: string; pace?: unknown; clientGameId?: string } }>(
     "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
       const db = getDb();
       const { seed, inputs, final } = req.body ?? {};
@@ -244,6 +244,14 @@ export async function gameRoutes(app: FastifyInstance) {
       const difficulty = req.body?.difficulty ?? "pro";
       if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7) || !isDifficulty(difficulty)) {
         return reply.code(400).send({ error: "That game can't be saved." });
+      }
+      const clientGameId = req.body?.clientGameId;
+      if (clientGameId !== undefined && (typeof clientGameId !== "string" || !/^[\w-]{8,64}$/.test(clientGameId))) return reply.code(400).send({ error: "That game can't be saved." });
+      // A retry of an upload that already landed: hand back the saved game, pay nothing again.
+      if (clientGameId) {
+        const [dup] = await db.select({ g: games, t: mlbTeams }).from(games).innerJoin(mlbTeams, eq(mlbTeams.id, games.opponentTeamId))
+          .where(and(eq(games.userId, req.user!.id), eq(games.clientGameId, clientGameId)));
+        if (dup) return reply.code(200).send(played(dup.g, { id: dup.t.id, name: dup.t.name, abbr: dup.t.abbreviation }));
       }
       // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.
       const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId, rules < 3);
@@ -265,7 +273,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const reward = await payout(db, req.user!.id, result, outcome);
       const [row] = await db.insert(games).values({
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules, difficulty,
-        userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
+        userSide: "home", teams, inputs, clientGameId, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
       if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward);
       reward.levelUps = await awardXp(db, team.id, result, outcome);

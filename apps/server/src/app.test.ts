@@ -44,7 +44,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
-  assert.equal(res.json().migrations, 12, "every migration in drizzle/ should be applied at boot");
+  assert.equal(res.json().migrations, 13, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 
@@ -192,7 +192,20 @@ test("play a game against an MLB team, then see it in your history", async () =>
   assert.deepEqual(saved.json().result.final, out.result!.final);
   const reloaded = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.deepEqual(reloaded.result.events, out.result!.events);
-  assert.equal((await app.inject({ url: "/api/games", headers })).json().games.length, 2);
+
+  // The offline queue may upload the same finished game twice: the second try returns the first game and pays nothing.
+  const coinsBefore = (await app.inject({ url: "/api/store", headers })).json().coins;
+  const withId = { ...bad, final: out.result!.final, clientGameId: "client-game-0001" };
+  assert.equal((await finish({ ...withId, clientGameId: "no" })).statusCode, 400);
+  const once = await finish(withId);
+  assert.equal(once.statusCode, 201, once.body);
+  const coinsAfter = (await app.inject({ url: "/api/store", headers })).json().coins;
+  assert.ok(coinsAfter > coinsBefore);
+  const twice = await finish(withId);
+  assert.equal(twice.statusCode, 200, twice.body);
+  assert.equal(twice.json().id, once.json().id);
+  assert.equal((await app.inject({ url: "/api/store", headers })).json().coins, coinsAfter);
+  assert.equal((await app.inject({ url: "/api/games", headers })).json().games.length, 3);
 });
 
 test("coins: games pay out, the store sells bats, gear equips", async () => {
