@@ -46,6 +46,21 @@ async function layoutCheck(page, m) {
     }
     if (phone && a.n.startsWith("") && /^(?:[^:]*button|tp-|pchip|swing|target|duel|approach|run-|coach|chip|speed|link|primary)/.test(a.n) && Math.min(a.w, a.h) < 43.5 && a.w * a.h > 0) bad.push(`touch target <44px: ${a.n} ${a.w | 0}x${a.h | 0}`);
   }
+  // Touch contract (Kimi CLAUDE.md section 4, phone only): primary action >= 112x88, other gameplay controls >= 56x56,
+  // base targets >= 64x64, and 8pt between neighbouring gameplay controls. Measured from the real DOM rects in CSS px.
+  if (phone) {
+    const SIZES = [[".swing-btn, .run-confirm", 112, 88, "primary action"], [".duel-type, .approach button, .tp-toggle, .run-go, .run-burn, .target-cell, .pchip > button:first-child", 56, 56, "gameplay control"], [".throw-diamond button", 64, 64, "base target"]];
+    const rects = await page.evaluate((groups) => groups.flatMap(([sel, w, h, kind]) => [...document.querySelectorAll(sel)].map((e) => {
+      const r = e.getBoundingClientRect(), s = getComputedStyle(e);
+      return { n: ((e.className.baseVal === undefined ? e.className : "") + ":" + (e.textContent || "").trim()).slice(0, 24), x: r.left, y: r.top, w: r.width, h: r.height, need: [w, h], kind, vis: r.width * r.height > 0 && s.visibility !== "hidden" && s.display !== "none" };
+    })).filter((b) => b.vis), SIZES);
+    for (const r of rects) if (r.w < r.need[0] - E || r.h < r.need[1] - E) bad.push(`${r.kind} too small: ${r.n} ${r.w | 0}x${r.h | 0}, needs ${r.need[0]}x${r.need[1]}`);
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j];
+      const gx = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w)), gy = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+      if (Math.max(gx, gy) < 8 - E && Math.min(gx, gy) < 0 + E) bad.push(`gap under 8pt (${Math.max(gx, gy).toFixed(1)}): ${a.n} next to ${b.n}`);
+    }
+  }
   // Centre of the screen must be live ballpark pixels, not the flat page background.
   const cx = (vp.width / 2) | 0, cy = (vp.height / 2) | 0;
   const png = await page.screenshot({ type: "png", clip: { x: cx - 60, y: cy - 40, width: 120, height: 80 } });
