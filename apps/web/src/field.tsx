@@ -321,6 +321,7 @@ class Director {
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
   private shake = 0;
   private raf = 0; private last = performance.now();
+  private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
   constructor(private canvas: HTMLCanvasElement, game: PlayedGame, private reduced: boolean) {
     this.colors = { away: new THREE.Color(game.teams.away.color), home: new THREE.Color(game.teams.home.color) };
@@ -824,8 +825,22 @@ class Director {
     this.ball.scale.setScalar(kind && kind !== "ride" ? 0.5 : 1); // oversized for the long gameplay lens only
     this.updateCamera(real);
     this.renderer.render(this.scene, this.cam);
-    if (SHOT_MODE) this.publishStrikeZone();
+    if (SHOT_MODE) { this.publishStrikeZone(); this.publishStats(now); }
   };
+
+  /** Shot mode only: `window.__renderStats`, the renderer's own counts plus frame-interval median/p95 over the last 60 frames. */
+  private publishStats(now: number) {
+    const f = this.frameMs;
+    if (this.frames++) f.push(now - this.last0); // interval between two rendered frames
+    if (f.length > 60) f.shift();
+    this.last0 = now;
+    const s = [...f].sort((a, b) => a - b), i = this.renderer.info;
+    (window as unknown as { __renderStats: unknown }).__renderStats = {
+      seq: this.frames, samples: s.length, calls: i.render.calls, triangles: i.render.triangles, points: i.render.points,
+      geometries: i.memory.geometries, textures: i.memory.textures, programs: i.programs?.length ?? 0,
+      frameMedianMs: s[s.length >> 1] ?? 0, frameP95Ms: s[Math.floor(s.length * 0.95)] ?? 0,
+    };
+  }
 
   /** Shot mode only: where the plate and batter land on screen, so layout checks can assert nothing covers them. */
   private publishStrikeZone() {

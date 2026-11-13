@@ -4,7 +4,7 @@
 // Uses the locally installed Google Chrome through playwright-core (no browser download).
 import { chromium } from "playwright-core";
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,7 +14,12 @@ const args = process.argv.slice(2);
 const phone = args.includes("--phone");
 // --check: layout assertions per duel-* moment (no overlapping HUD/controls, all inside the viewport, ballpark pixels in the centre).
 const check = args.includes("--check");
-const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check");
+// --perf: no pictures; print renderer stats (draw calls, triangles, frame time) per moment. --json=FILE also writes them.
+// --quality=high|standard|battery sets the stored quality tier before the page loads.
+const perf = args.includes("--perf");
+const jsonOut = args.find((a) => a.startsWith("--json="))?.slice(7);
+const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
@@ -22,7 +27,7 @@ const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
-const moments = only.length ? only : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
+const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
 const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
@@ -114,13 +119,22 @@ try {
   const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   const page = await browser.newPage(phone ? { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
   page.on("pageerror", (e) => console.error("page error:", e.message));
+  if (quality) await page.addInitScript((q) => { try { localStorage.setItem("bb.quality", q); } catch { /* shot runs without storage */ } }, quality);
   let failures = 0;
+  const rows = [];
   for (const m of moments) {
     await page.goto(`http://localhost:${port}/?shot=${m}&t=700`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
     if (CONTROLS[m] || STATIC[m]) {
       const n = await page.locator(CONTROLS[m] ?? STATIC[m]).count();
       if (!n) throw new Error(`${m}: controls (${CONTROLS[m] ?? STATIC[m]}) missing from the shot`);
+    }
+    if (perf) { // sample a fixed window of 60 rendered frames after the moment is ready
+      await page.waitForSelector(".field canvas", { timeout: 15000 });
+      const from = await page.evaluate(() => window.__renderStats?.seq ?? 0);
+      await page.waitForFunction((n) => (window.__renderStats?.seq ?? 0) >= n + 60, from, { timeout: 120000, polling: 100 });
+      rows.push({ moment: m, quality: quality ?? "stored", ...(await page.evaluate(() => window.__renderStats)) });
+      continue;
     }
     if (HUBS[m]) {
       if (check) { failures += await hubCheck(page, m); continue; }
@@ -137,6 +151,14 @@ try {
     console.log(file);
   }
   await browser.close();
+  if (perf) {
+    const BUDGET = 250; // graphics-production-plan 2.3, higher tier. Soft: warn, never fail.
+    console.log("desktop headless Chromium (SwiftShader), not device evidence");
+    console.log("moment     quality    calls  tris    points  geoms  tex  prog  median ms  p95 ms  frames");
+    for (const r of rows) console.log(`${r.moment.padEnd(10)} ${String(r.quality).padEnd(9)} ${String(r.calls).padStart(6)} ${String(r.triangles).padStart(6)} ${String(r.points).padStart(7)} ${String(r.geometries).padStart(6)} ${String(r.textures).padStart(4)} ${String(r.programs).padStart(5)} ${r.frameMedianMs.toFixed(1).padStart(10)} ${r.frameP95Ms.toFixed(1).padStart(7)} ${String(r.samples).padStart(7)}`);
+    for (const r of rows) if (r.calls > BUDGET) console.warn(`WARN ${r.moment}: ${r.calls} draw calls over the soft budget of ${BUDGET}`);
+    if (jsonOut) { writeFileSync(jsonOut, JSON.stringify(rows, null, 2)); console.log(jsonOut); }
+  }
   if (failures) { console.error(`${failures} layout failure(s)`); process.exitCode = 1; }
 } finally {
   vite.kill();
