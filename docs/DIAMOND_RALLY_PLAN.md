@@ -46,7 +46,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
 - [x] W23 (359ff62) Baserunning (ARC 8, PUP 10): fixed leads, steal/pickoff, tag-ups, selected-runner commands; Afterburner.
 - [x] W24 (90fc65d) Rally Breaker + CPU (PUP 11, 14; ARC 11): Rally Breaker, three CPU difficulty profiles, CPU ability use, AI-vs-AI soak test.
 - [x] W25 (b8f38ae) Rookie Rally tutorial + coach hints (ARC Appendix C): 1-inning fixed-seed game, server-verified completion + 100 coins once, one-time hints.
-- [ ] W26 Season in PRD format + objectives/unlocks (ARC 12-13): migration, 7-game round-robin with the rival in round 4,
+- [x] W26 (67fb470) Season in PRD format + objectives/unlocks (ARC 12-13): migration, 7-game round-robin with the rival in round 4,
       top-4 playoffs, three-star objectives, lifetime track.
 - [ ] W27 Save/resume + PWA (ARC 14): pitch-start local snapshot, resume after backgrounding, manifest + service worker,
       landscape.
