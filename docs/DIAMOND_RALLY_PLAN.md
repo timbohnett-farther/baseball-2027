@@ -43,7 +43,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
       chips with plain-language disabled reasons, safe-area layout. Replaces the Super button.
 - [x] W22 (631545c) Fielding + throwing (ARC 7, PUP 9): automatic fielder selection, contextual action button, base targets,
       recommended throw; Wall Reaper, Acrobat, Cannon Arm.
-- [ ] W23 Baserunning (ARC 8, PUP 10): fixed leads, steal/pickoff, tag-ups, selected-runner commands; Afterburner.
+- [x] W23 (359ff62) Baserunning (ARC 8, PUP 10): fixed leads, steal/pickoff, tag-ups, selected-runner commands; Afterburner.
 - [ ] W24 Rally Breaker + CPU (PUP 11, 14; ARC 11): Rally Breaker, three CPU difficulty profiles, CPU ability use, AI-vs-AI soak test.
 - [ ] W25 Rookie Rally tutorial + coach hints (ARC Appendix C).
 - [ ] W26 Season in PRD format + objectives/unlocks (ARC 12-13): migration, 7-game round-robin with the rival in round 4,
