@@ -70,7 +70,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   }), [setup]);
 
   const g = useMemo(() => {
-    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, userSide: setup.userSide, inputs });
+    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, userSide: setup.userSide, inputs, facts: true });
     shell.result = out.result ?? { ...shell.result, events: out.events };
     return out;
   }, [setup, inputs, shell]);

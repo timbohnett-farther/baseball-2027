@@ -67,9 +67,16 @@ export interface GameState {
   fire: Side | null;
 }
 
+/** Presentation facts (opt-in `facts` on the engine; absent otherwise). Descriptive only: no outcome ever reads them. */
+export interface PitchShot { type: PitchType; /** Where it crossed the plate (inside the zone is -1..1). */ x: number; y: number }
+/** A ball in play: how it left the bat. `spray` 0 = left line, 1 = right line; `strength` 0 weak, 1 solid, 2 hard. Null for a strikeout or walk. */
+export type PlayShot = { kind: "grounder" | "fly" | "liner"; spray: number; strength: 0 | 1 | 2 } | null;
+/** A baserunning play at a base: `close` is 0-1, 1 = a coin-flip. */
+export interface RunShot { play: "steal" | "pickoff"; base: "first" | "second" | "third"; safe: boolean; close: number }
+
 export type GameEvent =
   | { type: "half_start"; state: GameState; text: string }
-  | { type: "pitch"; state: GameState; batterId: number; pitcherId: number; result: PitchResult; mph: number; zone: boolean }
+  | { type: "pitch"; state: GameState; batterId: number; pitcherId: number; result: PitchResult; mph: number; zone: boolean; shot?: PitchShot }
   | {
       type: "play"; state: GameState; batterId: number; pitcherId: number; outcome: Outcome;
       runs: number; rbi: number; text: string; tier: Tier; call: string | null;
@@ -79,11 +86,12 @@ export type GameEvent =
       stat: string | null;
       /** The user spent a Super Power Bat charge on this at-bat. */
       superSwing?: boolean;
+      shot?: PlayShot;
     }
   | { type: "pitching_change"; state: GameState; side: Side; pitcherId: number; text: string }
   | { type: "final"; state: GameState; text: string }
   /** Rules v6: a baserunning decision played out (steal, pickoff, send or hold on contact, tag-up). `runnerId` is the runner it was about. */
-  | { type: "run"; state: GameState; action: "steal" | "caught" | "pickoff" | "advance" | "hold" | "thrown_out"; side: Side; runnerId: number; text: string }
+  | { type: "run"; state: GameState; action: "steal" | "caught" | "pickoff" | "advance" | "hold" | "thrown_out"; side: Side; runnerId: number; text: string; shot?: RunShot }
   /** Rules v7: a team ability (Rally Breaker) was used. */
   | { type: "team"; state: GameState; side: Side; action: "rally_breaker"; text: string }
   /** Rules v4: an ability request was committed, took effect, fizzled, or was refused (and cost nothing). */

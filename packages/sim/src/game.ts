@@ -11,7 +11,7 @@ import { ABILITIES, BOUNDS, TEAM_RALLY_BREAKER, arm as armAbility, cancel, combi
 import { PROFILES, chooseAbility, pitchTypeFor, profileOf, sceneOf, swingFor, zoneAim, type Bot, type CpuProfile } from "./cpu.ts";
 import type {
   AbilityRequest, Aim, Awaiting, Base, Bases, BattingLine, BoxScore, DisabledReason, Difficulty, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
-  PitchingLine, PitchResult, PitchType, RulesVersion, RunnerOption, RunOptions, Side, SimPlayer, SimTeam, TeamStatus, Tier, UserInput,
+  PitchingLine, PitchResult, PitchShot, PitchType, PlayShot, RulesVersion, RunnerOption, RunOptions, Side, SimPlayer, SimTeam, TeamStatus, Tier, UserInput,
 } from "./types.ts";
 
 export const DEFAULT_INNINGS = 3;
@@ -115,6 +115,10 @@ interface Ctx {
   cpuPickoffs: number;
   /** Rules v7: Rally Breaker is once per side per match. */
   breaker: Record<Side, boolean>;
+  /** Opt-in presentation facts (`shot` on events). Descriptive only: never read by the sim, never drawn from an RNG. */
+  facts: boolean;
+  pitchFacts?: PitchShot;
+  ballFacts?: { kind: "grounder" | "fly" | "liner"; spray: number };
 }
 
 interface Active { def: AbilityDef; request: AbilityRequest; playerId: number; side: Side; fx: Effects; triggered: boolean }
@@ -388,6 +392,7 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   }
 
   const zone = inZone(loc);
+  c.pitchFacts = { type, x: Math.round(loc.x * 100) / 100, y: Math.round(loc.y * 100) / 100 };
   const edge = zone ? clamp((Math.max(Math.abs(loc.x), Math.abs(loc.y)) - 0.6) / 0.4, 0, 1) : 0;
   const swing = swingKind
     ? swingKind !== "take"
@@ -454,6 +459,7 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
   const x = rng.next();
   const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement) + (fx?.dGround ?? 0), 0.3, 0.6);
   const flyEnd = ground + 0.35 + (fx?.dFly ?? 0);
+  c.ballFacts = { kind: x < ground ? "grounder" : x < flyEnd ? "fly" : "liner", spray: (x * 1000) % 1 };
 
   const triple = clamp(0.03 + 0.015 * z(b?.speed), 0.005, 0.08);
   const double = clamp(0.22 + 0.03 * z(b?.power) + (fx?.dDouble ?? 0), 0.1, 0.35);
@@ -601,22 +607,29 @@ function stealAttempt(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLin
   if (id === null || b[to] !== null) return;
   const runner = findPlayer(c, id);
   const fx = useAbility(c, "run", runner, bSide, ability, undefined, undefined, cpu);
-  const safe = c.rng.next() < Math.min(RUN_CAP, stealChance(c, id, from, pitcher, fSide) + (fx?.run ?? 0));
+  const roll = c.rng.next(), odds = Math.min(RUN_CAP, stealChance(c, id, from, pitcher, fSide) + (fx?.run ?? 0));
+  const safe = roll < odds;
   if (cpu ? c.cpuActive : c.active) settleAbility(c, false, cpu);
   b[from] = null;
   if (safe) b[to] = id; else { c.state.outs++; pLine.outs++; }
   award(c, bSide, id, safe ? 15 : -12);
   c.events.push({ type: "run", state: snapshot(c.state), action: safe ? "steal" : "caught", side: bSide, runnerId: id,
+    ...(c.facts ? { shot: { play: "steal", base: to, safe, close: closeness(roll, odds) } } : {}),
     text: safe ? `${runner.name} steals ${to}!` : `${runner.name} is caught stealing ${to}.` });
 }
+
+/** How near the roll was to the odds, 0-1 (1 = a coin-flip play). Descriptive only. */
+const closeness = (roll: number, odds: number) => Math.round(Math.max(0, 1 - Math.abs(roll - odds) / 0.25) * 100) / 100;
 
 function pickoffThrow(c: Ctx, bSide: Side, pitcher: SimPlayer, pLine: PitchingLine, at: RunBase) {
   const b = c.state.bases, id = b[at];
   if (id === null) return;
   const runner = findPlayer(c, id);
-  const out = c.rng.next() < pickoffChance(c, id, pitcher);
+  const roll = c.rng.next(), odds = pickoffChance(c, id, pitcher);
+  const out = roll < odds;
   if (out) { b[at] = null; c.state.outs++; pLine.outs++; award(c, bSide, id, -12); }
   c.events.push({ type: "run", state: snapshot(c.state), action: out ? "pickoff" : "hold", side: bSide, runnerId: id,
+    ...(c.facts ? { shot: { play: "pickoff", base: at, safe: !out, close: closeness(roll, odds) } } : {}),
     text: out ? `${pitcher.name} picks ${runner.name} off ${at}!` : `${pitcher.name} throws over to ${at}. ${runner.name} is back in time.` });
 }
 
@@ -852,6 +865,7 @@ function plateAppearance(c: Ctx) {
       if (state.outs >= 3) { c.lineupIdx[bSide]--; return; } // caught stealing for the last out: the batter leads off next time
     }
     c.assist = c.rules >= 3 ? rallyAssist(state) : null;
+    c.pitchFacts = undefined;
     const pitch = c.user ? throwUserPitch(c, batter, pitcher) : throwPitch(c, batter, pitcher);
     c.pitchCount.set(pitcher.id, (c.pitchCount.get(pitcher.id) ?? 0) + 1);
     pLine.pitches++;
@@ -860,11 +874,12 @@ function plateAppearance(c: Ctx) {
     else if (pitch.result === "called_strike" || pitch.result === "swinging_strike") state.strikes++;
     else if (pitch.result === "foul" && state.strikes < 2) state.strikes++;
     if (c.rules >= 3) { contactQ = pitch.q; pitchHeat(c, bSide, fSide, batter, pitcher, pitch.result, pitch.q); }
-    c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone });
+    c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone, ...(c.facts && c.pitchFacts ? { shot: c.pitchFacts } : {}) });
     if (c.user && c.rules >= 4) { settleAbility(c, pitch.result === "in_play"); if (c.cpuActive) settleAbility(c, pitch.result === "in_play", true); }
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
     else if (pitch.result === "in_play") {
+      c.ballFacts = undefined;
       outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined;
       if (c.active) settleAbility(c, true);
       if (c.cpuActive) settleAbility(c, true, true);
@@ -966,12 +981,24 @@ function plateAppearance(c: Ctx) {
   c.events.push({
     type: "play", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, outcome, runs, rbi,
     text, tier, call: line, card, stat, ...(superSwing ? { superSwing } : {}),
+    ...(c.facts ? { shot: contactFacts(c, outcome, batter, contactQ) } : {}),
   });
   if (walkOff) c.over = true;
   // Rules v2: the home team opening a 10-run lead in the bottom of the 2nd or later ends it on the spot.
   if (c.rules >= 2 && !c.over && state.half === "bottom" && state.inning >= 2 && state.score.home - state.score.away >= RUN_AHEAD) {
     c.over = true; c.runAhead = true;
   }
+}
+
+/** Presentation facts for a play: the batted ball, from values the at-bat already produced. No draws. */
+function contactFacts(c: Ctx, outcome: Outcome, batter: SimPlayer, q: number | undefined): PlayShot {
+  const b = c.ballFacts;
+  const inPlay = outcome !== "strikeout" && outcome !== "walk";
+  // A home run skips the batted-ball draw, so its direction comes from who hit it and when.
+  const spray = b?.spray ?? ((batter.id * 37 + c.state.inning * 7 + c.state.outs * 11) % 100) / 100;
+  const kind = outcome === "home_run" ? "fly" : b?.kind ?? "grounder";
+  const strength = outcome === "home_run" || outcome === "triple" ? 2 : q !== undefined ? (q >= 0.8 ? 2 : q >= 0.5 ? 1 : 0) : outcome === "double" ? 2 : outcome === "single" || outcome === "lineout" ? 1 : 0;
+  return inPlay ? { kind, spray: Math.round(spray * 100) / 100, strength } : null;
 }
 
 // --- Whole game ----------------------------------------------------------------------------
@@ -986,6 +1013,8 @@ type GameInput = {
   startHeat?: number;
   /** Rules v7: the computer's difficulty (default "pro"). */
   difficulty?: Difficulty;
+  /** Attach presentation facts (`shot`) to events. Off by default so existing event payloads stay byte-identical. */
+  facts?: boolean;
 };
 
 export function simulateGame(input: GameInput): GameResult {
@@ -1040,6 +1069,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     cpuRng: createRng((input.seed ^ 0x5bd1e995) >>> 0),
     cpuPickoffs: 0,
     breaker: { away: false, home: false },
+    facts: input.facts === true,
   };
   const s = c.state;
 

@@ -35,7 +35,7 @@ function fixture(seed: number): PlayedGame {
   nextId = 1;
   const away = team("Harbor City", "HAR", "#1d4e89", AWAY);
   const home = team("Ridgeback", "RDG", "#b3302a", HOME);
-  const result = simulateGame({ away, home, seed });
+  const result = simulateGame({ away, home, seed, facts: true });
   return { id: 0, createdAt: "", opponent: { id: 0, name: away.name, abbr: away.abbr }, userSide: "home", teams: { away, home }, result };
 }
 
@@ -59,7 +59,7 @@ function find(game: PlayedGame, m: Moment): number {
 function toMoment(setup: InteractiveSetup, stop: (a: NonNullable<ReturnType<typeof playInteractive>["awaiting"]>) => boolean): UserInput[] {
   const inputs: UserInput[] = [];
   for (let i = 0; i < 600; i++) {
-    const g = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs });
+    const g = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs, facts: true });
     if (!g.awaiting || stop(g.awaiting)) return inputs;
     const a = g.awaiting;
     inputs.push(a.role === "swing" ? { kind: "swing", swing: i % 4 ? "contact" : "take", timing: 0 } : a.role === "run" ? { kind: "run", action: "advance", send: [] } : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "pitch", type: "fastball", aim: { x: 0.15 * ((i % 5) - 2), y: 0.2 * ((i % 3) - 1) } });

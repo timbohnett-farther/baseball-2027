@@ -55,7 +55,7 @@ export function restore(raw: unknown, now = Date.now()): Restored {
   if (!setup.teams?.away || !setup.teams?.home || !Number.isInteger(setup.seed) || !Number.isInteger(setup.innings)) return { ok: false, message: KID_MSG };
   if (now - s.at > MAX_AGE_MS) return { ok: false, message: "That game is too old to pick up. Start a fresh one!" };
   try {
-    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, userSide: setup.userSide, inputs: s.inputs });
+    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, userSide: setup.userSide, inputs: s.inputs, facts: true });
     if (out.result || !out.awaiting) return { ok: false, message: "That game was already finished." };
     const st = out.awaiting.state;
     return { ok: true, snapshot: s as Snapshot, balls: st.balls, strikes: st.strikes, outs: st.outs, inning: st.inning, half: st.half, score: st.score };
