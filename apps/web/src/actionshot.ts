@@ -283,11 +283,11 @@ export function slideAxes(base: number) {
  * Every pose looks toward -z: the park (stands, wall, towers) is only built beyond the plate, so a camera that looks
  * the other way sees black.
  */
-export function shotPose(camera: ShotCamera, p: number, still: boolean, base = 1): ShotPose {
+export function shotPose(camera: ShotCamera, p: number, still: boolean, base = 1, side: 1 | -1 = 1): ShotPose {
   const q = still ? 0.5 : Math.min(1, Math.max(0, p));
   switch (camera) {
     case "contact": // low, first-base side of the plate, looking across the open stance: swing-through, bat and ball with the stadium behind
-      return { pos: [3.6 - 0.3 * q, 1.0, 3.6 - 0.2 * q], look: [-0.7, 1.05, -1.1], fov: 30 };
+      return { pos: [side * (3.6 - 0.3 * q), 1.0, 3.6 - 0.2 * q], look: [side * -0.7, 1.05, -1.1], fov: 30 };
     case "release": // plate side, off the line to the mound: release pose and the ball in flight with the stands behind the pitcher
       return { pos: [3.4, 1.4, -10.4 + 0.4 * q], look: [0.1, 1.3, -17.8], fov: 22 };
     case "slide": { // low and outside, looking across the bag at runner and fielder

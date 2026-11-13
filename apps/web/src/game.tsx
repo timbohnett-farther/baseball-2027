@@ -5,7 +5,7 @@ import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { cueFor, DOMAIN_COLOR } from "./abilityfx.ts";
 import { blockingBudgetMs, cardWindowMs, skipAfterMs } from "./presentation.ts";
-import { holdWithShot, SHOT_SKIP_MS, type ShotPlan } from "./actionshot.ts";
+import { holdWithShot, SHOT_SKIP_MS, type ActionShotDirector, type ShotPlan } from "./actionshot.ts";
 import { useShotPlans } from "./actionshots.ts";
 import { useCoachTips } from "./coach.tsx";
 import { Ovr } from "./players.tsx";
@@ -207,17 +207,22 @@ export function AbilityCue({ e, speed }: { e: GameEvent | undefined; speed: numb
   );
 }
 
-export function SkipPlay({ e, speed, onSkip, plan }: { e: GameEvent | undefined; speed: number; onSkip: () => void; plan?: ShotPlan | null }) {
+/** A planned shot is skipped through its director (allowed once it has run SHOT_SKIP_MS); everything else keeps the old timer. */
+export function SkipPlay({ e, speed, onSkip, plan, director, index }: { e: GameEvent | undefined; speed: number; onSkip: () => void; plan?: ShotPlan | null; director?: ActionShotDirector; index?: number }) {
   const [ready, setReady] = useState(false);
   const after = e ? skipAfter(e, plan) : null;
   useEffect(() => {
     setReady(false);
     if (after === null) return;
-    const t = setTimeout(() => setReady(true), after / speed);
+    const t = setTimeout(() => setReady(true), plan ? after : after / speed); // a shot's skip delay is real time, not game time
     return () => clearTimeout(t);
-  }, [e, after, speed]);
+  }, [e, after, speed, plan]);
   if (after === null || !ready) return null;
-  return <button className="link skip-play" onClick={onSkip}>Skip ▸</button>;
+  const tap = () => {
+    if (plan && director && index !== undefined && director.active(index)) { if (director.skip(index, performance.now())) onSkip(); return; }
+    onSkip();
+  };
+  return <button className="link skip-play" onClick={tap}>Skip ▸</button>;
 }
 
 // --- Highlight reel (VISUAL_DESIGN 3.5) ----------------------------------------------------
@@ -315,7 +320,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
         <Scorebug game={game} index={i} />
         <div className="game-controls">
           {!done && SPEEDS.map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
-          {!done && <SkipPlay e={current} speed={speed} plan={planFor(i)} onSkip={() => setI((n) => n + 1)} />}
+          {!done && <SkipPlay e={current} speed={speed} plan={planFor(i)} director={planFor.director} index={i} onSkip={() => setI((n) => n + 1)} />}
           {!done && <button className="link" onClick={() => setI(events.length - 1)}>Skip to final</button>}
           {done && highlights.reel && <SkipPlay e={events[shownIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
@@ -324,7 +329,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
         </div>
       </div>
 
-      <Suspense fallback={<div className="field" />}><FieldView game={game} index={shownIndex} speed={speed} plan={highlights.reel ? null : planFor(shownIndex)} /></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={game} index={shownIndex} speed={speed} plan={highlights.reel ? null : planFor(shownIndex)} director={planFor.director} /></Suspense>
       {highlights.reel && <ReelCard reel={highlights.reel} game={game} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
 
       {!done && batterId && (

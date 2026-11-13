@@ -6,6 +6,8 @@ import {
   ActionShotDirector, BASE_XZ, CATALOG, effectiveMode, holdWithShot, MIN_CAM_Y, MIN_FIGURE_GAP, scoreEvent, shotPose, slideAxes,
   SHOT_CAP, SHOT_MAX_MS, SHOT_MIN_MS, SHOT_SKIP_MS, type ActionShotMode,
 } from "./actionshot.ts";
+import { FIELD_XZ, contactScene, releaseScene, slideScene } from "./shotscene.ts";
+import type { Vec3 } from "./actionshot.ts";
 import { ACTION_SHOT_MODES, getActionShots, setActionShots } from "./actionshots.ts";
 
 // W32: events are synthetic here so each rule is tested on its own.
@@ -186,21 +188,27 @@ test("hold timers: the shot fits the existing budget when it can and never excee
   void e;
 });
 
-test("camera poses stay above the ground and clear of every standing figure", () => {
-  const figures: [number, number][] = [[-0.95, 0.3], [0, 2.2], [0, -18.4], ...BASE_XZ];
-  const near = (x: number, z: number, skip: number) => figures.filter((_, i) => i !== skip).every(([fx, fz]) => Math.hypot(x - fx, z - fz) >= MIN_FIGURE_GAP);
+test("camera poses stay above the ground and clear of every figure in the staged scene", () => {
+  // W32c: the staged scene (batter/pitcher/runner/fielder placed by shotscene, both handednesses) replaces the fixed figure list.
+  const gap = (pos: Vec3, fig: [number, number][]) => fig.every(([fx, fz]) => Math.hypot(pos[0] - fx, pos[2] - fz) >= MIN_FIGURE_GAP);
+  const field = FIELD_XZ.map(([x, z]) => [x, z] as [number, number]);
   for (const still of [false, true]) for (let p = 0; p <= 1; p += 0.25) {
-    const c = shotPose("contact", p, still);
-    assert.ok(c.pos[1] >= MIN_CAM_Y);
-    assert.ok(near(c.pos[0], c.pos[2], -1), `contact ${p}`);
-    const r = shotPose("release", p, still);
-    assert.ok(r.pos[1] >= MIN_CAM_Y && near(r.pos[0], r.pos[2], -1), `release ${p}`);
-    for (let b = 0; b < 4; b++) {
-      const s = shotPose("slide", p, still, b);
-      const [bx, bz] = BASE_XZ[b];
-      assert.ok(s.pos[1] >= MIN_CAM_Y);
-      assert.ok(Math.hypot(s.pos[0] - bx, s.pos[2] - bz) >= MIN_FIGURE_GAP + 1, `slide ${b} ${p}`);
+    for (const bats of ["R", "L"] as const) {
+      const sc = contactScene(null, 0, bats, undefined), c = shotPose("contact", p, still, 1, sc.side);
+      assert.ok(c.pos[1] >= MIN_CAM_Y);
+      assert.ok(gap(c.pos, [[sc.batter.x, sc.batter.z], ...field]), `contact ${bats} ${p}`);
     }
+    const rs = releaseScene(null, 0, undefined), r = shotPose("release", p, still);
+    assert.ok(r.pos[1] >= MIN_CAM_Y && gap(r.pos, [[rs.pitcher.x, rs.pitcher.z + 0.6], ...field.slice(1)]), `release ${p}`);
+    for (let b = 0; b < 3; b++) {
+      const sub = { runnerId: 3, base: (b + 1) as 1 | 2 | 3 }, sl = slideScene(null, 0, sub), a = sl.axes;
+      const s = shotPose("slide", p, still, sub.base);
+      const run = 1.7 - 1.35 * p;
+      assert.ok(s.pos[1] >= MIN_CAM_Y);
+      assert.ok(gap(s.pos, [[a.bx - a.dx * run, a.bz - a.dz * run], [a.bx - a.nx * 0.6, a.bz - a.nz * 0.6]]), `slide ${sub.base} ${p}`);
+    }
+    const s = shotPose("slide", p, still, 0);
+    assert.ok(s.pos[1] >= MIN_CAM_Y && Math.hypot(s.pos[0] - BASE_XZ[0][0], s.pos[2] - BASE_XZ[0][1]) >= MIN_FIGURE_GAP + 1, `slide home ${p}`);
   }
   assert.deepEqual(shotPose("contact", 0, true), shotPose("contact", 1, true), "still means no camera move");
 });

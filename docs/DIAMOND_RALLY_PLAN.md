@@ -78,6 +78,7 @@ free/royalty-free rigs and motion libraries, no paid mocap.
 - [x] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
       W28's celebration budgets. Shipped 5be30fe (commits 9bc48b4, 792a4e6, 5be30fe): CONTACT, MOUND_RELEASE, SLIDE_TAG; `actionShots` setting (full/reduced/off).
   W32b (fix): shots staged from the event's `shot` facts with fresh posed figures, hidden live actors and dust, cameras all looking -z so the park renders; one owner per eligible highlight (broadcast then action shot); server re-sim sets `facts`. Open: bat/swing-through read, Director begin/finish/skip not used by production (SkipPlay timer), shot-frequency retune dropped.
+  W32c: articulated shot figures + presentation-only transform recorder (apps/web shotscene.ts/shotfigure.ts), one lifecycle (Director begin/finish/active/skip; parallel SkipPlay timer delegated), tested `canFrame`, ball at the one live world size (BALL_SCALE = 1, never per camera), early/mid/late fixtures. Sim untouched. Open: contact ball leaves frame late, release throwing arm hidden from the camera side, device feel EVIDENCE_MISSING.
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.

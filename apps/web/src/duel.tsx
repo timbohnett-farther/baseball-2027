@@ -151,7 +151,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
         <Scorebug game={shell} index={Math.min(shown, events.length - 1)} />
         <div className="game-controls">
           {!done && [1, 2].map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
-          {!done && !caughtUp && <SkipPlay e={current} speed={speed} plan={planFor(shown)} onSkip={() => setShown((n) => n + 1)} />}
+          {!done && !caughtUp && <SkipPlay e={current} speed={speed} plan={planFor(shown)} director={planFor.director} index={shown} onSkip={() => setShown((n) => n + 1)} />}
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
@@ -168,7 +168,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
         </div>
       )}
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planFor(fieldIndex)}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planFor(fieldIndex)} director={planFor.director}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 
