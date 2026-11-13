@@ -14,6 +14,8 @@ const args = process.argv.slice(2);
 const phone = args.includes("--phone");
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone");
 const moments = only.length ? only : ["pitch", "swing", "hr", "k", "single", "double", "final"];
+// duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn" };
 const port = 5199;
 mkdirSync(outDir, { recursive: true });
 
@@ -31,6 +33,10 @@ try {
   for (const m of moments) {
     await page.goto(`http://localhost:${port}/?shot=${m}&t=700`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
+    if (CONTROLS[m]) {
+      const n = await page.locator(CONTROLS[m]).count();
+      if (!n) throw new Error(`${m}: controls (${CONTROLS[m]}) missing from the shot`);
+    }
     const file = join(outDir, `${m}${phone ? "-phone" : ""}.jpg`);
     await page.screenshot({ path: file, type: "jpeg", quality: 82 });
     console.log(file);

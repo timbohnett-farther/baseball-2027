@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { simulateGame, type PlayedGame, type SimPlayer, type SimTeam } from "@bb/sim";
+import { CURRENT_RULES, playInteractive, simulateGame, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
 import { FieldView } from "./field.tsx";
 import { DuelView } from "./duel.tsx";
 
@@ -51,27 +51,39 @@ function find(game: PlayedGame, m: Moment): number {
   }
 }
 
-/** `/?shot=duel-pitch` / `duel-swing`: the real DuelView on a fixture setup, for checking the tap controls. */
-function DuelShot({ side, wait }: { side: "home" | "away"; wait: number }) {
+/** Pitches (varied aim, since a close ball is rare) until the user is asked to field a close ball; that log is the `duel-field` starting point. */
+function toFieldMoment(setup: InteractiveSetup): UserInput[] {
+  const inputs: UserInput[] = [];
+  for (let i = 0; i < 400; i++) {
+    const g = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs });
+    if (g.awaiting?.role === "field" || !g.awaiting) return inputs;
+    inputs.push(g.awaiting.role === "swing" ? { kind: "swing", swing: "take", timing: 0 } : { kind: "pitch", type: "fastball", aim: { x: 0.15 * ((i % 5) - 2), y: 0.2 * ((i % 3) - 1) } });
+  }
+  return inputs;
+}
+
+/** `/?shot=duel-pitch` / `duel-swing` / `duel-field`: the real DuelView on a fixture setup, for checking the tap controls. */
+function DuelShot({ side, wait, field }: { side: "home" | "away"; wait: number; field?: boolean }) {
   const setup = useMemo(() => {
     nextId = 1;
     const away = team("Harbor City", "HAR", "#1d4e89", AWAY), home = team("Ridgeback", "RDG", "#b3302a", HOME);
-    return { seed: 7, innings: 3, rules: 4 as const, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
-  }, [side]);
+    return { seed: field ? 2 : 7, innings: 3, rules: CURRENT_RULES, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
+  }, [side, field]);
   useEffect(() => {
     const t = setInterval(() => {
       if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
     }, 50);
     return () => clearInterval(t);
   }, [wait, side]);
-  // The swing panel auto-takes after ~1.25x the pitch flight, so its shot must land well before that.
-  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} /></div>;
+  // Shot mode freezes the panels' auto-take, so the controls stay up however long the page takes to settle.
+  const shotInputs = useMemo(() => field ? toFieldMoment(setup) : undefined, [setup, field]);
+  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} shotInputs={shotInputs} /></div>;
 }
 
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
-  if (duel === "duel-pitch" || duel === "duel-swing") return <DuelShot side={duel === "duel-pitch" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} />;
+  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field") return <DuelShot side={duel === "duel-swing" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} field={duel === "duel-field"} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);

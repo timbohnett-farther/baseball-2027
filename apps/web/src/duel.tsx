@@ -29,9 +29,13 @@ const BALLS = { grounder: { ms: 950, label: "Grounder", hint: "Charge it and glo
 const GRID = 1.8; // zone drawing spans -GRID..GRID
 const toPct = (v: number) => ((v + GRID) / (2 * GRID)) * 100;
 
-export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void }) {
-  const [inputs, setInputs] = useState<UserInput[]>([]);
-  const [shown, setShown] = useState(0);
+/** Art-review mode (`?shot=...`): the swing and glove panels hold still instead of auto-taking on a timer. */
+const SHOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("shot");
+
+/** `shotInputs` (dev screenshots only) starts the game already this far in, with every event shown. */
+export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[] }) {
+  const [inputs, setInputs] = useState<UserInput[]>(shotInputs ?? []);
+  const [shown, setShown] = useState(shotInputs ? 1e6 : 0);
   const [speed, setSpeed] = useState(1);
   const [pitchType, setPitchType] = useState<PitchType>("fastball");
   const [approach, setApproach] = useState<Approach>("contact");
@@ -334,6 +338,7 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
 
   // No tap is a take (ARC 5.2): let it go by.
   useEffect(() => {
+    if (SHOT) return;
     const t = setTimeout(() => swing("take"), ms * 1.25);
     return () => clearTimeout(t);
   }, [ms, swing]);
@@ -423,6 +428,7 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove }:
   }, [ms, armedRef]);
 
   useEffect(() => {
+    if (SHOT) return;
     const t = setTimeout(glove, ms * 1.25);
     return () => clearTimeout(t);
   }, [ms, glove]);
