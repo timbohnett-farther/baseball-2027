@@ -89,10 +89,14 @@ SLICE WO0-8 = W18-W25, W28; WO11 = W27; WO12 = W26 (we shipped the full season, 
 Still new: WO9 athlete/stadium fidelity (= W33/W34), WO10 three action shots (= W32), WO13 device/accessibility
 hardening (= W35), WO14 external playtest (Tim + Micah on a real phone).
 
-Where the Kimi CLAUDE.md conflicts with Tim's direct instructions, Tim's stand until he says otherwise:
+Tim confirmed 2026-11-13: adopt the Kimi CLAUDE.md engineering rules only. Where it conflicts with Tim's direct
+instructions, Tim's stand:
 continuous waves instead of stop-at-every-gate; commit and push to main; parallel wave agents in worktrees;
 MLB draft rosters instead of two original teams; full season and all 11 abilities stay shipped.
 Adopted from it: completion-report format, no invented evidence (device results stay "missing" until measured on
 a phone), render rate/quality tier must not change replay hashes, no dead UI for deferred content.
 W32 scope is the three SLICE shot families first; Wall Reaper is a flagship there, so its open scope question
 gets settled in W29.
+W29 also checks the Kimi CLAUDE.md sections 3-6 against the build: touch sizes (primary 112x88pt, other controls
+56x56pt, base targets 64x64pt, 8pt gaps), stale/repeated taps spend nothing, windup taps ignored with a hint,
+separate seeded streams for gameplay, CPU and cosmetic RNG. Report gaps; fix the cheap ones.
