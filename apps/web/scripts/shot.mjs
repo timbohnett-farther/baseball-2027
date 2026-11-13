@@ -57,6 +57,14 @@ async function layoutCheck(page, m) {
     for (let i = 0; i < d.length; i += 4) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4);
     return seen.size;
   }, png.toString("base64"));
+  // The coach card must never sit on the plate or batter: that is where the player looks to time the swing.
+  const plate = await page.evaluate(() => document.querySelector(".field canvas")?.dataset.plate ?? "");
+  if (plate && process.env.SHOT_DEBUG) console.log("   plate", plate, vis.filter((b) => /^(P|BUTTON:OK)/.test(b.n)).map((b) => `${b.n}[${b.x | 0},${b.y | 0},${b.w | 0}x${b.h | 0}]`).join(" "));
+  if (plate) {
+    const [px, py, pw, ph] = plate.split(",").map(Number);
+    const c = await page.evaluate(() => { const r = document.querySelector(".coach")?.getBoundingClientRect(); return r && r.width ? [r.left, r.top, r.width, r.height] : null; });
+    if (c && c[0] < px + pw && px < c[0] + c[2] && c[1] < py + ph && py < c[1] + c[3]) bad.push(`coach covers the plate/batter: [${c.map(Math.round)}] vs plate [${plate}]`);
+  }
   if (spread < 6) bad.push(`centre pixels are flat (${spread} colours): ballpark not rendered`);
   console.log(`${bad.length ? "FAIL" : "ok  "} ${m}: ${vis.length} HUD boxes, centre colours ${spread}`);
   for (const b of bad) console.log("   - " + b);

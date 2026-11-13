@@ -10,6 +10,8 @@ import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView }
 // at the origin, the outfield toward -z, first base to the right.
 
 type Play = Extract<GameEvent, { type: "play" }>;
+/** `?shot=...` art-review pages publish the plate's screen rect (see publishStrikeZone). */
+const SHOT_MODE = typeof location !== "undefined" && location.search.includes("shot=");
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const FT = 0.3048;
 const BASES = [V(0, 0, 0), V(19.4, 0, -19.4), V(0, 0, -38.8), V(-19.4, 0, -19.4)]; // home, 1B, 2B, 3B
@@ -822,7 +824,20 @@ class Director {
     this.ball.scale.setScalar(kind && kind !== "ride" ? 0.5 : 1); // oversized for the long gameplay lens only
     this.updateCamera(real);
     this.renderer.render(this.scene, this.cam);
+    if (SHOT_MODE) this.publishStrikeZone();
   };
+
+  /** Shot mode only: where the plate and batter land on screen, so layout checks can assert nothing covers them. */
+  private publishStrikeZone() {
+    const c = this.renderer.domElement, r = c.getBoundingClientRect();
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const p of [V(0.45, 0, -0.45), V(-0.45, 0, 0.45), V(-0.95, 1.9, 0.3), V(0.45, 1.9, -0.45), V(-1.4, 0, 0.3)]) {
+      p.project(this.cam);
+      const x = r.left + (p.x + 1) / 2 * r.width, y = r.top + (1 - p.y) / 2 * r.height;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    c.dataset.plate = [x0, y0, x1 - x0, y1 - y0].map(Math.round).join(",");
+  }
 
   /** The named cameras (VISUAL_DESIGN 3.3): low, close and long-lensed; the gameplay camera when no shot runs. */
   private updateCamera(dt: number) {
