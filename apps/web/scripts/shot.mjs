@@ -15,7 +15,7 @@ const phone = args.includes("--phone");
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone");
 const moments = only.length ? only : ["pitch", "swing", "hr", "k", "single", "double", "final"];
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go" };
 const port = 5199;
 mkdirSync(outDir, { recursive: true });
 

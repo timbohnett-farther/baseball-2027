@@ -528,3 +528,17 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 }
 .tp .zone { width: 96px; }
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) { .game:has(.tp) .tp .zone { display: none; } }
+
+/* Rules v6 baserunning: steal/pickoff strip and the send/hold panel. A column in the right thumb zone on a landscape phone, so the field centre stays clear. */
+.run-box { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: stretch; }
+.run-title { flex-basis: 100%; margin: 0; font-family: var(--display); letter-spacing: 0.06em; font-size: 13px; }
+.run-go, .run-burn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 56px; min-width: 96px; text-align: left; }
+.run-go small, .run-burn small { font-size: 11px; letter-spacing: 0.04em; color: var(--text-2); }
+.run-burn[aria-disabled="true"] { opacity: 0.6; }
+.run-confirm { min-height: 56px; min-width: 112px; padding: 8px 20px; font-size: 20px; }
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .game:has(.tp) .run-strip .run-box, .game:has(.tp) .run-adv .run-box { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(92px + env(safe-area-inset-top)); flex-direction: column; flex-wrap: nowrap; width: min(180px, 26vw); margin: 0; }
+  .game:has(.tp) .run-adv .run-box { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .game:has(.tp) .run-go, .game:has(.tp) .run-burn { background: rgba(26, 31, 42, 0.62); min-height: 44px; }
+  .game:has(.tp) .run-title { background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+}

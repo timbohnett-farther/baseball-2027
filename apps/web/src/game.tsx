@@ -129,6 +129,7 @@ export function holdFor(e: GameEvent): number {
     case "half_start": return 1300;
     case "pitching_change": return 1400;
     case "ability": return 500;
+    case "run": return 700;
     case "final": return 0;
     case "play": {
       if (reducedMotion()) return e.tier === 1 ? 3600 : e.tier === 2 ? 2800 : e.tier === 3 ? 1500 : 1300;
@@ -325,6 +326,7 @@ function FeedItem({ e }: { e: GameEvent }) {
   if (e.type === "half_start") return <li className="feed-inning">{e.text}</li>;
   if (e.type === "pitching_change") return <li className="feed-change">{e.text}</li>;
   if (e.type === "final") return <li className="feed-final">{e.text}</li>;
+  if (e.type === "run") return <li className="feed-change">{e.text}</li>;
   if (e.type !== "play") return null;
   return (
     <li className={`feed-play tier-${e.tier}`}>

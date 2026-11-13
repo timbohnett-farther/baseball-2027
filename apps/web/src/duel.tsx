@@ -8,6 +8,7 @@ import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { RewardLine } from "./store.tsx";
+import { AdvancePanel, RunStrip } from "./run.tsx";
 import { ABILITY_ICON, APPROACH_TEXT, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
@@ -108,6 +109,12 @@ export function DuelView({ setup, seasonId, onDone, shotInputs }: { setup: Inter
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 
+      {(awaiting?.role === "pitch" || awaiting?.role === "swing") && awaiting.run && (
+        <RunStrip key={`r${inputs.length}`} run={awaiting.run} heat={awaiting.state.heat} players={players} onRun={submit} />
+      )}
+      {awaiting?.role === "run" && awaiting.run?.advance && (
+        <AdvancePanel key={inputs.length} adv={awaiting.run.advance} heat={awaiting.state.heat} players={players} onGo={submit} />
+      )}
       {awaiting?.role === "pitch" && (
         <PitchPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
           heat={awaiting.state.heat} v3={setup.rules >= 3} type={pitchType} onType={setPitchType} abilities={awaiting.abilities} actorId={awaiting.pitcherId}

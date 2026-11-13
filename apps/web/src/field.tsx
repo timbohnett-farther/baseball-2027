@@ -543,6 +543,7 @@ class Director {
     if (e.type === "pitch") this.onPitch(e);
     else if (e.type === "play") this.onPlay(e);
     else if (e.type === "half_start") this.clearRunners();
+    else if (e.type === "run") this.resync(e);
   }
 
   private syncHalf(e: GameEvent) {

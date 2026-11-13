@@ -51,24 +51,25 @@ function find(game: PlayedGame, m: Moment): number {
   }
 }
 
-/** Pitches (varied aim, since a close ball is rare) until the user is asked to field a close ball; that log is the `duel-field` starting point. */
-function toFieldMoment(setup: InteractiveSetup): UserInput[] {
+/** Plays inputs (varied aim, since a close ball is rare; contact swings so runners get on) until `stop` says the awaiting is the wanted moment; that log is the starting point. */
+function toMoment(setup: InteractiveSetup, stop: (a: NonNullable<ReturnType<typeof playInteractive>["awaiting"]>) => boolean): UserInput[] {
   const inputs: UserInput[] = [];
-  for (let i = 0; i < 400; i++) {
+  for (let i = 0; i < 600; i++) {
     const g = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs });
-    if (g.awaiting?.role === "field" || !g.awaiting) return inputs;
-    inputs.push(g.awaiting.role === "swing" ? { kind: "swing", swing: "take", timing: 0 } : { kind: "pitch", type: "fastball", aim: { x: 0.15 * ((i % 5) - 2), y: 0.2 * ((i % 3) - 1) } });
+    if (!g.awaiting || stop(g.awaiting)) return inputs;
+    const a = g.awaiting;
+    inputs.push(a.role === "swing" ? { kind: "swing", swing: i % 4 ? "contact" : "take", timing: 0 } : a.role === "run" ? { kind: "run", action: "advance", send: [] } : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "pitch", type: "fastball", aim: { x: 0.15 * ((i % 5) - 2), y: 0.2 * ((i % 3) - 1) } });
   }
   return inputs;
 }
 
 /** `/?shot=duel-pitch` / `duel-swing` / `duel-field`: the real DuelView on a fixture setup, for checking the tap controls. */
-function DuelShot({ side, wait, field }: { side: "home" | "away"; wait: number; field?: boolean }) {
+function DuelShot({ side, wait, kind }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal" }) {
   const setup = useMemo(() => {
     nextId = 1;
     const away = team("Harbor City", "HAR", "#1d4e89", AWAY), home = team("Ridgeback", "RDG", "#b3302a", HOME);
-    return { seed: field ? 2 : 7, innings: 3, rules: CURRENT_RULES, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
-  }, [side, field]);
+    return { seed: kind === "field" ? 2 : kind ? 3 : 7, innings: 3, rules: CURRENT_RULES, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
+  }, [side, kind]);
   useEffect(() => {
     const t = setInterval(() => {
       if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
@@ -76,14 +77,17 @@ function DuelShot({ side, wait, field }: { side: "home" | "away"; wait: number; 
     return () => clearInterval(t);
   }, [wait, side]);
   // Shot mode freezes the panels' auto-take, so the controls stay up however long the page takes to settle.
-  const shotInputs = useMemo(() => field ? toFieldMoment(setup) : undefined, [setup, field]);
+  const shotInputs = useMemo(() => kind === "field" ? toMoment(setup, (a) => a.role === "field")
+    : kind === "run" ? toMoment(setup, (a) => a.role === "run")
+    : kind === "steal" ? toMoment(setup, (a) => a.role === "swing" && !!a.run?.steal.length) : undefined, [setup, kind]);
   return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} shotInputs={shotInputs} /></div>;
 }
 
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
-  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field") return <DuelShot side={duel === "duel-swing" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} field={duel === "duel-field"} />;
+  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal")
+    return <DuelShot side={duel === "duel-pitch" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);
