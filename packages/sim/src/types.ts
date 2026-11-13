@@ -31,6 +31,9 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 
 export type Side = "away" | "home";
 
+/** Which rules a game is played under; stored with each saved game so old ones replay identically. */
+export type RulesVersion = 1 | 2;
+
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
 export type Outcome =
@@ -166,6 +169,7 @@ export interface InteractiveGame {
 export interface InteractiveSetup {
   seed: number;
   innings: number;
+  rules: RulesVersion;
   userSide: Side;
   opponent: { id: number; name: string; abbr: string };
   teams: Record<Side, SimTeam>;

@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
-import { autoLineup, DEFAULT_INNINGS, playInteractive, simulateGame, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
+import { autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, playInteractive, simulateGame, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
@@ -113,7 +113,8 @@ export function mlbSimTeam(teamId: number, exclude: Set<number> = new Set()): Si
 }
 
 function played(row: typeof games.$inferSelect, opponent: { id: number; name: string; abbr: string }): PlayedGame {
-  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings };
+  // rules: a game replays under the ruleset it was played with, so later rule changes never rewrite history.
+  const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules };
   // autoField: games saved before fielding taps existed have none in their log; the play stands as rolled.
   const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs, autoField: true }).result! : simulateGame(input);
   return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result };
@@ -127,6 +128,14 @@ function isInput(i: unknown): i is UserInput {
   if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1;
   if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1;
   return false;
+}
+
+/** Quick Match length (1, 3 or 5). Season and playoff games are always the default 3 (ARC 3.1). */
+function matchInnings(raw: unknown, season: SeasonRow | null): { innings: number } | { error: string } {
+  if (raw == null) return { innings: DEFAULT_INNINGS };
+  if (season) return raw === DEFAULT_INNINGS ? { innings: DEFAULT_INNINGS } : { error: `Season games are ${DEFAULT_INNINGS} innings.` };
+  if (!(INNINGS_OPTIONS as readonly unknown[]).includes(raw)) return { error: `Pick ${INNINGS_OPTIONS.join(", ")} innings.` };
+  return { innings: raw as number };
 }
 
 /** Fold a season bonus (paid by settleSeason) into the game's reward line. */
@@ -185,12 +194,14 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // Play it yourself: the browser runs the game pitch by pitch (the engine is pure TypeScript),
   // so all it needs from us is the two lineups and a seed.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; innings?: number } }>("/api/games/interactive", { preHandler: requireUser }, async (req, reply) => {
     const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
+    const len = matchInnings(req.body?.innings, m.season);
+    if ("error" in len) return reply.code(400).send({ error: len.error });
     const id = Number(req.body!.opponentTeamId);
     const body: InteractiveSetup = {
-      seed: randomInt(0, 2 ** 31 - 1), innings: DEFAULT_INNINGS, userSide: "home",
+      seed: randomInt(0, 2 ** 31 - 1), innings: len.innings, rules: CURRENT_RULES, userSide: "home",
       opponent: { id, name: m.opponent.name, abbr: m.opponent.abbr }, teams: { away: m.opponent, home: m.me },
     };
     return reply.code(201).send(body);
@@ -198,25 +209,29 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // The game is over: replay the user's choices against the seed with today's lineups, and record
   // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number } } }>(
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number } }>(
     "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
       const db = getDb();
       const { seed, inputs, final } = req.body ?? {};
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final) {
+      // A browser that loaded before rules versioning sends neither field and played rules 1.
+      const rules = req.body?.rules ?? 1;
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
       if ("error" in m) return reply.code(400).send({ error: m.error });
       const { team, opponent, me, season } = m;
+      const len = matchInnings(req.body?.innings, season);
+      if ("error" in len) return reply.code(400).send({ error: len.error });
       const teams = { away: opponent, home: me };
-      const { result } = playInteractive({ ...teams, seed: seed!, innings: DEFAULT_INNINGS, userSide: "home", inputs });
+      const { result } = playInteractive({ ...teams, seed: seed!, innings: len.innings, rules: rules as RulesVersion, userSide: "home", inputs });
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
       const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
       const reward = await payout(db, req.user!.id, result, outcome);
       const [row] = await db.insert(games).values({
-        userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: DEFAULT_INNINGS,
+        userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules,
         userSide: "home", teams, inputs, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
       }).returning();
       if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
@@ -226,20 +241,22 @@ export async function gameRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; innings?: number } }>("/api/games", { preHandler: requireUser }, async (req, reply) => {
     const db = getDb();
     const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
     if ("error" in m) return reply.code(400).send({ error: m.error });
     const { team, opponent, me, season } = m;
+    const len = matchInnings(req.body?.innings, season);
+    if ("error" in len) return reply.code(400).send({ error: len.error });
     // You're the home team: you always get the last at-bat.
     const teams = { away: opponent, home: me };
     const seed = randomInt(0, 2 ** 31 - 1);
-    const result = simulateGame({ ...teams, seed, innings: DEFAULT_INNINGS });
+    const result = simulateGame({ ...teams, seed, innings: len.innings, rules: CURRENT_RULES });
     const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
     const reward = await payout(db, req.user!.id, result, outcome);
 
     const [row] = await db.insert(games).values({
-      userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: DEFAULT_INNINGS,
+      userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: len.innings, rules: CURRENT_RULES,
       userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
     if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));

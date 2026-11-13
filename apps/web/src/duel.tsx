@@ -41,7 +41,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
   }), [setup]);
 
   const g = useMemo(() => {
-    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, userSide: setup.userSide, inputs });
+    const out = playInteractive({ away: setup.teams.away, home: setup.teams.home, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: setup.userSide, inputs });
     shell.result = out.result ?? { ...shell.result, events: out.events };
     return out;
   }, [setup, inputs, shell]);
@@ -78,7 +78,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
   useEffect(() => {
     if (!g.result || saved) return;
     setSaved("saving");
-    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, final: g.result.final } })
+    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, final: g.result.final } })
       .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
   }, [g.result, saved, inputs, setup]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");

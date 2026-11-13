@@ -1,0 +1,1 @@
+ALTER TABLE "games" ADD COLUMN "rules" integer DEFAULT 1 NOT NULL;

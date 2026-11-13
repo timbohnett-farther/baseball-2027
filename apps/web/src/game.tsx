@@ -19,6 +19,7 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
   const [duel, setDuel] = useState<InteractiveSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [innings, setInnings] = useState<number>(3);
 
   const load = () => {
     api<MyTeam>("/api/my-team").then(setMyTeam).catch((e) => (e instanceof ApiError && e.status === 404 ? setMyTeam(null) : setError(e.message)));
@@ -31,8 +32,8 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
     setBusy(true);
     setError(null);
     try {
-      if (mode === "duel") setDuel(await api<InteractiveSetup>("/api/games/interactive", { body: { opponentTeamId: opponent } }));
-      else setGame(await api<PlayedGame>("/api/games", { body: { opponentTeamId: opponent } }));
+      if (mode === "duel") setDuel(await api<InteractiveSetup>("/api/games/interactive", { body: { opponentTeamId: opponent, innings } }));
+      else setGame(await api<PlayedGame>("/api/games", { body: { opponentTeamId: opponent, innings } }));
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   const open = async (id: number) => {
@@ -62,7 +63,12 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
         </div>
         <p className="muted">
           <b style={{ color: "var(--text)" }}>{myTeam.name}</b> (team power {myTeam.chemistry.teamPower.toFixed(1)}) hosts a real MLB lineup.
-          3 innings, you bat last.
+          You bat last.
+        </p>
+        <p className="play-buttons">
+          {[1, 3, 5].map((n) => (
+            <button key={n} className={`chip ${innings === n ? "ready" : ""}`} aria-pressed={innings === n} onClick={() => setInnings(n)}>{n} {n === 1 ? "inning" : "innings"}</button>
+          ))}
         </p>
         <div className="opponents">
           {sorted.map((t) => (

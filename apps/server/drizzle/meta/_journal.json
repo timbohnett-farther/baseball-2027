@@ -57,6 +57,13 @@
       "when": 1794470208483,
       "tag": "0007_player_xp",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794594506343,
+      "tag": "0008_game_rules",
+      "breakpoints": true
     }
   ]
 }

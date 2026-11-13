@@ -42,7 +42,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
-  assert.equal(res.json().migrations, 8, "every migration in drizzle/ should be applied at boot");
+  assert.equal(res.json().migrations, 9, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 
@@ -174,14 +174,14 @@ test("play a game against an MLB team, then see it in your history", async () =>
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: yankees.id } })).json();
   assert.equal(setup.userSide, "home");
   const inputs: unknown[] = [];
-  let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: [] });
+  let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: [] });
   while (out.awaiting) {
     inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
       : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
-    out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, userSide: "home", inputs: inputs as never });
+    out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: inputs as never });
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body }).then((r) => r);
-  const bad = { opponentTeamId: yankees.id, seed: setup.seed, inputs, final: { away: 99, home: 0 } };
+  const bad = { opponentTeamId: yankees.id, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, final: { away: 99, home: 0 } };
   assert.equal((await finish(bad)).statusCode, 409); // the score you claim must match the replay
   assert.equal((await finish({ ...bad, inputs: [{ kind: "swing", swing: "bunt", timing: 0 }] })).statusCode, 400);
   const saved = await finish({ ...bad, final: out.result!.final });
@@ -378,4 +378,55 @@ test("cosmetics: colourways buy with coins, equip per slot, ride into the sim te
 
   const off = await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { cosmetics: { helmet: null } } });
   assert.equal(off.json().cosmetics.helmet, null);
+});
+
+test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules ride with the game", async () => {
+  const { res: su, cookie } = await signup("lengths", undefined, "10.0.0.21");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Lengths", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams.find((t) => t.id !== undefined)!;
+  const start = (payload: object) => app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, ...payload } });
+
+  for (const bad of [0, 2, 4, 9, "3", 1.5]) assert.equal((await start({ innings: bad })).statusCode, 400, `innings ${bad}`);
+  assert.equal((await start({})).json().innings, 3);
+  for (const n of [1, 3, 5]) {
+    const setup = (await start({ innings: n })).json();
+    assert.equal(setup.innings, n);
+    assert.equal(setup.rules, 2);
+  }
+  const sim = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 1 } });
+  assert.equal(sim.statusCode, 201, sim.body);
+  assert.equal(sim.json().result.box.linescore.away.length >= 1, true);
+  assert.notEqual(sim.json().result.winner, null); // rules 2: no ties
+  assert.equal((await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 7 } })).statusCode, 400);
+
+  // Season games are always 3 innings.
+  const season = (await app.inject({ method: "POST", url: "/api/season", headers })).json();
+  const seasonBody = { opponentTeamId: season.next.opponent.id, seasonId: season.id };
+  assert.equal((await start({ ...seasonBody, innings: 5 })).statusCode, 400);
+  assert.equal((await start({ ...seasonBody })).json().innings, 3);
+
+  // A game finished by a browser that predates rules versioning replays as rules 1.
+  const { playInteractive } = await import("@bb/sim");
+  const setup = (await start({ innings: 1 })).json();
+  const inputs: unknown[] = [];
+  const play = (rules: 1 | 2) => playInteractive({ ...setup.teams, seed: setup.seed, innings: 1, rules, userSide: "home", inputs: inputs as never });
+  let out = play(1);
+  while (out.awaiting) {
+    inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out = play(1);
+  }
+  const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
+  const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
+  assert.equal((await finish({ ...base, rules: 3 })).statusCode, 400);
+  assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
+  const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
+  assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
+  const saved = await finish({ ...base, rules: 1 });
+  assert.equal(saved.statusCode, 201, saved.body);
+  assert.deepEqual((await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json().result.final, out.result!.final);
 });

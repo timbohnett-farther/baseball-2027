@@ -9,11 +9,28 @@ import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
 import type {
   Aim, Awaiting, Bases, BattingLine, BoxScore, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
-  PitchingLine, PitchResult, PitchType, Side, SimPlayer, SimTeam, Tier, UserInput,
+  PitchingLine, PitchResult, PitchType, RulesVersion, Side, SimPlayer, SimTeam, Tier, UserInput,
 } from "./types.ts";
 
 export const DEFAULT_INNINGS = 3;
-const MAX_INNINGS = 9; // a game still tied after this many ends in a tie
+/** Rules v1 stops here and calls it a tie. Only used when `rules` is 1: saved games depend on it. */
+const MAX_INNINGS = 9;
+
+/**
+ * The ruleset a game is played under. Saved games are re-simulated from seed + inputs, so a rules
+ * change must never alter a game recorded under an older version: gate it on `c.rules`.
+ *  1 = original: ties after 9 innings, no run-ahead rule.
+ *  2 = ARC 3: no ties (extra innings until a winner), 10-run run-ahead rule from inning 2.
+ */
+export const CURRENT_RULES: RulesVersion = 2;
+/** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
+export const INNINGS_OPTIONS = [1, 3, 5] as const;
+const RUN_AHEAD = 10;
+/**
+ * Rules v2 safety net: extra innings past this many (regulation + 20) are decided by a seeded coin
+ * flip that adds one run, so a game always ends. Two level 70-rated teams reach it about never.
+ */
+export const MAX_EXTRA_INNINGS = 20;
 
 // How much a rating gap matters. Below 1 keeps upsets alive: an 80 team beats a 70 team
 // about 2 games in 3 instead of 4 in 5 (arcade games should never feel decided at the draft).
@@ -26,6 +43,9 @@ interface Ctx {
   rng: Rng;
   teams: Record<Side, SimTeam>;
   innings: number;
+  rules: RulesVersion;
+  /** Rules v2: set when the 10-run rule ended the game mid-inning. */
+  runAhead: boolean;
   state: GameState;
   events: GameEvent[];
   lineupIdx: Record<Side, number>;
@@ -461,11 +481,21 @@ function plateAppearance(c: Ctx) {
     text, tier, call: line, card, stat, ...(superSwing ? { superSwing } : {}),
   });
   if (walkOff) c.over = true;
+  // Rules v2: the home team opening a 10-run lead in the bottom of the 2nd or later ends it on the spot.
+  if (c.rules === 2 && !c.over && state.half === "bottom" && state.inning >= 2 && state.score.home - state.score.away >= RUN_AHEAD) {
+    c.over = true; c.runAhead = true;
+  }
 }
 
 // --- Whole game ----------------------------------------------------------------------------
 
-type GameInput = { away: SimTeam; home: SimTeam; seed: number; innings?: number };
+type GameInput = {
+  away: SimTeam; home: SimTeam; seed: number; innings?: number;
+  /** Ruleset version; see CURRENT_RULES. Saved games pass the one they were recorded under. */
+  rules?: RulesVersion;
+  /** Test hook: override MAX_EXTRA_INNINGS (rules v2). */
+  maxExtraInnings?: number;
+};
 
 export function simulateGame(input: GameInput): GameResult {
   return run(input).result!;
@@ -482,10 +512,14 @@ export function playInteractive(input: GameInput & { userSide: Side; inputs: Use
 
 function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; awaiting: Awaiting | null; result: GameResult | null } {
   const innings = input.innings ?? DEFAULT_INNINGS;
+  const rules = input.rules ?? CURRENT_RULES;
+  const lastInning = rules === 2 ? innings + (input.maxExtraInnings ?? MAX_EXTRA_INNINGS) : MAX_INNINGS;
   const c: Ctx = {
     rng: createRng(input.seed),
     teams: { away: input.away, home: input.home },
     innings,
+    rules,
+    runAhead: false,
     state: { inning: 1, half: "top", outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null }, score: { away: 0, home: 0 }, heat: {}, rally: { away: 0, home: 0 }, fire: null },
     events: [],
     lineupIdx: { away: 0, home: 0 },
@@ -504,7 +538,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
 
   try {
 
-  for (let inning = 1; inning <= MAX_INNINGS && !c.over; inning++) {
+  for (let inning = 1; inning <= lastInning && !c.over; inning++) {
     for (const half of ["top", "bottom"] as const) {
       // Home team doesn't bat in the last inning if it's already ahead.
       if (half === "bottom" && inning >= innings && s.score.home > s.score.away) break;
@@ -525,6 +559,8 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
       if (c.over) break;
     }
     if (inning >= innings && s.score.home !== s.score.away) break;
+    // Rules v2: after any completed inning from the 2nd on, a 10-run lead wins (an away lead still got its bottom half).
+    if (rules === 2 && inning >= 2 && Math.abs(s.score.home - s.score.away) >= RUN_AHEAD) { c.runAhead = true; break; }
   }
 
   } catch (e) {
@@ -532,12 +568,20 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     throw e;
   }
 
-  const winner: Side | null = s.score.home > s.score.away ? "home" : s.score.away > s.score.home ? "away" : null;
+  let winner: Side | null = s.score.home > s.score.away ? "home" : s.score.away > s.score.home ? "away" : null;
   const { away, home } = c.teams;
   s.balls = 0; s.strikes = 0;
+  let note = c.runAhead ? " Run-ahead rule." : "";
+  if (rules === 2 && winner === null) {
+    // Hit the extra-innings guard still level: a seeded coin flip, worth one run so the score agrees with the winner.
+    winner = c.rng.next() < 0.5 ? "away" : "home";
+    s.score[winner]++;
+    c.line[winner][c.line[winner].length - 1]++;
+    note = ` Decided by a coin flip after ${lastInning} innings.`;
+  }
   c.events.push({ type: "final", state: snapshot(s),
     text: winner
-      ? `Final: ${c.teams[winner].name} win ${Math.max(s.score.home, s.score.away)}-${Math.min(s.score.home, s.score.away)}.`
+      ? `Final: ${c.teams[winner].name} win ${Math.max(s.score.home, s.score.away)}-${Math.min(s.score.home, s.score.away)}.${note}`
       : `Final: ${away.name} ${s.score.away}, ${home.name} ${s.score.home}. A tie after ${MAX_INNINGS}.` });
 
   const box: BoxScore = {
