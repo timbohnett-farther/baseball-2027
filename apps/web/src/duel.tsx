@@ -8,6 +8,7 @@ import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { RewardLine } from "./store.tsx";
+import { ABILITY_ICON, APPROACH_TEXT, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
@@ -33,6 +34,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
   const [shown, setShown] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [pitchType, setPitchType] = useState<PitchType>("fastball");
+  const [approach, setApproach] = useState<Approach>("contact");
 
   // One stable object for the field and scorebug; its events grow as the game does.
   const shell = useMemo<PlayedGame>(() => ({
@@ -109,7 +111,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super}
+          heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super} approach={approach} onApproach={setApproach}
           abilities={awaiting.abilities} actorId={awaiting.batterId}
           onSwing={(swing, timing, sup, ability) => submit({ kind: "swing", swing, timing, ...(sup ? { super: true } : {}), ...(ability ? { ability } : {}) })} />
       )}
@@ -157,33 +159,10 @@ function Who({ batter, pitcher, heat, v3 }: { batter?: SimPlayer; pitcher?: SimP
   );
 }
 
-/** A strike-zone diagram. Children draw on top; `onPick` turns a tap or click into plate coordinates.
- *  pointerdown (not click) so a phone tap lands the instant the finger touches, with no tap delay. */
-// Keyboard aim: number keys laid out like a numpad (7 8 9 high, 4 5 6 middle, 1 2 3 low), all inside the strike zone.
-const KEY_AIM: Record<string, Aim> = {};
-"123456789".split("").forEach((k, i) => { KEY_AIM[k] = { x: ((i % 3) - 1) * 0.6, y: (Math.floor(i / 3) - 1) * 0.6 }; });
-
-function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
+/** Strike-zone diagram, display only: batting shows where the ball is headed (pitching uses the tap grid). */
+function Zone({ children }: { children?: React.ReactNode }) {
   return (
-    <div className={`zone ${onPick ? "pickable" : ""}`} ref={ref}
-      role={onPick ? "button" : undefined} tabIndex={onPick ? 0 : undefined}
-      aria-label={onPick ? "Strike zone. Press 1 to 9 to aim like a numpad, or Enter for the middle." : undefined}
-      onKeyDown={(e) => {
-        if (!onPick) return;
-        const aim = KEY_AIM[e.key] ?? (e.key === "Enter" || e.key === " " ? KEY_AIM["5"] : undefined);
-        if (!aim) return;
-        e.preventDefault();
-        onPick(aim);
-      }}
-      onPointerDown={(e) => {
-        if (!onPick || !ref.current || e.button !== 0) return;
-        e.preventDefault();
-        const r = ref.current.getBoundingClientRect();
-        const x = ((e.clientX - r.left) / r.width) * 2 * GRID - GRID;
-        const y = GRID - ((e.clientY - r.top) / r.height) * 2 * GRID;
-        onPick({ x: Math.max(-GRID, Math.min(GRID, x)), y: Math.max(-GRID, Math.min(GRID, y)) });
-      }}>
+    <div className="zone">
       <div className="zone-box" style={{ left: `${toPct(-1)}%`, top: `${toPct(-1)}%`, width: `${toPct(1) - toPct(-1)}%`, height: `${toPct(1) - toPct(-1)}%` }} />
       {children}
     </div>
@@ -198,30 +177,81 @@ function useArmed() {
   return { armed, ref, setArmed };
 }
 
-/** PUP 4: tap a chip to reserve its Heat, tap again to release it. The cost is spent when the pitch or swing goes. */
-function AbilityChips({ abilities, heat, armed, onArm }: {
-  abilities: AbilityStatus[]; heat: number; armed: AbilityRequest | null; onArm: (r: AbilityRequest | null) => void;
-}) {
-  if (!abilities.length) return null;
-  const spent = armed ? abilities.find((a) => a.id === armed.id)?.cost ?? 0 : 0;
+/** Left-handed mode mirrors the control clusters only (ARC 4.2); the field never flips. */
+function useLefty(): [boolean, () => void] {
+  const [lefty, setLefty] = useState(() => { try { return localStorage.getItem("bb.lefty") === "1"; } catch { return false; } });
+  return [lefty, () => setLefty((v) => { try { localStorage.setItem("bb.lefty", v ? "0" : "1"); } catch { /* private mode */ } return !v; })];
+}
+
+function HeatMeter({ heat, reserved }: { heat: number; reserved: number }) {
+  const h = Math.max(0, Math.min(100, Math.floor(heat)));
   return (
-    <div className="ability-chips" role="group" aria-label="Abilities">
-      <small className="muted">Heat {Math.floor(heat - spent)}</small>
-      {abilities.map((a) => {
-        const on = armed?.id === a.id;
-        return (
-          <span key={a.id} className={`ability-chip ${on ? "on" : ""}`}>
-            <button disabled={!a.available && !on} aria-pressed={on} title={a.message ?? a.summary}
-              onClick={() => onArm(on ? null : { id: a.id, ...(a.needsDirection ? { direction: "left" as const } : {}) })}>
-              <b>{a.name}</b> <small>{a.cost}{!a.available && !on && a.message ? ` · ${a.message}` : ""}</small>
-            </button>
-            {on && a.needsDirection && (["left", "right"] as const).map((d) => (
-              <button key={d} className={armed?.direction === d ? "dir on" : "dir"} aria-pressed={armed?.direction === d} onClick={() => onArm({ id: a.id, direction: d })}>{d === "left" ? "Left" : "Right"}</button>
-            ))}
-            {on && <small className="muted">{a.swings.length === 1 ? `${a.swings[0]} swing only. ` : ""}{a.summary}</small>}
-          </span>
-        );
-      })}
+    <div className="heat-meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={h} aria-label={`Heat ${h} of 100`}>
+      <span className="heat-meter-text">HEAT {h} / 100{reserved > 0 ? ` (${reserved} RESERVED)` : ""}</span>
+      <span className="heat-meter-bar"><i style={{ width: `${h - reserved}%` }} /><i className="reserved" style={{ width: `${reserved}%` }} /></span>
+    </div>
+  );
+}
+
+/** PUP 12.2: icon, name, cost and state on every chip; the reason a chip is off is on the chip, and a tap or long press says it in words. */
+function AbilityChips({ abilities, heat, armed, onArm, approach, onApproach }: {
+  abilities: AbilityStatus[]; heat: number; armed: AbilityRequest | null; onArm: (r: AbilityRequest | null) => void;
+  approach: Approach | null; onApproach?: (a: Approach) => void;
+}) {
+  const [choosing, setChoosing] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; to?: Approach } | null>(null);
+  const press = useRef<{ t: ReturnType<typeof setTimeout>; fired: boolean } | null>(null);
+  useEffect(() => { if (!note || note.to) return; const t = setTimeout(() => setNote(null), 2500); return () => clearTimeout(t); }, [note]);
+  if (!abilities.length) return null;
+  const reserved = armed ? abilities.find((a) => a.id === armed.id)?.cost ?? 0 : 0;
+  const ctx: ChipCtx = { armed, heat, approach, choosing };
+  const tap = (a: AbilityStatus) => {
+    const act = chipTap(a, ctx);
+    setNote(null);
+    if (act.do !== "choose") setChoosing(null);
+    if (act.do === "arm") onArm(act.req);
+    else if (act.do === "cancel") onArm(null);
+    else if (act.do === "choose") { onArm(null); setChoosing(act.id); }
+    else if (act.do === "note") setNote({ text: act.text });
+    else setNote({ text: act.text, to: act.to });
+  };
+  return (
+    <div className="tp-chips" role="group" aria-label="Abilities">
+      <HeatMeter heat={heat} reserved={reserved} />
+      <div className="tp-chip-row">
+        {abilities.map((a) => {
+          const v = chipState(a, ctx);
+          return (
+            <div key={a.id} className={`pchip pchip-${v.state}`}>
+              <button aria-pressed={v.state === "armed"} aria-disabled={v.state === "disabled"}
+                onPointerDown={() => { press.current = { fired: false, t: setTimeout(() => { if (press.current) { press.current.fired = true; setNote({ text: a.summary }); } }, 450) }; }}
+                onPointerUp={() => press.current && clearTimeout(press.current.t)}
+                onPointerLeave={() => press.current && clearTimeout(press.current.t)}
+                onContextMenu={(e) => e.preventDefault()}
+                onClick={() => { if (press.current?.fired) { press.current = null; return; } tap(a); }}>
+                <span className="chip-icon" aria-hidden>{ABILITY_ICON[a.id] ?? "*"}</span>
+                <span className="chip-main"><b>{a.name.toUpperCase()}</b><small>COST {a.cost}</small></span>
+                <span className="chip-state">{v.label}{v.state === "armed" ? " · TAP TO CANCEL" : ""}</span>
+              </button>
+              {v.state === "choosing" && (["left", "right"] as const).map((d) => (
+                <button key={d} className="chip-dir" onClick={() => { onArm({ id: a.id, direction: d }); setChoosing(null); }}>{d.toUpperCase()}</button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      {note && (
+        <p className="tp-note" role="status">{note.text}
+          {note.to && onApproach && (
+            <button className="chip-dir" onClick={() => {
+              const a = abilities.find((x) => x.swings.length && !x.swings.includes(approach!) && x.swings.includes(note.to!));
+              onApproach(note.to!);
+              if (a) onArm({ id: a.id });
+              setNote(null);
+            }}>SWITCH TO {note.to.toUpperCase()} + ARM</button>
+          )}
+        </p>
+      )}
     </div>
   );
 }
@@ -230,40 +260,67 @@ function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow, abilitie
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim, ability?: AbilityRequest) => void;
   abilities: AbilityStatus[]; actorId: number;
 }) {
-  const { armed, setArmed } = useArmed();
+  const { armed, ref: armedRef, setArmed } = useArmed();
+  const [chase, setChase] = useState(false);
+  const [lefty, toggleLefty] = useLefty();
+  const throwAt = useCallback((cell: number) => onThrow(cellAim(cell, chase), armedRef.current ?? undefined), [onThrow, chase, armedRef]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const c = keyCell(e.key);
+      if (c >= 0 && !e.repeat) { e.preventDefault(); throwAt(c); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [throwAt]);
   return (
-    <div className="duel-panel">
+    <div className={`duel-panel tp ${lefty ? "lefty" : ""}`}>
       <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />
-      <div className="duel-row">
-        <div className="duel-types" role="group" aria-label="Pitch type">
-          {TYPES.map((t) => (
-            <button key={t.type} className={`duel-type ${type === t.type ? "on" : ""}`} onClick={() => onType(t.type)}>
-              <b>{t.label}</b><small>{t.hint}</small>
-            </button>
-          ))}
+      <div className="tp-grid-layout">
+        <div className="tp-side">
+          <div className="duel-types" role="group" aria-label="Pitch type">
+            {TYPES.map((t) => (
+              <button key={t.type} className={`duel-type ${type === t.type ? "on" : ""}`} aria-pressed={type === t.type} onClick={() => onType(t.type)}>
+                <b>{t.label}</b><small>{t.hint}</small>
+              </button>
+            ))}
+          </div>
+          <div className="tp-mini">
+            <button className={`tp-toggle ${chase ? "on" : ""}`} aria-pressed={chase} onClick={() => setChase((v) => !v)}>WASTE PITCH {chase ? "ON" : "OFF"}</button>
+            <button className={`tp-toggle ${lefty ? "on" : ""}`} aria-pressed={lefty} onClick={toggleLefty}>LEFTY LAYOUT</button>
+          </div>
         </div>
-        <div className="duel-zone-wrap">
-          <Zone onPick={(aim) => onThrow(aim, armed ?? undefined)} />
-          <small className="muted">Tap where to throw it. Strikes are in the box. <span className="key">Keys 1–9 aim.</span></small>
+        <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} approach={null} />
+        <div className="tp-action">
+          <div className="target-grid" role="group" aria-label="Pitch target. Tap a cell to throw.">
+            {Array.from({ length: 9 }, (_, i) => (
+              <button key={i} className={`target-cell ${i === 4 ? "mid" : ""} ${chase && i !== 4 ? "chase" : ""}`} onClick={() => throwAt(i)}
+                aria-label={`${cellTag(i, chase).toLowerCase()} ${["high", "middle", "low"][Math.floor(i / 3)]} ${["left", "middle", "right"][i % 3]}`}>
+                <small>{cellTag(i, chase)}</small>
+              </button>
+            ))}
+          </div>
+          <small className="muted tp-hint">Tap a cell to throw. <span className="key">Keys 1–9 aim.</span></small>
         </div>
       </div>
-      <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} />
     </div>
   );
 }
 
-function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing, abilities, actorId }: {
+function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onApproach, onSwing, abilities, actorId }: {
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType; mph: number; aim: Aim };
-  sup: Awaiting["super"];
+  sup: Awaiting["super"]; approach: Approach; onApproach: (a: Approach) => void;
   onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean, ability?: AbilityRequest) => void;
   abilities: AbilityStatus[]; actorId: number;
 }) {
   const { armed, ref: armedRef, setArmed } = useArmed();
+  const [lefty, toggleLefty] = useLefty();
   const ms = flightMs(incoming.mph);
   const startRef = useRef(performance.now());
   const doneRef = useRef(false);
   const onSwingRef = useRef(onSwing);
   onSwingRef.current = onSwing;
+  const approachRef = useRef(approach);
+  approachRef.current = approach;
   const canSuper = !v3 && !!sup && sup.clutch && sup.charges > 0;
 
   const swing = useCallback((kind: "contact" | "power" | "take", superSwing = false) => {
@@ -274,55 +331,65 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing, abiliti
     onSwingRef.current(kind, Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)), superSwing, kind === "take" ? undefined : armedRef.current ?? undefined);
   }, [ms, armedRef]);
 
-  // Let it go by and it's a take.
+  // No tap is a take (ARC 5.2): let it go by.
   useEffect(() => {
     const t = setTimeout(() => swing("take"), ms * 1.25);
     return () => clearTimeout(t);
   }, [ms, swing]);
 
+  const pick = useCallback((a: Approach) => {
+    onApproach(a);
+    const held = abilities.find((x) => x.id === armedRef.current?.id);
+    if (!survivesApproach(held, a)) setArmed(null);
+  }, [onApproach, abilities, armedRef, setArmed]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      if (e.code === "Space" || e.key === "c" || e.key === "C") { e.preventDefault(); swing("contact"); }
-      else if (e.key === "p" || e.key === "P") swing("power");
+      if (e.code === "Space") { e.preventDefault(); swing(approachRef.current); }
+      else if (e.key === "c" || e.key === "C") pick("contact");
+      else if (e.key === "p" || e.key === "P") pick("power");
       else if (e.key === "t" || e.key === "T") swing("take");
       else if ((e.key === "s" || e.key === "S") && canSuper) swing("power", true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [swing, canSuper]);
+  }, [swing, pick, canSuper]);
 
   const label = TYPES.find((t) => t.type === incoming.type)!.label;
   return (
-    <div className="duel-panel">
+    <div className={`duel-panel tp ${lefty ? "lefty" : ""}`}>
       <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />
-      <div className="duel-row">
-        <div className="duel-incoming">
+      <div className="tp-grid-layout">
+        <div className="tp-side">
+          <div className="approach" role="radiogroup" aria-label="Swing approach">
+            {(["contact", "power"] as const).map((a) => (
+              <button key={a} role="radio" aria-checked={approach === a} className={approach === a ? "on" : ""} onClick={() => pick(a)}>
+                <b>{a.toUpperCase()}</b><small>{APPROACH_TEXT[a].split(": ")[1]}</small>
+              </button>
+            ))}
+          </div>
+          <div className="tp-mini"><button className={`tp-toggle ${lefty ? "on" : ""}`} aria-pressed={lefty} onClick={toggleLefty}>LEFTY LAYOUT</button></div>
+        </div>
+        <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} approach={approach} onApproach={pick} />
+        <div className="tp-action">
           <div className="duel-pitch"><b>{label}</b> {incoming.mph} mph</div>
+          <Zone><i className="zone-ball" style={{ left: `${toPct(incoming.aim.x)}%`, top: `${toPct(-incoming.aim.y)}%`, animationDuration: `${ms}ms` }} /></Zone>
           <div className="timing" aria-hidden>
             <i className="timing-sweet" style={{ left: `${(SWEET - WINDOW * 0.2) * 100}%`, width: `${WINDOW * 0.4 * 100}%` }} />
             <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
           </div>
-          <div className="duel-buttons">
-            <button className="primary" onPointerDown={() => swing("contact")} onClick={() => swing("contact")}>Contact <small className="key">Space</small></button>
-            <button className="primary" onPointerDown={() => swing("power")} onClick={() => swing("power")}>Power <small className="key">P</small></button>
-            <button onPointerDown={() => swing("take")} onClick={() => swing("take")}>Take <small className="key">T</small></button>
+          <div className="tp-swing-row">
             {sup && !v3 && (
-              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onPointerDown={() => swing("power", true)} onClick={() => swing("power", true)}
+              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onPointerDown={() => swing("power", true)}
                 title={sup.charges === 0 ? "No charges left" : sup.clutch ? "Clutch spot. Spend a charge." : "Only in clutch spots"}>
-                Super <small><span className="key">S · </span>{sup.charges} left</small>
+                Super <small>{sup.charges} left</small>
               </button>
             )}
+            <button className="swing-btn" onPointerDown={() => swing(approach)}>SWING<small className="key">Space</small></button>
           </div>
-          <small className="muted">
-            Swing when the marker hits the gold. Contact for hits, Power for homers.
-            {sup && !v3 && (canSuper ? " Clutch spot: a Super Swing is ready." : ` ${sup.bat} charges only in clutch spots.`)}
-          </small>
-          <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} />
+          <small className="muted tp-hint">Swing when the marker hits the gold. Don't tap to take.</small>
         </div>
-        <Zone>
-          <i className="zone-ball" style={{ left: `${toPct(incoming.aim.x)}%`, top: `${toPct(-incoming.aim.y)}%`, animationDuration: `${ms}ms` }} />
-        </Zone>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { simulateGame, type PlayedGame, type SimPlayer, type SimTeam } from "@bb/sim";
 import { FieldView } from "./field.tsx";
+import { DuelView } from "./duel.tsx";
 
 // Dev-only art review: `/?shot=hr` renders the ballpark full-screen at a named moment of a fixture game
 // (no server, no sign-in) so `scripts/shot.mjs` can screenshot it. Moments: pitch, swing, hr, k, single,
@@ -50,8 +51,26 @@ function find(game: PlayedGame, m: Moment): number {
   }
 }
 
+/** `/?shot=duel-pitch` / `duel-swing`: the real DuelView on a fixture setup, for checking the tap controls. */
+function DuelShot({ side, wait }: { side: "home" | "away"; wait: number }) {
+  const setup = useMemo(() => {
+    nextId = 1;
+    const away = team("Harbor City", "HAR", "#1d4e89", AWAY), home = team("Ridgeback", "RDG", "#b3302a", HOME);
+    return { seed: 7, innings: 3, rules: 4 as const, userSide: side, opponent: { id: 0, name: away.name, abbr: away.abbr }, teams: { away, home } };
+  }, [side]);
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, wait); }
+    }, 100);
+    return () => clearInterval(t);
+  }, [wait]);
+  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} /></div>;
+}
+
 export function ShotView() {
   const q = new URLSearchParams(location.search);
+  const duel = q.get("shot");
+  if (duel === "duel-pitch" || duel === "duel-swing") return <DuelShot side={duel === "duel-pitch" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);

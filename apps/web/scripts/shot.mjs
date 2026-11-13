@@ -9,7 +9,10 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
-const [outDir = join(web, "shots"), ...only] = process.argv.slice(2);
+const args = process.argv.slice(2);
+// --phone: 844x390 landscape touch viewport (iPhone-class), for the tap-control layout.
+const phone = args.includes("--phone");
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone");
 const moments = only.length ? only : ["pitch", "swing", "hr", "k", "single", "double", "final"];
 const port = 5199;
 mkdirSync(outDir, { recursive: true });
@@ -23,12 +26,12 @@ await new Promise((ok, no) => {
 
 try {
   const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage(phone ? { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
   page.on("pageerror", (e) => console.error("page error:", e.message));
   for (const m of moments) {
     await page.goto(`http://localhost:${port}/?shot=${m}&t=700`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
-    const file = join(outDir, `${m}.jpg`);
+    const file = join(outDir, `${m}${phone ? "-phone" : ""}.jpg`);
     await page.screenshot({ path: file, type: "jpeg", quality: 82 });
     console.log(file);
   }
