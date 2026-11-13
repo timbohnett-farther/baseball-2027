@@ -492,7 +492,7 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 
 
 /* Landscape phone stage: while a tap panel is up the field fills the screen and the control clusters float over its
-   lower corners (thumb zones), so nothing needs scrolling. Chips sit at the top centre, away from the plate. */
+   lower corners (thumb zones), so nothing needs scrolling. Chips are a compact row at the top left; the centre and plate stay clear. */
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
   .game:has(.tp) { min-height: 0; padding: 0; border: 0; background: none; backdrop-filter: none; box-shadow: none; animation: none; margin: 0; overflow: visible; }
   .game:has(.tp) .field { position: fixed; inset: 0; margin: 0; aspect-ratio: auto; border: 0; border-radius: 0; z-index: 1; }
@@ -505,8 +505,16 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
   .game:has(.tp) .tp-grid-layout { position: absolute; inset: 0; display: block; margin: 0; padding: 0; }
   .game:has(.tp) .tp-side { position: absolute; left: calc(8px + env(safe-area-inset-left)); bottom: calc(8px + env(safe-area-inset-bottom)); width: min(260px, 31vw); }
   .game:has(.tp) .tp-action { position: absolute; right: calc(8px + env(safe-area-inset-right)); bottom: calc(8px + env(safe-area-inset-bottom)); }
-  .game:has(.tp) .tp-chips { position: absolute; left: 50%; transform: translateX(-50%); top: calc(100px + env(safe-area-inset-top)); width: min(290px, 34vw); }
-  .game:has(.tp) .pchip > button:first-child, .game:has(.tp) .duel-type, .game:has(.tp) .approach button, .game:has(.tp) .tp-toggle { background: rgba(26, 31, 42, 0.92); }
+  .game:has(.tp) .tp-chips { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(52px + env(safe-area-inset-top)); max-width: calc(100vw - 190px); flex-direction: row; flex-wrap: nowrap; align-items: flex-start; gap: 6px; }
+  .game:has(.tp) .tp-chips .heat-meter { width: 104px; padding: 2px 6px; background: rgba(11, 13, 18, 0.55); border-radius: 3px; }
+  .game:has(.tp) .tp-chip-row { flex-wrap: nowrap; gap: 6px; }
+  .game:has(.tp) .tp-note { flex-basis: 100%; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+  .game:has(.tp) .pchip > button:first-child { min-height: 44px; padding: 2px 8px; gap: 0 6px; }
+  .game:has(.tp) .chip-main { flex-direction: row; align-items: baseline; gap: 6px; }
+  .game:has(.tp) .pchip { max-width: 128px; }
+  .game:has(.tp) .chip-state { font-size: 10px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game:has(.tp) .chip-icon { font-size: 16px; line-height: 1; }
+  .game:has(.tp) .pchip > button:first-child, .game:has(.tp) .duel-type, .game:has(.tp) .approach button, .game:has(.tp) .tp-toggle { background: rgba(26, 31, 42, 0.62); }
   .tp.lefty .tp-side { left: auto; right: calc(8px + env(safe-area-inset-right)); }
   .tp.lefty .tp-action { right: auto; left: calc(8px + env(safe-area-inset-left)); align-items: flex-start; }
 }
