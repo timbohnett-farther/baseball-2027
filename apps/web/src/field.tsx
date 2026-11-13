@@ -6,6 +6,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { getQuality, QUALITY_PROFILE } from "./quality.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
+import { holdWithShot, shotPose, type ShotPlan } from "./actionshot.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -33,8 +34,8 @@ interface Tween { t: number; delay: number; dur: number; fn: (p: number) => void
 // The named cameras of VISUAL_DESIGN 3.3. A big play queues a shot list; each shot runs on the
 // shot clock (playback seconds) and may slow or freeze the action under it. An empty queue is the
 // gameplay camera. `ride` ends early once the ball lands.
-type ShotKind = "barrel" | "dust" | "ride" | "drive" | "hero" | "dive";
-interface Shot { kind: ShotKind; dur: number; scale?: number | ((t: number) => number); target?: THREE.Object3D | null }
+type ShotKind = "barrel" | "dust" | "ride" | "drive" | "hero" | "dive" | "contact" | "release" | "slide";
+interface Shot { kind: ShotKind; dur: number; scale?: number | ((t: number) => number); target?: THREE.Object3D | null; still?: boolean; base?: number }
 const RAMP = (t: number) => 0.25 + Math.min(1, t / 0.6) * 0.75; // slow-mo easing back to full speed
 const barrel = (dur = FREEZE): Shot => ({ kind: "barrel", dur, scale: 0 });
 const dust = (dur: number): Shot => ({ kind: "dust", dur, scale: 0.25 });
@@ -349,6 +350,8 @@ class Director {
   private burstDust: Dust; private drift: Dust;
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
   private shake = 0;
+  private plan: ShotPlan | null = null;
+  private slideBase = 1;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
   private prof = QUALITY_PROFILE[getQuality()]; // graphics tier, read once per renderer
   private raf = 0; private last = performance.now();
@@ -541,7 +544,21 @@ class Director {
   }
 
   /** Replace the shot list; the first shot (or the gameplay camera) starts with a hard cut. */
-  private cutTo(shots: Shot[]) { this.shots = fitShots(shots, this.budget); this.shotT = 0; this.cut = true; }
+  private cutTo(shots: Shot[]) {
+    const a = this.actionShot();
+    // The action shot owns the tail of the hold; the result sequence is fitted into whatever is left before it.
+    this.shots = a ? [...fitShots(shots, Math.max(0.12, this.budget - a.dur)), a] : fitShots(shots, this.budget);
+    this.shotT = 0; this.cut = true;
+  }
+
+  /** The planned action shot as a camera segment, or null (the broadcast camera stays) if its subject is not on the field. */
+  private actionShot(): Shot | null {
+    const p = this.plan;
+    if (!p) return null;
+    if (p.camera === "release" && !this.fielders[0]) return null;
+    const base = p.camera === "slide" ? this.slideBase : 1;
+    return { kind: p.camera, dur: p.durMs / 1000 / this.speed, scale: 1, still: p.still, base };
+  }
 
   private flight(from: THREE.Vector3, to: THREE.Vector3, peak: number, dur: number, delay = 0, hold = false) {
     this.tween(dur, (p) => {
@@ -574,10 +591,11 @@ class Director {
 
   // --- event handling ----------------------------------------------------------------------
 
-  handle(e: GameEvent, jumped: boolean) {
+  handle(e: GameEvent, jumped: boolean, plan: ShotPlan | null = null) {
     this.flush();
     this.view = cameraViewFor(e);
-    this.budget = blockingBudgetMs(e) / 1000 / this.speed;
+    this.plan = plan;
+    this.budget = holdWithShot(blockingBudgetMs(e), plan) / 1000 / this.speed;
     this.syncHalf(e);
     this.syncPitcher(e);
     if (jumped) this.resync(e);
@@ -587,6 +605,8 @@ class Director {
     else if (e.type === "play") this.onPlay(e);
     else if (e.type === "half_start") this.clearRunners();
     else if (e.type === "run") this.resync(e);
+    this.slideBase = e.type === "run" && e.shot ? ({ first: 1, second: 2, third: 3 } as const)[e.shot.base] : 1;
+    if (plan && !this.shots.some((x) => x.kind === plan.camera)) this.cutTo([]); // routine plays that still earn a shot
   }
 
   private syncHalf(e: GameEvent) {
@@ -875,6 +895,7 @@ class Director {
       seq: this.frames, samples: s.length, calls: i.render.calls, triangles: i.render.triangles, points: i.render.points,
       geometries: i.memory.geometries, textures: i.memory.textures, programs: i.programs?.length ?? 0,
       frameMedianMs: s[s.length >> 1] ?? 0, frameP95Ms: s[Math.floor(s.length * 0.95)] ?? 0,
+      shotKind: this.shots[0]?.kind ?? null, shotP: this.shots[0] ? this.shotT / this.shots[0].dur : 0,
     };
   }
 
@@ -907,6 +928,10 @@ class Director {
       case "drive": pos = t.clone().add(V(2.6, 1.4, 3.4)); look = t.clone().add(V(0, 1.1, 0)); fov = 30; rate = 8; hand = 0.012; break;
       case "hero": pos = t.clone().add(V(1.5, 0.45, 1.9)); look = t.clone().add(V(0, 1.55, 0)); fov = 22; rate = 10; hand = 0.02; break;
       case "dive": pos = t.clone().add(V(3.4, 0.3, 2.4)); look = t.clone().add(V(0, 0.7, 0)); fov = 26; rate = 10; hand = 0.015; break;
+      case "contact": case "release": case "slide": {
+        const q = shotPose(shot.kind, this.shotT / shot.dur, !!shot.still, shot.base);
+        pos = V(...q.pos); look = V(...q.look); fov = q.fov; rate = 40; hand = shot.still ? 0 : 0.008; break;
+      }
       default:
         if (this.ballFlying && this.ball.visible) { look = vp.look.clone().lerp(b, 0.55); rate = Math.min(rate, 3); }
     }
@@ -927,7 +952,7 @@ class Director {
 }
 
 /** The ballpark. `index` is the current event; a jump of more than one event (skip, replay) re-syncs runners. */
-export function FieldView({ game, index, speed, children }: { game: PlayedGame; index: number; speed: number; children?: ReactNode }) {
+export function FieldView({ game, index, speed, plan = null, children }: { game: PlayedGame; index: number; speed: number; plan?: ShotPlan | null; children?: ReactNode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dirRef = useRef<Director | null>(null);
   const lastRef = useRef(-1);
@@ -951,9 +976,9 @@ export function FieldView({ game, index, speed, children }: { game: PlayedGame; 
   useEffect(() => {
     const d = dirRef.current;
     if (!d) return;
-    d.handle(game.result.events[index], index !== lastRef.current + 1);
+    d.handle(game.result.events[index], index !== lastRef.current + 1, plan);
     lastRef.current = index;
-  }, [index, game]);
+  }, [index, game]); // plan is derived from index and the game; it never re-triggers a handle on its own
 
   return <div className="field"><canvas ref={canvasRef} aria-label="Ballpark view" />{children}</div>;
 }

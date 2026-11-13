@@ -3,6 +3,7 @@ import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type GameE
 import { UNLOCKS, type ArcadeFixture, type ArcadeSeasonState, type ArcadeStanding, type BracketGame, type ClubStyle, type SuggestedDifficulty } from "@bb/shared";
 import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
+import { CATALOG, type ShotPlan } from "./actionshot.ts";
 import { DuelView } from "./duel.tsx";
 import { AbilityCue, PlayCard } from "./game.tsx";
 
@@ -10,7 +11,7 @@ import { AbilityCue, PlayCard } from "./game.tsx";
 // (no server, no sign-in) so `scripts/shot.mjs` can screenshot it. Moments: pitch, swing, hr, k, single,
 // double, final. `&t=<ms>` is how long after the moment lands the page declares itself ready.
 
-const MOMENTS = ["pitch", "swing", "hr", "k", "single", "double", "final", "ability", "bigplay"] as const;
+const MOMENTS = ["pitch", "swing", "hr", "k", "single", "double", "final", "ability", "bigplay", "shot-contact", "shot-release", "shot-slide"] as const;
 type Moment = typeof MOMENTS[number];
 
 let nextId = 1;
@@ -52,6 +53,9 @@ function find(game: PlayedGame, m: Moment): number {
     case "single": return play("single");
     case "double": { const i = play("double"); return i >= 0 ? i : play("triple"); }
     case "final": return ev.length - 1;
+    case "shot-contact": return play("home_run");
+    case "shot-release": return play("strikeout");
+    case "shot-slide": return play("single");
   }
 }
 
@@ -196,9 +200,13 @@ export function ShotView() {
   }, [target, wait]);
 
   const e = game.result.events[index];
+  // W32 art review: a plan on the moment itself, so the camera can be captured without waiting for a match to earn one.
+  const plan: ShotPlan | null = moment === "shot-contact" || moment === "shot-release" || moment === "shot-slide"
+    ? (() => { const family = moment === "shot-contact" ? "CONTACT" : moment === "shot-release" ? "MOUND_RELEASE" : "SLIDE_TAG"; const d = CATALOG[family]; return { index: target, family, camera: d.camera, durMs: d.fullMs, score: 100, reasons: ["art review"], still: false }; })()
+    : null;
   return (
     <div className="shot">
-      <FieldView game={game} index={index} speed={1}>
+      <FieldView game={game} index={index} speed={1} plan={index === target ? plan : null}>
         {moment === "ability" && <AbilityCue speed={1} e={{ ...e, type: "ability", phase: "triggered", side: "home", playerId: 0, ability: "RUN_AFTERBURNER", heat: 0, text: "" } as GameEvent} />}
       </FieldView>
       {moment === "bigplay" && e.type === "play" && <PlayCard card={e.card ? e : { ...e, card: "HOME RUN", tier: 1 }} players={new Map(Object.values(game.teams).flatMap((t) => [...t.lineup, ...t.pitchers]).map((p) => [p.id, p]))} />}

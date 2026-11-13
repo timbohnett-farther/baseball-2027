@@ -5,6 +5,8 @@ import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { cueFor, DOMAIN_COLOR } from "./abilityfx.ts";
 import { blockingBudgetMs, cardWindowMs, skipAfterMs } from "./presentation.ts";
+import { holdWithShot, SHOT_SKIP_MS, type ShotPlan } from "./actionshot.ts";
+import { useShotPlans } from "./actionshots.ts";
 import { useCoachTips } from "./coach.tsx";
 import { Ovr } from "./players.tsx";
 import { RewardLine } from "./store.tsx";
@@ -160,10 +162,10 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
 const SPEEDS = [1, 2, 4];
 
 /** How long each event stays on screen at 1x (ms): the ARC 10.3 blocking budget. */
-export function holdFor(e: GameEvent): number { return blockingBudgetMs(e); }
+export function holdFor(e: GameEvent, plan?: ShotPlan | null): number { return holdWithShot(blockingBudgetMs(e), plan); }
 
 /** A big play may be skipped by tap once its opening beat has landed. */
-export function skipAfter(e: GameEvent): number | null { return skipAfterMs(e); }
+export function skipAfter(e: GameEvent, plan?: ShotPlan | null): number | null { return plan ? SHOT_SKIP_MS : skipAfterMs(e); }
 
 /** Show the card after `delay`, for `dur`, both scaled by playback speed. */
 export function usePlayCard(e: GameEvent | undefined, speed: number, key: unknown) {
@@ -205,9 +207,9 @@ export function AbilityCue({ e, speed }: { e: GameEvent | undefined; speed: numb
   );
 }
 
-export function SkipPlay({ e, speed, onSkip }: { e: GameEvent | undefined; speed: number; onSkip: () => void }) {
+export function SkipPlay({ e, speed, onSkip, plan }: { e: GameEvent | undefined; speed: number; onSkip: () => void; plan?: ShotPlan | null }) {
   const [ready, setReady] = useState(false);
-  const after = e ? skipAfter(e) : null;
+  const after = e ? skipAfter(e, plan) : null;
   useEffect(() => {
     setReady(false);
     if (after === null) return;
@@ -276,6 +278,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
     for (const side of ["away", "home"] as Side[]) for (const p of [...game.teams[side].lineup, ...game.teams[side].pitchers]) m.set(p.id, p);
     return m;
   }, [game]);
+  const planFor = useShotPlans(events, game.result.innings, game);
   const done = i >= events.length - 1;
   const highlights = useReel(events, speed);
   const shownIndex = highlights.index ?? i; // the reel borrows the field after the final
@@ -283,9 +286,9 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
 
   useEffect(() => {
     if (done) return;
-    const t = setTimeout(() => setI((n) => n + 1), holdFor(events[i]) / speed);
+    const t = setTimeout(() => setI((n) => n + 1), holdFor(events[i], planFor(i)) / speed);
     return () => clearTimeout(t);
-  }, [i, speed, done, events]);
+  }, [i, speed, done, events, planFor]);
 
   const current = events[i];
   const s = current.state;
@@ -312,7 +315,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
         <Scorebug game={game} index={i} />
         <div className="game-controls">
           {!done && SPEEDS.map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
-          {!done && <SkipPlay e={current} speed={speed} onSkip={() => setI((n) => n + 1)} />}
+          {!done && <SkipPlay e={current} speed={speed} plan={planFor(i)} onSkip={() => setI((n) => n + 1)} />}
           {!done && <button className="link" onClick={() => setI(events.length - 1)}>Skip to final</button>}
           {done && highlights.reel && <SkipPlay e={events[shownIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
@@ -321,7 +324,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
         </div>
       </div>
 
-      <Suspense fallback={<div className="field" />}><FieldView game={game} index={shownIndex} speed={speed} /></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={game} index={shownIndex} speed={speed} plan={highlights.reel ? null : planFor(shownIndex)} /></Suspense>
       {highlights.reel && <ReelCard reel={highlights.reel} game={game} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
 
       {!done && batterId && (

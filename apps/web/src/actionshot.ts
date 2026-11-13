@@ -271,8 +271,8 @@ export const MIN_FIGURE_GAP = 1.2;
 export function shotPose(camera: ShotCamera, p: number, still: boolean, base = 1): ShotPose {
   const q = still ? 0.5 : Math.min(1, Math.max(0, p));
   switch (camera) {
-    case "contact": // low at the plate, in front of the batter, slowly pushing in on the contact point
-      return { pos: [1.9 - 0.5 * q, MIN_CAM_Y + 0.05, 1.6 - 0.3 * q], look: [-0.4, 1.1, 0.1], fov: 30 };
+    case "contact": // ground level on the third-base side, across the plate and batter's box, slowly pushing in
+      return { pos: [-3.6 + 0.5 * q, MIN_CAM_Y + 0.05, -1.4 + 0.2 * q], look: [-0.2, 0.55, 0.3], fov: 32 };
     case "release": // behind the mound, over the pitcher's shoulder toward the plate
       return { pos: [0.9, 1.75, -21.1 + 0.6 * q], look: [0, 1.2, -2], fov: 24 };
     case "slide": { // base level, outside the diamond, looking across the bag

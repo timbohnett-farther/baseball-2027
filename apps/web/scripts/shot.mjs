@@ -27,7 +27,7 @@ const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
-const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
+const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay", "shot-contact", "shot-release", "shot-slide"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
 const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
@@ -123,12 +123,19 @@ try {
   let failures = 0;
   const rows = [];
   for (const m of moments) {
-    await page.goto(`http://localhost:${port}/?shot=${m}&t=700`, { waitUntil: "load" });
+    await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
+    let shotStats = null;
+    if (m.startsWith("shot-")) { // an action shot lasts about a second: wait until its camera is a third of the way through
+      const want = { "shot-contact": "contact", "shot-release": "release", "shot-slide": "slide" }[m];
+      await page.waitForFunction(([k]) => { const r = window.__renderStats; return r && r.shotKind === k && r.shotP > 0.35; }, [want], { timeout: 60000, polling: 20 });
+      shotStats = await page.evaluate(() => ({ ...window.__renderStats }));
+    }
     if (CONTROLS[m] || STATIC[m]) {
       const n = await page.locator(CONTROLS[m] ?? STATIC[m]).count();
       if (!n) throw new Error(`${m}: controls (${CONTROLS[m] ?? STATIC[m]}) missing from the shot`);
     }
+    if (perf && shotStats) { rows.push({ moment: m, quality: quality ?? "stored", ...shotStats }); continue; } // measured while the shot camera is live
     if (perf) { // sample a fixed window of 60 rendered frames after the moment is ready
       await page.waitForSelector(".field canvas", { timeout: 15000 });
       const from = await page.evaluate(() => window.__renderStats?.seq ?? 0);
@@ -145,7 +152,7 @@ try {
     }
     if (check) { failures += await layoutCheck(page, m); continue; }
     await page.waitForSelector(".field canvas", { timeout: 15000 }); // the ballpark is a lazy chunk; never shoot before it mounts
-    await page.waitForTimeout(800);
+    if (!shotStats) await page.waitForTimeout(800);
     const file = join(outDir, `${m}${phone ? "-phone" : ""}.jpg`);
     await page.screenshot({ path: file, type: "jpeg", quality: 82 });
     console.log(file);

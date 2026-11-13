@@ -11,6 +11,7 @@ import { clearSnapshot, newGameId, saveSnapshot, SNAPSHOT_SCHEMA } from "./resum
 import { crowdBed, playEvent } from "./audio.ts";
 import { hapticFor, vibrate } from "./haptics.ts";
 import { PaceTracker } from "./pace.ts";
+import { useShotPlans } from "./actionshots.ts";
 import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
@@ -76,6 +77,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   }, [setup, inputs, shell]);
 
   const events = g.events;
+  const planFor = useShotPlans(events, setup.innings, shell);
   const players = useMemo(() => {
     const m = new Map<number, SimPlayer>();
     for (const side of ["away", "home"] as Side[]) for (const p of [...setup.teams[side].lineup, ...setup.teams[side].pitchers]) m.set(p.id, p);
@@ -86,9 +88,9 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   const caughtUp = shown >= events.length - 1;
   useEffect(() => {
     if (caughtUp || paused) return;
-    const t = setTimeout(() => setShown((n) => n + 1), holdFor(events[shown]) / speed);
+    const t = setTimeout(() => setShown((n) => n + 1), holdFor(events[shown], planFor(shown)) / speed);
     return () => clearTimeout(t);
-  }, [shown, caughtUp, speed, events, paused]);
+  }, [shown, caughtUp, speed, events, paused, planFor]);
 
   // Each render's taps carry that render's phase token (the input count), so a late or repeated tap is dropped.
   const at = inputs.length;
@@ -149,7 +151,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
         <Scorebug game={shell} index={Math.min(shown, events.length - 1)} />
         <div className="game-controls">
           {!done && [1, 2].map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
-          {!done && !caughtUp && <SkipPlay e={current} speed={speed} onSkip={() => setShown((n) => n + 1)} />}
+          {!done && !caughtUp && <SkipPlay e={current} speed={speed} plan={planFor(shown)} onSkip={() => setShown((n) => n + 1)} />}
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
@@ -166,7 +168,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
         </div>
       )}
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planFor(fieldIndex)}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 
