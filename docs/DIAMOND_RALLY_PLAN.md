@@ -82,6 +82,11 @@ free/royalty-free rigs and motion libraries, no paid mocap.
   W32c review (captures, 3053049): contact reads as a swing; release pose hunched with the throwing arm hidden and the ball (live radius 0.15 m) reading head-sized at close range; slide readable, fielder reach weak. Railway build of 3053049 failed on infrastructure ("failed to download build driver"), redeployed by the next push.
 - [x] W32d shot polish (apps/web only, sim untouched): release camera on the throwing-arm side with an upright stride pose; ball inside frame at the contact capture; close cameras pulled back/lengthened so the unscaled ball does not read oversized; fielder glove reach to the tag; real captures for early/mid/late fixtures and a lefty batter.
   Still open: ball:head size ratio is fixed by constants (BALL_RADIUS 0.15 vs head 0.115); pitcher throwing hand is a presentation default (R, lefty via SHOT_MODE-only ?throws=L) as the sim has none; contact ball display speed slowed (CONTACT_SLOW) with recorded direction; runner stray glove removed; device/frame-rate evidence missing.
+  W32d review (36bcb56, tests 24/79/39/164): release pose and camera side fixed; contact ball in frame; glove reaches the tag.
+  Open: the ball still reads head-sized in close shots (live BALL_RADIUS 0.15 m, kept unscaled by rule) — owner decision;
+  fielder and runner overlap in the late slide frame; an extra figure stands behind the batter at contact (cause unknown);
+  the sim has no pitcher throwing hand (R is a presentation default).
+- [ ] W32e shot telemetry (Kimi phase 03): record shot triggers/skips/durations, no frequency or pacing retune.
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
@@ -135,3 +140,19 @@ Six packages, mapped to our waves:
 - Shot frequency (full 1.40, reduced 0.80 per match) and the 2.8-minute match estimate: no retuning and no added
   delays until a real playtest.
 - Separate maintenance item: `npm ci` reports 8 dependency vulnerabilities (6 moderate, 2 high); no force upgrade.
+
+## Kimi weekend queue (2026-11-13, WEEKEND-BUILD-QUEUE.md + weekend-phases/00–21)
+
+Kimi's 22-phase queue replaces its Package-A-only note and accepts continuous waves, the MLB draft, all eleven
+abilities, Rally Breaker, full season and web/PWA. Phase files live in the Kimi task folder; each is a work order.
+Mapping and status (project records are the evidence, not this list):
+
+- 00 green baseline: COMPLETE at 3053049 (web 75/75; Kimi's 2 failures were from a mid-edit copy).
+- 01 contact readability, 02 release + slide/tag: DONE as W32d (36bcb56).
+- 03 shot telemetry (no retune) → W32e. 04 live PBR → W33. 05 cinematic post/VFX → W33b.
+- 06 athlete asset audition (offline, provenance) → W34a; 07/08 rig import + integration BLOCKED until a legal rig is approved.
+- 09 preload/hitch/memory, 10 render-rate invariance + soak → W35a/b (desktop only; device rows EVIDENCE_MISSING).
+- 11 touch/safe-area/a11y → W36a. 12 gameplay telemetry → W36b. 14 per-ability goldens + CPU fairness → W36c (IN_PROGRESS, worktree, sim/server tests only, no retune).
+- 13 save/resume fault injection (after 03, 12). 15 audio/haptics (after 02, 11). 16 result flow (after 12). 17 season hub clarity (after 13, 16).
+- 18 content scale BLOCKED on 08/10. 19 dependency maintenance (separate worktree). 20 playtest kit. 21 RC audit last.
+- Serialization points: field.tsx, shotscene.ts, shared CSS, telemetry schemas, sim files — one wave at a time on each.
