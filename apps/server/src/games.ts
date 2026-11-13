@@ -117,7 +117,7 @@ function played(row: typeof games.$inferSelect, opponent: { id: number; name: st
   const input = { away: row.teams.away, home: row.teams.home, seed: row.seed, innings: row.innings, rules: row.rules };
   // autoField: games saved before fielding taps existed have none in their log; the play stands as rolled.
   const result = row.inputs ? playInteractive({ ...input, userSide: row.userSide, inputs: row.inputs, autoField: true }).result! : simulateGame(input);
-  return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result };
+  return { id: row.id, createdAt: row.createdAt.toISOString(), opponent, userSide: row.userSide, teams: row.teams, result, rules: row.rules };
 }
 
 const isAim = (a: unknown): a is Aim => !!a && typeof a === "object" && Number.isFinite((a as Aim).x) && Number.isFinite((a as Aim).y);
@@ -173,7 +173,7 @@ async function awardXp(db: Db, teamId: number, result: GameResult, outcome: "W" 
 
 export async function gameRoutes(app: FastifyInstance) {
   /** Both lineups for a game against an MLB team, or the reason it can't be played yet. */
-  async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null }> {
+  async function matchup(userId: number, opponentTeamId: unknown, seasonId?: unknown, develop = false): Promise<{ error: string } | { team: typeof userTeams.$inferSelect; opponent: SimTeam; me: SimTeam; season: SeasonRow | null }> {
     const db = getDb();
     // A season game must be the season's next scheduled one.
     let season: SeasonRow | null = null;
@@ -186,7 +186,7 @@ export async function gameRoutes(app: FastifyInstance) {
     if (!team) return { error: "Draft your team first." };
     if (team.status !== "ready") return { error: "Finish your draft before playing." };
 
-    const players = await teamPlayers(db, team.id); // ratings include each player's development level
+    const players = await teamPlayers(db, team.id, develop);
     const opponent = mlbSimTeam(Number(opponentTeamId), new Set(players.map((p) => p.id)));
     if (!opponent) return { error: "Pick an MLB team to play." };
     return { team, opponent, me: userSimTeam(team.name, team.color, players, pool().statsSeason || new Date().getUTCFullYear(), team.gear), season };
@@ -215,10 +215,11 @@ export async function gameRoutes(app: FastifyInstance) {
       const { seed, inputs, final } = req.body ?? {};
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2)) {
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
-      const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId);
+      // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.
+      const m = await matchup(req.user!.id, req.body?.opponentTeamId, req.body?.seasonId, rules < 3);
       if ("error" in m) return reply.code(400).send({ error: m.error });
       const { team, opponent, me, season } = m;
       const len = matchInnings(req.body?.innings, season);
@@ -236,7 +237,7 @@ export async function gameRoutes(app: FastifyInstance) {
       }).returning();
       if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
       reward.levelUps = await awardXp(db, team.id, result, outcome);
-      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
+      const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules };
       return reply.code(201).send(body);
     },
   );
@@ -261,7 +262,7 @@ export async function gameRoutes(app: FastifyInstance) {
     }).returning();
     if (season) await addSeasonBonus(reward, await settleSeason(db, season, row.id, outcome));
     reward.levelUps = await awardXp(db, team.id, result, outcome);
-    const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward };
+    const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules };
     return reply.code(201).send(body);
   });
 

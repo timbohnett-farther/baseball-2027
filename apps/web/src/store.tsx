@@ -113,7 +113,7 @@ export function StoreView() {
       })}
 
       <h3>Super Power Bats</h3>
-      <p className="muted">Equip one. Each charge turns a clutch swing into a Super Swing: runners in scoring position, late innings, or two strikes.</p>
+      <p className="muted">Show off a bat in your locker. Super Bats are looks only: they do not change ratings, Heat or any swing.</p>
       <div className="store-grid">
         {store.bats.map((b) => {
           const owned = store.owned.includes(b.id);
@@ -129,8 +129,6 @@ export function StoreView() {
               <small className="muted">by {b.maker}</small>
               <p className="bat-blurb">{b.blurb}</p>
               <dl className="bat-specs">
-                <div><dt>Charges</dt><dd>{b.charges} / game</dd></div>
-                <div><dt>Super Swing</dt><dd>+{b.boost.power} Power · +{b.boost.contact} Contact</dd></div>
                 <div><dt>Swing</dt><dd>{SWING_LABEL[b.swingWeight]}</dd></div>
                 <div><dt>Build</dt><dd>{BUILD_LABEL[b.build]}</dd></div>
               </dl>

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MyTeam, TeamSummary } from "@bb/shared";
-import type { GameEvent, GameHistory, InteractiveSetup, PlayedGame, Side, SimPlayer } from "@bb/sim";
+import { rallyAssist, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { Ovr } from "./players.tsx";
@@ -340,10 +340,12 @@ export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   const s = e.state;
   const showCount = e.type === "pitch";
   const flash = e.type === "play" && e.runs > 0;
+  const assist = (game.rules ?? 0) >= 3 ? rallyAssist(s) : null;
   const row = (side: Side) => (
     <div className={`bug-row ${s.fire === side ? "fire" : ""}`} style={{ ["--team" as string]: game.teams[side].color }}>
       <span className="bug-abbr">{game.teams[side].abbr}</span>
       <span className={`bug-score ${flash && (s.half === "top" ? "away" : "home") === side ? "flash" : ""}`} key={`${side}${s.score[side]}`}>{s.score[side]}</span>
+      {assist === side && <span className="bug-assist" title="Trailing by 3+: Heat gains are 25% bigger">ASSIST ×1.25</span>}
       <span className="bug-rally" role="meter" aria-label={s.fire === side ? "On fire" : `Rally ${s.rally[side]}%`} aria-valuenow={s.rally[side]} aria-valuemin={0} aria-valuemax={100}>
         <i style={{ width: `${s.rally[side]}%` }} />
       </span>

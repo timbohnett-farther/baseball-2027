@@ -24,15 +24,18 @@ export async function playerFromDb(db: Db | Tx, id: number): Promise<Player | nu
   };
 }
 
-/** A team's drafted players, each with his development level already folded into his ratings. */
-export async function teamPlayers(db: Db | Tx, teamId: number): Promise<Player[]> {
+/**
+ * A team's drafted players with their development level as a badge. Levels stopped raising ratings
+ * in rules v3; `develop` folds them back in only to re-verify a game recorded under rules 1-2.
+ */
+export async function teamPlayers(db: Db | Tx, teamId: number, develop = false): Promise<Player[]> {
   const rows = await db.select().from(userTeamPlayers).where(eq(userTeamPlayers.teamId, teamId)).orderBy(userTeamPlayers.addedAt);
   const out: Player[] = [];
   for (const r of rows) {
     const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
     if (!p) continue;
     const progress = progressFor(r.xp);
-    out.push({ ...p, ratings: developRatings(p.ratings, progress.level), progress });
+    out.push({ ...p, ratings: develop ? developRatings(p.ratings, progress.level) : p.ratings, progress });
   }
   return out;
 }

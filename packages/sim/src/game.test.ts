@@ -223,11 +223,11 @@ test("auto sim is unchanged by the interactive code", () => {
   assert.equal(g.events.length > 20, true);
 });
 
-test("heat and rally: earned on the field, capped, and visible in every state", () => {
+test("rules 2 heat and rally: earned on the field, capped, and visible in every state", () => {
   const isHit = (o: string) => ["single", "double", "triple", "home_run"].includes(o);
   let fires = 0;
   for (let seed = 0; seed < 10; seed++) {
-    const g = simulateGame({ away: team(95, "Mashers"), home: team(40, "Scrubs"), seed });
+    const g = simulateGame({ away: team(95, "Mashers"), home: team(40, "Scrubs"), seed, rules: 2 });
     for (const [i, e] of g.events.entries()) {
       const s = e.state;
       assert.ok(Object.values(s.heat).every((h) => h >= 1 && h <= 3));
@@ -246,12 +246,12 @@ test("heat and rally: earned on the field, capped, and visible in every state", 
 
 import { isClutch } from "./game.ts";
 
-test("super bat: charges only spend in clutch spots, and a spent charge marks the play", () => {
+test("rules 2 super bat: charges only spend in clutch spots, and a spent charge marks the play", () => {
   const bat = { id: "thunderclap", name: "Thunderclap", charges: 2, contact: 6, power: 10 };
   const home = { ...avg2, gear: { superBat: bat } };
   const inputs: UserInput[] = [];
   let spent = 0;
-  let g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true });
+  let g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true, rules: 2 });
   for (let guard = 0; guard < 2000 && !g.result; guard++) {
     const a = g.awaiting!;
     if (a.role === "pitch") inputs.push(pitchIn);
@@ -263,7 +263,7 @@ test("super bat: charges only spend in clutch spots, and a spent charge marks th
       inputs.push({ kind: "swing", swing: "power", timing: 0, super: true });
       if (a.super.clutch && a.super.charges > 0) spent++;
     }
-    g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true });
+    g = playInteractive({ away: avg, home, seed: 21, userSide: "home", inputs, autoField: true, rules: 2 });
   }
   assert.ok(g.result);
   assert.equal(spent, 2, "both charges get used over a full game");
@@ -273,7 +273,7 @@ test("super bat: charges only spend in clutch spots, and a spent charge marks th
   const hits = new Set(["single", "double", "triple", "home_run"]);
   for (const e of supers) if (e.type === "play" && hits.has(e.outcome)) assert.ok(e.tier === 1 || e.tier === 2);
   // Without a bat, the same inputs are just normal swings: nothing is marked.
-  const plain = playInteractive({ away: avg, home: avg2, seed: 21, userSide: "home", inputs, autoField: true });
+  const plain = playInteractive({ away: avg, home: avg2, seed: 21, userSide: "home", inputs, autoField: true, rules: 2 });
   assert.equal(plain.awaiting?.super ?? null, null);
   assert.equal(plain.events.filter((e) => e.type === "play" && e.superSwing).length, 0);
 });

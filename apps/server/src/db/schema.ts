@@ -98,7 +98,7 @@ export const games = pgTable("games", {
   seed: integer("seed").notNull(),
   innings: integer("innings").notNull(),
   /** Ruleset the game was played under (sim RulesVersion). Rows from before versioning are 1 and replay as they always did. */
-  rules: integer("rules").$type<1 | 2>().notNull().default(1),
+  rules: integer("rules").$type<1 | 2 | 3>().notNull().default(1),
   userSide: text("user_side").$type<"home" | "away">().notNull(),
   teams: jsonb("teams").$type<Record<"home" | "away", SimTeam>>().notNull(),
   /** Set when the user played it pitch by pitch: their choices, replayed against the seed. */

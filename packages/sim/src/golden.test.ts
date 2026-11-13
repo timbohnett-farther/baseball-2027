@@ -59,3 +59,15 @@ test("rules 1: an interactive input log replays to the same game", () => {
   assert.equal(inputs.length, 41);
   assert.equal(hash(result), "830262917f7ac5d4");
 });
+
+// Golden tests for ruleset 2, captured before rules 3 (Heat economy) existed.
+test("rules 2: simulateGame output is unchanged", () => {
+  const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 2 })));
+  assert.equal(hash(all.flat()), "5745de525c5efa55");
+});
+
+test("rules 2: an interactive input log replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 2);
+  assert.equal(inputs.length, 41);
+  assert.equal(hash(result), "830262917f7ac5d4");
+});

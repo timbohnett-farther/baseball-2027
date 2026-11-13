@@ -22,7 +22,10 @@ export function progressFor(xp: number): PlayerProgress {
   return { xp, level, nextLevelXp: level >= MAX_LEVEL ? null : (level + 1) * LEVEL_XP };
 }
 
-/** Ratings with the level applied: +1 per level to every skill and to overall, never past 99. */
+/**
+ * Ratings with the level applied: +1 per level to every skill and to overall, never past 99.
+ * Rules 3 no longer uses this (levels are a badge only); it re-verifies games recorded under rules 1-2.
+ */
 export function developRatings<R extends Omit<PlayerRatings, "id">>(r: R, level: number): R {
   if (level <= 0) return r;
   const up = (n: number) => Math.min(99, n + level);

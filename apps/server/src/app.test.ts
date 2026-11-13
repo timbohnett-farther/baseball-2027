@@ -298,7 +298,7 @@ test("season: 20 games, playoffs if over .500, bonuses paid by the server", asyn
   assert.equal(again.json().number, 2);
 });
 
-test("player development: games earn XP, levels lift ratings, only the server writes XP", async () => {
+test("player development: games earn XP, levels are a badge, only the server writes XP", async () => {
   const { res: su, cookie } = await signup("coach", undefined, "10.0.0.12");
   assert.equal(su.statusCode, 201, su.body);
   const headers = { cookie };
@@ -318,7 +318,7 @@ test("player development: games earn XP, levels lift ratings, only the server wr
   }
   assert.ok(g.reward.levelUps.every((l: { level: number }) => l.level === 1)); // 60 xp is a lot for one game, but allowed
 
-  // Level 3: +3 to every rating, capped at 99, and the sim sees the developed player.
+  // Level 3 is a badge: rules 3 leaves every rating where it was.
   const { getDb } = await import("./db/index.ts");
   const { userTeamPlayers } = await import("./db/schema.ts");
   const { eq } = await import("drizzle-orm");
@@ -327,9 +327,9 @@ test("player development: games earn XP, levels lift ratings, only the server wr
   const team = (await app.inject({ url: "/api/my-team", headers })).json();
   const grown = team.players.find((p: { id: number }) => p.id === star.id);
   assert.equal(grown.progress.level, 3);
-  assert.equal(grown.ratings.overall, Math.min(99, star.ratings.overall + 3));
-  assert.equal(grown.ratings.hitting.contact, Math.min(99, star.ratings.hitting.contact + 3));
-  // The sim gets the developed rating, then chemistry (which can shift with the new overall) and the wood bat on top.
+  assert.equal(grown.ratings.overall, star.ratings.overall);
+  assert.equal(grown.ratings.hitting.contact, star.ratings.hitting.contact);
+  // The sim gets the base rating, then chemistry and the wood bat on top.
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp } })).json();
   const inSim = setup.teams.home.lineup.find((p: { id: number }) => p.id === star.id);
   assert.ok(inSim, "developed player is in the lineup");
@@ -395,12 +395,12 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   for (const n of [1, 3, 5]) {
     const setup = (await start({ innings: n })).json();
     assert.equal(setup.innings, n);
-    assert.equal(setup.rules, 2);
+    assert.equal(setup.rules, 3);
   }
   const sim = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 1 } });
   assert.equal(sim.statusCode, 201, sim.body);
   assert.equal(sim.json().result.box.linescore.away.length >= 1, true);
-  assert.notEqual(sim.json().result.winner, null); // rules 2: no ties
+  assert.notEqual(sim.json().result.winner, null); // no ties
   assert.equal((await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 7 } })).statusCode, 400);
 
   // Season games are always 3 innings.
@@ -413,7 +413,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   const { playInteractive } = await import("@bb/sim");
   const setup = (await start({ innings: 1 })).json();
   const inputs: unknown[] = [];
-  const play = (rules: 1 | 2) => playInteractive({ ...setup.teams, seed: setup.seed, innings: 1, rules, userSide: "home", inputs: inputs as never });
+  const play = (rules: 1 | 2 | 3) => playInteractive({ ...setup.teams, seed: setup.seed, innings: 1, rules, userSide: "home", inputs: inputs as never });
   let out = play(1);
   while (out.awaiting) {
     inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
@@ -422,11 +422,26 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 3 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 4 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
   const saved = await finish({ ...base, rules: 1 });
   assert.equal(saved.statusCode, 201, saved.body);
   assert.deepEqual((await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json().result.final, out.result!.final);
+
+  // The current rules finish and replay too, and the stored row reports its ruleset.
+  const inputs3: unknown[] = [];
+  const play3 = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 1, rules: 3, userSide: "home", inputs: inputs3 as never });
+  let out3 = play3();
+  while (out3.awaiting) {
+    inputs3.push(out3.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : out3.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out3 = play3();
+  }
+  const saved3 = await finish({ ...base, inputs: inputs3, final: out3.result!.final, rules: 3 });
+  assert.equal(saved3.statusCode, 201, saved3.body);
+  const replay3 = (await app.inject({ url: `/api/games/${saved3.json().id}`, headers })).json();
+  assert.equal(replay3.rules, 3);
+  assert.deepEqual(replay3.result.final, out3.result!.final);
 });

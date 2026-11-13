@@ -71,11 +71,22 @@ on read, so any rules change is gated by a ruleset version stored with the game.
 | ARC 3 match rules | v2 rules above | Pitch-ready timer (3.5), `BONUS BASEBALL` banner | Timer is client-only presentation; banner from `half_start` text when inning > innings. |
 | ARC 4-7 touch controls | Timing input, `UserInput` log | `TouchIntent` union, context state machine, 9-cell pitch target | Map intents to existing `UserInput` in the web layer; extend `aim` to cell centres. No sim change needed first. |
 | ARC 8 baserunning | Runners advance by outcome roll | Live commands, steals, tag-ups | New `UserInput` kinds gated by rules 3; outcome roll consults them. |
-| ARC 9 / PUP abilities | Heat 1-3, hidden momentum boost | Heat numeric, Rally meter, ability catalog, arm/commit/expire | Ability state in the interactive loop as extra log entries; effects as capped probability modifiers (see section 1). |
+| ARC 9 / PUP abilities | W19 (rules 3): Heat 0-100, Rally meter, no hidden boost (rules 1-2 keep Heat 1-3) | Ability catalog, arm/commit/expire; Heat numeric, Rally meter done in W19 | ability catalog, arm/commit/expire | Ability state in the interactive loop as extra log entries; effects as capped probability modifiers (see section 1). |
 | ARC 11 CPU difficulty | `autoLineup`, fixed AI | Difficulty profiles | Parameter bundle on the CPU side's choices; RNG order unchanged. |
 | ARC 12-13 season/objectives | 20 games + 3 rounds, coins | PRD format, objectives, unlocks | Replace `shared/season.ts` constants and `settleSeason`; new rows gated by season version. |
 | ARC 14 save/resume | Log is the save (replayable) | Mid-game persistence | Persist the in-progress log server-side; replay to resume. |
 | ARC 16.5 telemetry events | None | Event stream | Derive from `GameEvent` after the fact; do not emit from the sim. |
-| PUP economy / progression | XP raises ratings | Normalized sidegrades | W19: XP keeps level badge only. |
+| PUP economy / progression | Rules 3: XP is a level badge only (rules 1-2 still +1 per level on replay) | Normalized sidegrades | W19: Super Bats are cosmetic under rules 3. |
 
 Every row that changes outcomes needs a new `rules` value and a golden test against the previous version.
+
+## 8. Rules v3 (W19: PUP Heat / Rally economy)
+
+- Heat 0-100 per player, everyone starts at 25. Awards (per pitch and per play) are visible only; no outcome reads Heat.
+  Pitch: taken ball +3 batter, called strike +5 pitcher, swinging strike +7 pitcher / -5 batter, foul +2 pitcher / +4 batter on solid contact.
+  Play: HR +25 / -20 pitcher, hit +15 / -8, walk +8 / -12, strikeout -20 batter / +10 pitcher (plus the strike award), ball-in-play out +6 / +8, hard contact +5, run scored +8, user fielding robbed +12 / held-out contested out +6.
+- Rally 0-100 per side: each positive Heat award also adds floor(award / 2). Negatives never drain it.
+- Rally Assist: a side trailing by 3+ runs gets x1.25 on positive Heat awards (HUD label). No physics change (PUP 1.2(5)).
+- Super Bats do nothing under rules 3 (store copy says looks only). XP still levels; levels no longer raise ratings. Wood-bat +-2 is unchanged.
+- Skipped awards (the engine has no such event): HBP, steals, pickoffs, caught stealing, manual extra-base advances, error and double-play fielder credits, batter GIDP penalty, spectacular and HR-robbery catches, uncontested or CPU-side fielder credits. Booted balls score as hits, not errors.
+- Open: strikeout gives the pitcher the strike award plus +10 (PUP ambiguous); Rally has no spend or effect yet; Super Bats stay in the catalog as cosmetics only.

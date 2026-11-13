@@ -29,8 +29,8 @@ const mashers = team(99, 99, "Mashers"), tomatoCans = team(40, 40, "Cans");
 const plays = (g: GameResult) => g.events.filter((e) => e.type === "play");
 const sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
 
-test("the current ruleset is 2, and the Quick Match lengths are 1, 3 and 5", () => {
-  assert.equal(CURRENT_RULES, 2);
+test("the current ruleset is 3, and the Quick Match lengths are 1, 3 and 5", () => {
+  assert.equal(CURRENT_RULES, 3);
   assert.deepEqual([...INNINGS_OPTIONS], [1, 3, 5]);
 });
 

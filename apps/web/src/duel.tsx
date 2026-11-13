@@ -36,7 +36,7 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
 
   // One stable object for the field and scorebug; its events grow as the game does.
   const shell = useMemo<PlayedGame>(() => ({
-    id: 0, createdAt: "", opponent: setup.opponent, userSide: setup.userSide, teams: setup.teams,
+    id: 0, createdAt: "", opponent: setup.opponent, userSide: setup.userSide, teams: setup.teams, rules: setup.rules,
     result: { seed: setup.seed, innings: setup.innings, final: { away: 0, home: 0 }, winner: null, events: [], box: { linescore: { away: [], home: [] }, hits: { away: 0, home: 0 }, batting: { away: [], home: [] }, pitching: { away: [], home: [] } } },
   }), [setup]);
 
@@ -104,11 +104,11 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
 
       {awaiting?.role === "pitch" && (
         <PitchPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          heat={awaiting.state.heat} type={pitchType} onType={setPitchType} onThrow={(aim) => submit({ kind: "pitch", type: pitchType, aim })} />
+          heat={awaiting.state.heat} v3={setup.rules >= 3} type={pitchType} onType={setPitchType} onThrow={(aim) => submit({ kind: "pitch", type: pitchType, aim })} />
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          heat={awaiting.state.heat} incoming={awaiting.incoming} sup={awaiting.super}
+          heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super}
           onSwing={(swing, timing, sup) => submit(sup ? { kind: "swing", swing, timing, super: true } : { kind: "swing", swing, timing })} />
       )}
       {awaiting?.role === "field" && awaiting.ball && (
@@ -139,17 +139,18 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
   );
 }
 
-/** Heat flames: one per level, earned on the field (hits for batters, strikeouts for pitchers). */
-function Heat({ level }: { level: number }) {
+/** Rules 1-2: flames, one per level. Rules 3: a 0-100 Heat number, "on fire" from 50. */
+function Heat({ level, v3 }: { level: number; v3: boolean }) {
+  if (v3) return <span className={`heat-num ${level >= 50 ? "hot" : ""}`} aria-label={`heat ${level} of 100`}>{level >= 50 ? "🔥 " : ""}{level}</span>;
   if (!level) return null;
   return <span className={`heat heat-${level}`} aria-label={`heat ${level} of 3`}>{"🔥".repeat(level)}</span>;
 }
 
-function Who({ batter, pitcher, heat }: { batter?: SimPlayer; pitcher?: SimPlayer; heat: Record<number, number> }) {
+function Who({ batter, pitcher, heat, v3 }: { batter?: SimPlayer; pitcher?: SimPlayer; heat: Record<number, number>; v3: boolean }) {
   return (
     <div className="matchup">
-      <span><small>AT BAT</small> {batter?.name}<Heat level={batter ? heat[batter.id] ?? 0 : 0} /></span>
-      <span><small>PITCHING</small> {pitcher?.name}<Heat level={pitcher ? heat[pitcher.id] ?? 0 : 0} /></span>
+      <span><small>AT BAT</small> {batter?.name}<Heat v3={v3} level={batter ? heat[batter.id] ?? 0 : 0} /></span>
+      <span><small>PITCHING</small> {pitcher?.name}<Heat v3={v3} level={pitcher ? heat[pitcher.id] ?? 0 : 0} /></span>
     </div>
   );
 }
@@ -187,12 +188,12 @@ function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: Re
   );
 }
 
-function PitchPanel({ pitcher, batter, heat, type, onType, onThrow }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim) => void;
+function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow }: {
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim) => void;
 }) {
   return (
     <div className="duel-panel">
-      <Who batter={batter} pitcher={pitcher} heat={heat} />
+      <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />
       <div className="duel-row">
         <div className="duel-types" role="group" aria-label="Pitch type">
           {TYPES.map((t) => (
@@ -210,8 +211,8 @@ function PitchPanel({ pitcher, batter, heat, type, onType, onThrow }: {
   );
 }
 
-function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; incoming: { type: PitchType; mph: number; aim: Aim };
+function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing }: {
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType; mph: number; aim: Aim };
   sup: Awaiting["super"];
   onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean) => void;
 }) {
@@ -220,7 +221,7 @@ function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
   const doneRef = useRef(false);
   const onSwingRef = useRef(onSwing);
   onSwingRef.current = onSwing;
-  const canSuper = !!sup && sup.clutch && sup.charges > 0;
+  const canSuper = !v3 && !!sup && sup.clutch && sup.charges > 0;
 
   const swing = useCallback((kind: "contact" | "power" | "take", superSwing = false) => {
     if (doneRef.current) return;
@@ -250,7 +251,7 @@ function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
   const label = TYPES.find((t) => t.type === incoming.type)!.label;
   return (
     <div className="duel-panel">
-      <Who batter={batter} pitcher={pitcher} heat={heat} />
+      <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />
       <div className="duel-row">
         <div className="duel-incoming">
           <div className="duel-pitch"><b>{label}</b> {incoming.mph} mph</div>
@@ -262,7 +263,7 @@ function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
             <button className="primary" onPointerDown={() => swing("contact")} onClick={() => swing("contact")}>Contact <small className="key">Space</small></button>
             <button className="primary" onPointerDown={() => swing("power")} onClick={() => swing("power")}>Power <small className="key">P</small></button>
             <button onPointerDown={() => swing("take")} onClick={() => swing("take")}>Take <small className="key">T</small></button>
-            {sup && (
+            {sup && !v3 && (
               <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onPointerDown={() => swing("power", true)} onClick={() => swing("power", true)}
                 title={sup.charges === 0 ? "No charges left" : sup.clutch ? "Clutch spot. Spend a charge." : "Only in clutch spots"}>
                 Super <small><span className="key">S · </span>{sup.charges} left</small>
@@ -271,7 +272,7 @@ function SwingPanel({ pitcher, batter, heat, incoming, sup, onSwing }: {
           </div>
           <small className="muted">
             Swing when the marker hits the gold. Contact for hits, Power for homers.
-            {sup && (canSuper ? " Clutch spot: a Super Swing is ready." : ` ${sup.bat} charges only in clutch spots.`)}
+            {sup && !v3 && (canSuper ? " Clutch spot: a Super Swing is ready." : ` ${sup.bat} charges only in clutch spots.`)}
           </small>
         </div>
         <Zone>

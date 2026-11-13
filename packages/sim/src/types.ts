@@ -32,7 +32,7 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2;
+export type RulesVersion = 1 | 2 | 3;
 
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
@@ -56,11 +56,11 @@ export interface GameState {
   strikes: number;
   bases: Bases;
   score: { away: number; home: number };
-  /** Heat by player id, 1-3 (absent = cold): batters warm up on hits and cool on outs; pitchers on strikeouts and hits allowed. */
+  /** Heat by player id. Rules v3: 0-100, everyone starts at 25. Rules 1-2: 1-3 (absent = cold), and it shifts hit odds. */
   heat: Record<number, number>;
-  /** Rally meter per team, 0-100: fills on hits, walks and runs, drains on outs. */
+  /** Rally meter per team, 0-100. Rules v3: grows by half of every positive Heat award, never drains. Rules 1-2: fills on hits, drains on outs. */
   rally: { away: number; home: number };
-  /** The team whose Rally hit 100: On Fire until their half of the inning ends. */
+  /** Rules 1-2 only: the team whose Rally hit 100, On Fire until their half of the inning ends. Always null in v3. */
   fire: Side | null;
 }
 
@@ -107,6 +107,8 @@ export interface PlayedGame {
   userSide: Side;
   teams: Record<Side, SimTeam>;
   result: GameResult;
+  /** The ruleset it was played under; absent on a live in-browser game, whose setup carries it. */
+  rules?: RulesVersion;
   /** What the game paid out, on the response to a just-finished game only. */
   reward?: {
     total: number; coins: Record<string, number>; drop: { id: string; name: string } | null;

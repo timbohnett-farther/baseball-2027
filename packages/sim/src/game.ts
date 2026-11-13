@@ -21,8 +21,9 @@ const MAX_INNINGS = 9;
  * change must never alter a game recorded under an older version: gate it on `c.rules`.
  *  1 = original: ties after 9 innings, no run-ahead rule.
  *  2 = ARC 3: no ties (extra innings until a winner), 10-run run-ahead rule from inning 2.
+ *  3 = PUP: Heat (0-100) and Rally are visible resources only. They never touch hit odds, and Super Bats do nothing.
  */
-export const CURRENT_RULES: RulesVersion = 2;
+export const CURRENT_RULES: RulesVersion = 3;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -64,7 +65,9 @@ interface Ctx {
   superLeft: number;
   superUsed: boolean;
   /** Interactive mode: how the user's last fielding tap changed the play. */
-  lastField?: { fielderId: number; robbed: boolean; booted: boolean };
+  lastField?: { fielderId: number; robbed: boolean; booted: boolean; out: boolean };
+  /** Rules v3: the side getting Rally Assist, read at the start of the current pitch. */
+  assist: Side | null;
 }
 
 /** Thrown in interactive mode when the log runs out; the caller turns it into "waiting for input". */
@@ -78,14 +81,54 @@ const snapshot = (s: GameState): GameState => ({ ...s, bases: { ...s.bases }, sc
 // --- Heat and Rally: visible momentum, earned on the field and capped ---------------------------
 
 const MAX_HEAT = 3;
+const START_HEAT = 25, HEAT_CAP = 100, RALLY_CAP = 100;
+const ASSIST_RUNS = 3, ASSIST_MULT = 1.25;
 const heatOf = (c: Ctx, id: number) => c.state.heat[id] ?? 0;
 function warm(c: Ctx, id: number, delta: number) {
   const h = clamp(heatOf(c, id) + delta, 0, MAX_HEAT);
   if (h > 0) c.state.heat[id] = h; else delete c.state.heat[id];
 }
-/** Extra chance (+/-) on the batter's side of a matchup: his heat, less the pitcher's, plus being On Fire. */
+/** Rules v3 Rally Assist: the side trailing by 3+ runs, whose positive Heat awards pay x1.25. */
+export const rallyAssist = (s: GameState): Side | null =>
+  s.score.home - s.score.away >= ASSIST_RUNS ? "away" : s.score.away - s.score.home >= ASSIST_RUNS ? "home" : null;
+
+/** One Heat award. Positive ones get the assist bonus and fill the team's Rally by half the base. */
+function award(c: Ctx, side: Side, id: number, base: number) {
+  if (base === 0) return;
+  const n = base > 0 && c.assist === side ? Math.round(base * ASSIST_MULT) : base;
+  c.state.heat[id] = clamp((c.state.heat[id] ?? START_HEAT) + n, 0, HEAT_CAP);
+  if (base > 0) c.state.rally[side] = clamp(c.state.rally[side] + Math.floor(base * 0.5), 0, RALLY_CAP);
+}
+
+/** Heat for what one pitch did on its own. Strikeouts and walks also get their final award in playHeat. */
+function pitchHeat(c: Ctx, bSide: Side, fSide: Side, batter: SimPlayer, pitcher: SimPlayer, result: PitchResult, q: number | undefined) {
+  const { balls, strikes } = c.state;
+  const k = strikes === 3;
+  if (result === "ball") { if (balls < 4) award(c, bSide, batter.id, 3); }
+  else if (result === "called_strike") award(c, fSide, pitcher.id, 5);
+  else if (result === "swinging_strike") { award(c, fSide, pitcher.id, 7); if (!k) award(c, bSide, batter.id, -5); }
+  else if (result === "foul") { award(c, fSide, pitcher.id, 2); if ((q ?? 0) >= 0.45) award(c, bSide, batter.id, 4); }
+}
+
+const IN_PLAY_OUT: Outcome[] = ["groundout", "flyout", "lineout", "sac_fly", "double_play"];
+/** Heat for how the plate appearance ended: the result, hard contact, fielders and runs scored. */
+function playHeat(c: Ctx, bSide: Side, fSide: Side, batter: SimPlayer, pitcher: SimPlayer, outcome: Outcome, q: number | undefined, scored: number[]) {
+  const hit = ["single", "double", "triple", "home_run"].includes(outcome);
+  const inPlay = outcome !== "walk" && outcome !== "strikeout";
+  if (outcome === "home_run") { award(c, bSide, batter.id, 25); award(c, fSide, pitcher.id, -20); }
+  else if (hit) { award(c, bSide, batter.id, 15); award(c, fSide, pitcher.id, -8); }
+  else if (outcome === "walk") { award(c, bSide, batter.id, 8); award(c, fSide, pitcher.id, -12); }
+  else if (outcome === "strikeout") { award(c, bSide, batter.id, -20); award(c, fSide, pitcher.id, 10); }
+  else if (IN_PLAY_OUT.includes(outcome)) { award(c, bSide, batter.id, 6); award(c, fSide, pitcher.id, 8); }
+  if (inPlay && (q ?? 0) >= 0.78) award(c, bSide, batter.id, 5);
+  const f = c.lastField;
+  if (f && (f.robbed || f.out)) award(c, fSide, f.fielderId, f.robbed ? 12 : 6);
+  for (const id of scored) award(c, bSide, id, 8);
+}
+
+/** Extra chance (+/-) on the batter's side of a matchup: his heat, less the pitcher's, plus being On Fire. Rules v3: none. */
 const momentum = (c: Ctx, batter: SimPlayer, pitcher: SimPlayer) =>
-  0.025 * (heatOf(c, batter.id) - heatOf(c, pitcher.id)) + (c.state.fire === battingSide(c) ? 0.05 : 0);
+  c.rules >= 3 ? 0 : 0.025 * (heatOf(c, batter.id) - heatOf(c, pitcher.id)) + (c.state.fire === battingSide(c) ? 0.05 : 0);
 const battingSide = (c: Ctx): Side => (c.state.half === "top" ? "away" : "home");
 const fieldingSide = (c: Ctx): Side => other(battingSide(c));
 const pitcherOf = (c: Ctx, side: Side) => c.teams[side].pitchers[c.pitcherIdx[side]];
@@ -113,7 +156,7 @@ function arm(c: Ctx, side: Side, p: SimPlayer): PitchingLine {
 
 // --- One pitch -----------------------------------------------------------------------
 
-function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number } {
+function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number; q?: number } {
   const { rng } = c;
   const b = batter.batting, p = pitcher.pitching;
   const used = c.pitchCount.get(pitcher.id) ?? 0;
@@ -133,8 +176,13 @@ function throwPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: Pi
     ? clamp(0.85 + 0.04 * z(b?.contact) - 0.05 * stuff + mo, 0.6, 0.97)
     : clamp(0.6 + 0.05 * z(b?.contact) - 0.06 * stuff + mo, 0.3, 0.85);
   if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
-  return { result: rng.next() < (zone ? 0.42 : 0.5) ? "foul" : "in_play", zone, mph };
+  const result = rng.next() < (zone ? 0.42 : 0.5) ? "foul" : "in_play";
+  return c.rules >= 3 ? { result, zone, mph, q: cpuContactQ(c, b?.contact, stuff) } : { result, zone, mph };
 }
+
+/** Rules v3 contact quality for swings nobody timed: only Heat reads it. */
+const cpuContactQ = (c: Ctx, contact: number | undefined, stuff: number) =>
+  clamp(0.55 + 0.1 * z(contact) - 0.1 * stuff + (c.rng.next() - 0.5) * 0.5, 0, 1);
 
 // --- One pitch, with the user in the loop ----------------------------------------------------
 
@@ -148,6 +196,7 @@ export function isClutch(state: GameState, innings: number): boolean {
 }
 
 function superInfo(c: Ctx, role: Awaiting["role"]): Awaiting["super"] {
+  if (c.rules >= 3) return null;
   const bat = c.user && c.teams[c.user.side].gear?.superBat;
   if (!bat || role !== "swing") return null;
   return { bat: bat.name, charges: c.superLeft, clutch: isClutch(c.state, c.innings) };
@@ -164,7 +213,7 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
 
 const inZone = (a: Aim) => Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1;
 
-function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number } {
+function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result: PitchResult; zone: boolean; mph: number; q?: number } {
   const { rng } = c;
   const b = batter.batting, p = pitcher.pitching;
   const used = c.pitchCount.get(pitcher.id) ?? 0;
@@ -223,9 +272,10 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     foul = clamp(0.55 - 0.35 * q, 0.15, 0.5);
   }
   if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
-  if (rng.next() < foul) return { result: "foul", zone, mph };
+  const hitQ = () => (swingKind ? q : c.rules >= 3 ? cpuContactQ(c, b?.contact, stuff) : undefined);
+  if (rng.next() < foul) return { result: "foul", zone, mph, q: hitQ() };
   if (swingKind) c.lastSwing = { power: swingKind === "power", q, boost };
-  return { result: "in_play", zone, mph };
+  return { result: "in_play", zone, mph, q: hitQ() };
 }
 
 // --- Ball in play ----------------------------------------------------------------------
@@ -259,7 +309,7 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
     const wasHit = r < hr + hit;
     r += (q - 0.5) * 2 * CONTEST_BAND; // a perfect tap makes the out, a whiff gives up the hit
     const isHit = r < hr + hit;
-    c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit };
+    c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit, out: !isHit };
   }
 
   if (r < hr + hit) {
@@ -383,8 +433,9 @@ function plateAppearance(c: Ctx) {
 
   state.balls = 0; state.strikes = 0;
   let outcome: Outcome | null = null;
-  let lastMph = 0;
+  let lastMph = 0, contactQ: number | undefined;
   while (!outcome) {
+    c.assist = c.rules >= 3 ? rallyAssist(state) : null;
     const pitch = c.user ? throwUserPitch(c, batter, pitcher) : throwPitch(c, batter, pitcher);
     c.pitchCount.set(pitcher.id, (c.pitchCount.get(pitcher.id) ?? 0) + 1);
     pLine.pitches++;
@@ -392,6 +443,7 @@ function plateAppearance(c: Ctx) {
     if (pitch.result === "ball") state.balls++;
     else if (pitch.result === "called_strike" || pitch.result === "swinging_strike") state.strikes++;
     else if (pitch.result === "foul" && state.strikes < 2) state.strikes++;
+    if (c.rules >= 3) { contactQ = pitch.q; pitchHeat(c, bSide, fSide, batter, pitcher, pitch.result, pitch.q); }
     c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone });
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
@@ -426,11 +478,12 @@ function plateAppearance(c: Ctx) {
   const outsMade = ["strikeout", "groundout", "flyout", "lineout", "sac_fly"].includes(outcome) ? 1 : outcome === "double_play" ? 2 : 0;
   pLine.outs += outsMade;
 
-  // Heat and Rally. Once a team is On Fire its meter stops draining until the half ends.
-  warm(c, batter.id, isHit ? 1 : outsMade ? -1 : 0);
-  warm(c, pitcher.id, outcome === "strikeout" ? 1 : isHit ? -1 : 0);
+  // Heat and Rally. Rules v3 is resources only; before that, once a team is On Fire its meter stops draining until the half ends.
   let caughtFire = false;
-  if (state.fire !== bSide) {
+  if (c.rules >= 3) playHeat(c, bSide, fSide, batter, pitcher, outcome, contactQ, scored);
+  else warm(c, batter.id, isHit ? 1 : outsMade ? -1 : 0);
+  if (c.rules < 3) warm(c, pitcher.id, outcome === "strikeout" ? 1 : isHit ? -1 : 0);
+  if (c.rules < 3 && state.fire !== bSide) {
     state.rally[bSide] = clamp(state.rally[bSide] + (isHit ? 25 : outcome === "walk" ? 10 : 0) + 15 * runs - 12 * outsMade, 0, 100);
     if (state.rally[bSide] >= 100) { state.fire = bSide; caughtFire = true; }
   }
@@ -482,7 +535,7 @@ function plateAppearance(c: Ctx) {
   });
   if (walkOff) c.over = true;
   // Rules v2: the home team opening a 10-run lead in the bottom of the 2nd or later ends it on the spot.
-  if (c.rules === 2 && !c.over && state.half === "bottom" && state.inning >= 2 && state.score.home - state.score.away >= RUN_AHEAD) {
+  if (c.rules >= 2 && !c.over && state.half === "bottom" && state.inning >= 2 && state.score.home - state.score.away >= RUN_AHEAD) {
     c.over = true; c.runAhead = true;
   }
 }
@@ -495,6 +548,8 @@ type GameInput = {
   rules?: RulesVersion;
   /** Test hook: override MAX_EXTRA_INNINGS (rules v2). */
   maxExtraInnings?: number;
+  /** Test hook: override the starting Heat (rules v3). */
+  startHeat?: number;
 };
 
 export function simulateGame(input: GameInput): GameResult {
@@ -510,17 +565,24 @@ export function playInteractive(input: GameInput & { userSide: Side; inputs: Use
   return { events, awaiting, result };
 }
 
+/** Rules v3: every rostered athlete, substitutes included, starts the match at 25 Heat. */
+function startHeat(rules: RulesVersion, start: number, ...teams: SimTeam[]): Record<number, number> {
+  const heat: Record<number, number> = {};
+  if (rules >= 3) for (const t of teams) for (const p of [...t.lineup, ...t.pitchers]) heat[p.id] = start;
+  return heat;
+}
+
 function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; awaiting: Awaiting | null; result: GameResult | null } {
   const innings = input.innings ?? DEFAULT_INNINGS;
   const rules = input.rules ?? CURRENT_RULES;
-  const lastInning = rules === 2 ? innings + (input.maxExtraInnings ?? MAX_EXTRA_INNINGS) : MAX_INNINGS;
+  const lastInning = rules >= 2 ? innings + (input.maxExtraInnings ?? MAX_EXTRA_INNINGS) : MAX_INNINGS;
   const c: Ctx = {
     rng: createRng(input.seed),
     teams: { away: input.away, home: input.home },
     innings,
     rules,
     runAhead: false,
-    state: { inning: 1, half: "top", outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null }, score: { away: 0, home: 0 }, heat: {}, rally: { away: 0, home: 0 }, fire: null },
+    state: { inning: 1, half: "top", outs: 0, balls: 0, strikes: 0, bases: { first: null, second: null, third: null }, score: { away: 0, home: 0 }, heat: startHeat(rules, input.startHeat ?? START_HEAT, input.away, input.home), rally: { away: 0, home: 0 }, fire: null },
     events: [],
     lineupIdx: { away: 0, home: 0 },
     pitcherIdx: { away: 0, home: 0 },
@@ -531,8 +593,9 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     pitching: { away: new Map(), home: new Map() },
     over: false,
     user,
-    superLeft: user ? (input[user.side].gear?.superBat?.charges ?? 0) : 0,
+    superLeft: user && rules < 3 ? (input[user.side].gear?.superBat?.charges ?? 0) : 0,
     superUsed: false,
+    assist: null,
   };
   const s = c.state;
 
@@ -560,7 +623,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     }
     if (inning >= innings && s.score.home !== s.score.away) break;
     // Rules v2: after any completed inning from the 2nd on, a 10-run lead wins (an away lead still got its bottom half).
-    if (rules === 2 && inning >= 2 && Math.abs(s.score.home - s.score.away) >= RUN_AHEAD) { c.runAhead = true; break; }
+    if (rules >= 2 && inning >= 2 && Math.abs(s.score.home - s.score.away) >= RUN_AHEAD) { c.runAhead = true; break; }
   }
 
   } catch (e) {
@@ -572,7 +635,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
   const { away, home } = c.teams;
   s.balls = 0; s.strikes = 0;
   let note = c.runAhead ? " Run-ahead rule." : "";
-  if (rules === 2 && winner === null) {
+  if (rules >= 2 && winner === null) {
     // Hit the extra-innings guard still level: a seeded coin flip, worth one run so the score agrees with the winner.
     winner = c.rng.next() < 0.5 ? "away" : "home";
     s.score[winner]++;

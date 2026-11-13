@@ -241,6 +241,9 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 .matchup small { font-family: var(--display); letter-spacing: 0.08em; color: var(--text-2); margin-right: 6px; }
 .heat { margin-left: 6px; font-size: 13px; letter-spacing: -2px; }
 .heat-3 { filter: drop-shadow(0 0 6px var(--red)); }
+.heat-num { margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.heat-num.hot { color: var(--amber); }
+.bug-assist { font-size: 9px; letter-spacing: 0.06em; color: var(--amber); white-space: nowrap; }
 
 /* Big-play card: a lower-third on dark glass; team accent only as an edge stripe; wipes in. */
 .big-play { position: relative; margin: 14px 0; padding: 14px 18px 14px 22px; background: rgba(11, 13, 18, 0.94); border-top: 1px solid var(--rim);
