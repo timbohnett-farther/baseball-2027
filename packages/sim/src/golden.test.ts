@@ -25,15 +25,17 @@ const team = (r: number, name: string, superBat = false): SimTeam => ({
 const away = team(72, "Away"), home = team(68, "Home", true);
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 
-function scriptedLog(innings: number, rules: 1 | 2 | 3): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
+function scriptedLog(innings: number, rules: 1 | 2 | 3 | 4, abilities = false, startHeat?: number): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
   const inputs: UserInput[] = [];
   for (;;) {
-    const out = playInteractive({ away, home, seed: 7, innings, rules, userSide: "home", inputs });
+    const out = playInteractive({ away, home, seed: 7, innings, rules, userSide: "home", inputs, ...(startHeat === undefined ? {} : { startHeat }) });
     if (!out.awaiting) return { inputs, result: out.result };
     const n = inputs.length, a = out.awaiting;
-    inputs.push(a.role === "pitch" ? { kind: "pitch", type: (["fastball", "slider", "change", "curve"] as const)[n % 4], aim: { x: ((n * 7) % 11) / 5 - 1, y: ((n * 3) % 9) / 4 - 1 } }
+    const usable = abilities ? a.abilities.filter((x) => x.available && !x.needsDirection) : [];
+    const ability = usable.length && n % 2 === 0 ? { ability: { id: usable[0].id } } : {};
+    inputs.push(a.role === "pitch" ? { kind: "pitch", type: (["fastball", "slider", "change", "curve"] as const)[n % 4], aim: { x: ((n * 7) % 11) / 5 - 1, y: ((n * 3) % 9) / 4 - 1 }, ...ability }
       : a.role === "field" ? { kind: "field", timing: ((n % 5) - 2) / 2 }
-        : { kind: "swing", swing: n % 7 === 0 ? "take" : n % 3 === 0 ? "power" : "contact", timing: ((n % 9) - 4) / 4, super: n % 5 === 0 });
+        : { kind: "swing", swing: n % 7 === 0 ? "take" : n % 3 === 0 ? "power" : "contact", timing: ((n % 9) - 4) / 4, super: n % 5 === 0, ...ability });
   }
 }
 
@@ -82,4 +84,22 @@ test("rules 3: an interactive input log replays to the same game", () => {
   const { inputs, result } = scriptedLog(3, 3);
   assert.equal(inputs.length, 65);
   assert.equal(hash(result), "e64775c8594cd0d4");
+});
+
+// Golden tests for ruleset 4 (abilities), captured before fielding inputs and rules 5 existed.
+test("rules 4: simulateGame output is unchanged", () => {
+  const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 4 })));
+  assert.equal(hash(all.flat()), "2fe9c63061335065");
+});
+
+test("rules 4: an interactive input log replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 4);
+  assert.equal(inputs.length, 65);
+  assert.equal(hash(result), "e64775c8594cd0d4");
+});
+
+test("rules 4: an interactive log that spends abilities replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 4, true, 100);
+  assert.ok(inputs.some((i) => i.kind !== "field" && i.ability));
+  assert.equal(hash(result), "76368dd13ed556b4");
 });
