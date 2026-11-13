@@ -32,7 +32,7 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2 | 3 | 4;
+export type RulesVersion = 1 | 2 | 3 | 4 | 5;
 
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
@@ -144,7 +144,7 @@ export type PitchType = "fastball" | "slider" | "change" | "curve";
 /** Position over the plate: x, y in -1..1 is inside the strike zone, beyond that is a ball. */
 export interface Aim { x: number; y: number }
 
-export type AbilityId = "BAT_COMET" | "BAT_LASER" | "BAT_GAP_MASTER" | "BAT_SECOND_SWING" | "PITCH_MIRAGE" | "PITCH_VORTEX";
+export type AbilityId = "BAT_COMET" | "BAT_LASER" | "BAT_GAP_MASTER" | "BAT_SECOND_SWING" | "PITCH_MIRAGE" | "PITCH_VORTEX" | "FIELD_WALL_REAPER" | "FIELD_ACROBAT" | "FIELD_CANNON_ARM";
 export type AbilityDirection = "left" | "right";
 /** What the user committed with a pitch or swing (arming and cancelling happen client-side and are never logged). Rules v4 only. */
 export interface AbilityRequest { id: AbilityId; direction?: AbilityDirection }
@@ -160,8 +160,13 @@ export type UserInput =
   | { kind: "pitch"; type: PitchType; aim: Aim; ability?: AbilityRequest }
   /** timing: -1 = very early, 0 = perfect, 1 = very late. `super` spends a Super Power Bat charge (clutch spots only). */
   | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number; super?: boolean; ability?: AbilityRequest }
-  /** A close ball in play on the user's defense: the glove tap, timed the same way. */
-  | { kind: "field"; timing: number };
+  /**
+   * A close ball in play on the user's defense: the glove tap, timed the same way.
+   * Rules v5: `throwTo` is the base chosen when a force play is on (absent = the recommended throw), and `ability` rides on the play like a swing's.
+   */
+  | { kind: "field"; timing: number; throwTo?: Base; ability?: AbilityRequest };
+
+export type Base = "first" | "second" | "third" | "home";
 
 /** What the game needs from the user next. */
 export interface Awaiting {
@@ -172,10 +177,10 @@ export interface Awaiting {
   /** When batting: the pitch that is on its way. */
   incoming: { type: PitchType; mph: number; aim: Aim } | null;
   /** When fielding a close one: what's coming and who has to make the play. */
-  ball: { kind: "grounder" | "liner" | "fly"; fielderId: number } | null;
+  ball: { kind: "grounder" | "liner" | "fly"; fielderId: number; /** Rules v5: the force-play throw choices, when there is one. */ throws?: { recommended: Base; options: Base[] } } | null;
   /** When batting with a Super Power Bat: charges left this game, and whether this is a clutch spot (the only time a charge can be spent). */
   super: { bat: string; charges: number; clutch: boolean } | null;
-  /** Rules v4: the user's abilities for this role (batter's when swinging, pitcher's when pitching). Empty otherwise. */
+  /** Rules v4: the user's abilities for this role (batter's when swinging, pitcher's when pitching, the fielder's on a close ball in v5). Empty otherwise. */
   abilities: AbilityStatus[];
 }
 

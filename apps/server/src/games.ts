@@ -129,7 +129,7 @@ function isInput(i: unknown): i is UserInput {
   const u = i as Record<string, unknown>;
   if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim) && isAbility(u.ability);
   if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1 && isAbility(u.ability);
-  if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1;
+  if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1 && (u.throwTo === undefined || ["first", "second", "third", "home"].includes(u.throwTo as string)) && isAbility(u.ability);
   return false;
 }
 
@@ -218,7 +218,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const { seed, inputs, final } = req.body ?? {};
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4)) {
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.

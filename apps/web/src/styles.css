@@ -453,6 +453,14 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .swing-btn small { font-size: 11px; opacity: 0.7; }
 .swing-btn:active { filter: brightness(1.15); transform: scale(0.98); }
 .tp-swing-row .super { min-width: 88px; min-height: 88px; border: 0; border-radius: 6px; padding: 8px 12px; }
+.throw-diamond { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: ". second ." "third . first" ". home ."; gap: 6px; max-width: 14rem; }
+.throw-diamond button { min-height: 48px; min-width: 48px; padding: 4px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.throw-diamond [data-base="second"] { grid-area: second; } .throw-diamond [data-base="third"] { grid-area: third; }
+.throw-diamond [data-base="first"] { grid-area: first; } .throw-diamond [data-base="home"] { grid-area: home; }
+.throw-diamond button.on { color: var(--amber); border-color: var(--amber); }
+.throw-diamond button.rec:not(.on) { animation: throw-pulse 1.2s ease-in-out infinite; }
+@keyframes throw-pulse { 50% { box-shadow: 0 0 0 3px var(--amber); } }
+@media (prefers-reduced-motion: reduce) { .throw-diamond button.rec:not(.on) { animation: none; box-shadow: 0 0 0 2px var(--amber); } }
 .tp-chips { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .tp-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .pchip { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

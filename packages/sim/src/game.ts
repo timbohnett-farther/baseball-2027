@@ -7,9 +7,9 @@
 
 import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
-import { ABILITIES, arm as armAbility, cancel, combine, commit, expire, newLedger, statuses, type AbilityDef, type Effects, type Ledger } from "./ability.ts";
+import { ABILITIES, arm as armAbility, cancel, combine, commit, expire, fieldContextOk, newLedger, statuses, type AbilityDef, type Effects, type FieldContext, type Ledger } from "./ability.ts";
 import type {
-  AbilityRequest, Aim, Awaiting, Bases, BattingLine, BoxScore, DisabledReason, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
+  AbilityRequest, Aim, Awaiting, Base, Bases, BattingLine, BoxScore, DisabledReason, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
   PitchingLine, PitchResult, PitchType, RulesVersion, Side, SimPlayer, SimTeam, Tier, UserInput,
 } from "./types.ts";
 
@@ -24,8 +24,10 @@ const MAX_INNINGS = 9;
  *  2 = ARC 3: no ties (extra innings until a winner), 10-run run-ahead rule from inning 2.
  *  3 = PUP: Heat (0-100) and Rally are visible resources only. They never touch hit odds, and Super Bats do nothing.
  *  4 = PUP abilities: the user can spend Heat on a bat or pitch ability (see ability.ts). A game that never uses one plays exactly as v3.
+ *  5 = ARC 7 fielding: a force-play throw choice on close grounders, and the fielding abilities (Wall Reaper, Acrobat, Cannon Arm).
+ *      A v5 game whose fielding inputs carry neither a throw nor an ability plays exactly as v4.
  */
-export const CURRENT_RULES: RulesVersion = 4;
+export const CURRENT_RULES: RulesVersion = 5;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -211,8 +213,13 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
   const u = c.user!;
   const next = u.inputs[u.cursor];
   if (!next) {
-    const actor = role === "swing" ? { id: batter.id, role: "bat" as const } : role === "pitch" ? { id: pitcher.id, role: "pitch" as const } : null;
-    const abilities = c.rules >= 4 && actor ? statuses(ABILITIES, c.ledger, { ...actor, heat: heatOf(c, actor.id) }) : [];
+    const actor = role === "swing" ? { id: batter.id, role: "bat" as const } : role === "pitch" ? { id: pitcher.id, role: "pitch" as const }
+      : ball && c.rules >= 5 ? { id: ball.fielderId, role: "field" as const } : null;
+    let abilities = c.rules >= 4 && actor ? statuses(ABILITIES, c.ledger, { ...actor, heat: heatOf(c, actor.id) }) : [];
+    if (actor?.role === "field" && ball) {
+      const ctx: FieldContext = { kind: ball.kind, doublePlay: !!ball.throws };
+      abilities = abilities.map((a) => fieldContextOk(a.id, ctx) ? a : { ...a, available: false, reason: "WRONG_CONTEXT", message: "Not on this play." });
+    }
     throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities });
   }
   if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
@@ -225,14 +232,14 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
  * (wrong swing, not enough Heat, ...) costs nothing and just logs why; the pitch carries on without it.
  * Returns the bounded effects to apply, or null.
  */
-function useAbility(c: Ctx, role: "bat" | "pitch", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take"): Effects | null {
+function useAbility(c: Ctx, role: "bat" | "pitch" | "field", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take", field?: FieldContext): Effects | null {
   if (c.rules < 4 || !req) return null;
   const actor = { id: who.id, role, heat: heatOf(c, who.id) };
   const name = ABILITIES[req.id]?.name ?? "Ability";
   const note = (phase: "committed" | "triggered" | "expired" | "rejected", text: string, reason?: DisabledReason) =>
     c.events.push({ type: "ability", state: snapshot(c.state), phase, side, playerId: who.id, ability: req.id, heat: heatOf(c, who.id), ...(reason ? { reason } : {}), text });
   if (swing === "take") { note("expired", `${who.name} lets it go. ${name} is released and costs no Heat.`); return null; }
-  const v = armAbility(ABILITIES, c.ledger, actor, req);
+  const v = field && !fieldContextOk(req.id, field) ? { ok: false as const, reason: "WRONG_CONTEXT" as const, message: "Not on this play." } : armAbility(ABILITIES, c.ledger, actor, req);
   const done = v.ok ? commit(ABILITIES, c.ledger, actor, swing) : v;
   if (!done.ok || done.heat === undefined || !done.def) {
     cancel(c.ledger);
@@ -252,7 +259,7 @@ function useAbility(c: Ctx, role: "bat" | "pitch", who: SimPlayer, side: Side, r
 function settleAbility(c: Ctx, inPlay: boolean) {
   const a = c.active;
   c.active = undefined;
-  expire(c.ledger);
+  if (a?.def.role === "field") cancel(c.ledger); else expire(c.ledger); // a fielding play isn't a pitch: cooldowns don't tick
   if (!a) return;
   const hit = a.triggered || (inPlay && a.def.role === "bat" && a.def.id !== "BAT_SECOND_SWING");
   const name = a.def.name;
@@ -362,28 +369,59 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
   const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement) + (fx?.dGround ?? 0), 0.3, 0.6);
   const flyEnd = ground + 0.35 + (fx?.dFly ?? 0);
 
+  const triple = clamp(0.03 + 0.015 * z(b?.speed), 0.005, 0.08);
+  const double = clamp(0.22 + 0.03 * z(b?.power) + (fx?.dDouble ?? 0), 0.1, 0.35);
+  // Rules v5: the throw the user picked on a close force-play grounder, and the fielding ability that rode along.
+  let thrown: { to: Base; rec: Base } | undefined, fieldFx: Effects | null = null;
+
   // A close one on the user's defense: their glove tap settles it (contextual takeover).
   if (c.user && fieldingSide(c) === c.user.side && Math.abs(r - (hr + hit)) < CONTEST_BAND) {
     const kind = x < ground ? "grounder" : x < flyEnd ? "fly" : "liner";
     const fielder = pickFielder(c.teams[fieldingSide(c)], kind, (x * 1000) % 1);
-    const q = takeFieldInput(c, batter, pitcher, { kind, fielderId: fielder.id });
+    const play = c.rules >= 5 && kind === "grounder" ? throwPlay(c.state) : undefined;
+    const f = takeFieldInput(c, batter, pitcher, { kind, fielderId: fielder.id, ...(play ? { throws: play } : {}) }, { kind, doublePlay: !!play });
     const wasHit = r < hr + hit;
-    r += (q - 0.5) * 2 * CONTEST_BAND; // a perfect tap makes the out, a whiff gives up the hit
+    // Wall Reaper only ever takes a hit away; it cannot turn a ball that was an out into anything. (Extra-base hits are drawn from the grounder range, so a fly cannot be gated on them.)
+    const reach = f.fx && (c.active?.def.id !== "FIELD_WALL_REAPER" || wasHit) ? f.fx.reach : 0;
+    const r0 = r + (f.q0 - 0.5) * 2 * CONTEST_BAND;
+    r += (f.q - 0.5) * 2 * CONTEST_BAND + reach * CONTEST_BAND; // a perfect tap makes the out, a whiff gives up the hit
     const isHit = r < hr + hit;
+    if (c.active?.def.role === "field" && r0 < hr + hit && !isHit) c.active.triggered = true;
     c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit, out: !isHit };
+    if (play) thrown = { to: f.throwTo && play.options.includes(f.throwTo) ? f.throwTo : play.recommended, rec: play.recommended };
+    fieldFx = f.fx;
   }
 
-  if (r < hr + hit) {
-    const triple = clamp(0.03 + 0.015 * z(b?.speed), 0.005, 0.08);
-    const double = clamp(0.22 + 0.03 * z(b?.power) + (fx?.dDouble ?? 0), 0.1, 0.35);
-    return x < triple ? "triple" : x < triple + double ? "double" : "single";
-  }
+  if (r < hr + hit) return x < triple ? "triple" : x < triple + double ? "double" : "single";
   if (x < ground) {
     const { outs, bases } = c.state;
-    if (bases.first !== null && outs < 2 && rng.next() < clamp(0.4 - 0.06 * z(b?.speed), 0.15, 0.6)) return "double_play";
+    if (bases.first !== null && outs < 2) {
+      let p = clamp(0.4 - 0.06 * z(b?.speed), 0.15, 0.6);
+      const base = p;
+      let turn = true;
+      if (thrown) {
+        if (thrown.to === "first") turn = false; // the sure out at first: no double play
+        else if (thrown.to !== thrown.rec) p *= 0.5; // the wrong force base
+        p += fieldFx?.dDp ?? 0;
+      }
+      const u = rng.next();
+      const wild = turn && fieldFx && fieldFx.wildThrow > 0 ? rng.next() < fieldFx.wildThrow : false;
+      if (turn && !wild && u < p) {
+        if (fieldFx && fieldFx.dDp > 0 && u >= base && c.active) c.active.triggered = true;
+        return "double_play";
+      }
+    }
     return "groundout";
   }
   return x < flyEnd ? "flyout" : "lineout";
+}
+
+/** The force-play throws on a grounder with the lead runner on first and fewer than two out (rules v5). The best throw is the one that can turn two. */
+function throwPlay(state: GameState): { recommended: Base; options: Base[] } | undefined {
+  const { first, second, third } = state.bases;
+  if (first === null || state.outs >= 2) return undefined;
+  const loaded = second !== null && third !== null;
+  return { recommended: loaded ? "home" : "second", options: ["first", "second", ...(second !== null ? ["third" as const] : []), ...(loaded ? ["home" as const] : [])] };
 }
 
 /** How close to the hit/out line a ball must land to be worth a glove tap (about 1 in 5 balls in play). */
@@ -398,12 +436,15 @@ function pickFielder(team: SimTeam, kind: "grounder" | "liner" | "fly", dir: num
 }
 
 /** Quality of the user's glove tap, 0-1. Better fielders get a wider window to hit. */
-function takeFieldInput(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, ball: NonNullable<Awaiting["ball"]>): number {
+function takeFieldInput(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, ball: NonNullable<Awaiting["ball"]>, ctx: FieldContext): { q: number; q0: number; throwTo?: Base; fx: Effects | null } {
   const u = c.user!;
-  if (u.autoField && u.inputs[u.cursor]?.kind !== "field") return 0.5; // no tap recorded: the play stands as rolled
+  if (u.autoField && u.inputs[u.cursor]?.kind !== "field") return { q: 0.5, q0: 0.5, fx: null }; // no tap recorded: the play stands as rolled
   const inp = takeInput(c, "field", batter, pitcher, null, ball) as Extract<UserInput, { kind: "field" }>;
-  const window = clamp(1 + 0.15 * z(findPlayer(c, ball.fielderId).batting?.fielding), 0.6, 1.4);
-  return 1 - Math.min(1, Math.abs(inp.timing) / window);
+  const fielder = findPlayer(c, ball.fielderId);
+  const fx = c.rules >= 5 ? useAbility(c, "field", fielder, fieldingSide(c), inp.ability, undefined, ctx) : null;
+  const window = clamp(1 + 0.15 * z(fielder.batting?.fielding), 0.6, 1.4);
+  const quality = (w: number) => 1 - Math.min(1, Math.abs(inp.timing) / w);
+  return { q: quality(window * (fx?.fieldWindow ?? 1)), q0: quality(window), ...(c.rules >= 5 && inp.throwTo ? { throwTo: inp.throwTo } : {}), fx };
 }
 
 // --- Running the bases -----------------------------------------------------------------
@@ -509,7 +550,10 @@ function plateAppearance(c: Ctx) {
     if (c.user && c.rules >= 4) settleAbility(c, pitch.result === "in_play");
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
-    else if (pitch.result === "in_play") { outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined; }
+    else if (pitch.result === "in_play") {
+      outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined;
+      if (c.active) settleAbility(c, true);
+    }
   }
 
   const count = `${state.balls}-${state.strikes}`;

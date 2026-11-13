@@ -3,7 +3,7 @@
 // choices so far; each new choice reveals the next few events, which play out on the field.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
+import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
@@ -117,7 +117,8 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
       )}
       {awaiting?.role === "field" && awaiting.ball && (
         <FieldPanel key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
-          kind={awaiting.ball.kind} onGlove={(timing) => submit({ kind: "field", timing })} />
+          kind={awaiting.ball.kind} throws={awaiting.ball.throws} heat={awaiting.state.heat[awaiting.ball.fielderId] ?? 0} abilities={awaiting.abilities}
+          onGlove={(timing, throwTo, ability) => submit({ kind: "field", timing, ...(throwTo ? { throwTo } : {}), ...(ability ? { ability } : {}) })} />
       )}
 
       {!awaiting && !done && lastCall && current.type !== "final" && (
@@ -395,22 +396,31 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
   );
 }
 
-/** A close ball on your defense: one timed tap, same gold window as a swing. Let it go and it drops in. */
-function FieldPanel({ batter, fielder, kind, onGlove }: {
-  batter?: SimPlayer; fielder?: SimPlayer; kind: keyof typeof BALLS; onGlove: (timing: number) => void;
+/** The contextual action the one button performs (ARC 7): the same timed tap, named for the ball. */
+const GLOVE_VERB = { grounder: "FIELD", liner: "DIVE", fly: "CATCH" } as const;
+const BASE_LABEL: Record<Base, string> = { first: "1B", second: "2B", third: "3B", home: "HOME" };
+
+/** A close ball on your defense: one timed tap, same gold window as a swing. Let it go and it drops in. On a force-play grounder you also pick the throw; the recommended base is pre-picked and pulses. */
+function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove }: {
+  batter?: SimPlayer; fielder?: SimPlayer; kind: keyof typeof BALLS; throws?: { recommended: Base; options: Base[] };
+  heat: number; abilities: AbilityStatus[]; onGlove: (timing: number, throwTo?: Base, ability?: AbilityRequest) => void;
 }) {
   const { ms, label, hint } = BALLS[kind];
   const startRef = useRef(performance.now());
   const doneRef = useRef(false);
   const onGloveRef = useRef(onGlove);
   onGloveRef.current = onGlove;
+  const { armed, ref: armedRef, setArmed } = useArmed();
+  const [pick, setPick] = useState<Base | null>(throws?.recommended ?? null);
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
 
   const glove = useCallback(() => {
     if (doneRef.current) return;
     doneRef.current = true;
     const p = (performance.now() - startRef.current) / ms;
-    onGloveRef.current(Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)));
-  }, [ms]);
+    onGloveRef.current(Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)), pickRef.current ?? undefined, armedRef.current ?? undefined);
+  }, [ms, armedRef]);
 
   useEffect(() => {
     const t = setTimeout(glove, ms * 1.25);
@@ -427,22 +437,35 @@ function FieldPanel({ batter, fielder, kind, onGlove }: {
   }, [glove]);
 
   return (
-    <div className="duel-panel">
+    <div className="duel-panel tp">
       <div className="matchup">
         <span><small>{label.toUpperCase()}</small> {batter?.name}</span>
         <span><small>YOUR PLAY</small> {fielder?.name} ({fielder?.position})</span>
       </div>
-      <div className="duel-row">
-        <div className="duel-incoming">
+      <div className="tp-grid-layout">
+        <div className="tp-side">
+          {throws && (
+            <div className="throw-diamond" role="radiogroup" aria-label="Throw to">
+              {(["second", "third", "first", "home"] as const).filter((b) => throws.options.includes(b)).map((b) => (
+                <button key={b} role="radio" aria-checked={pick === b} data-base={b}
+                  className={`${pick === b ? "on" : ""} ${b === throws.recommended ? "rec" : ""}`} onClick={() => setPick(b)}>
+                  <b>{BASE_LABEL[b]}</b>{b === throws.recommended && <small>BEST</small>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <AbilityChips abilities={abilities} heat={heat} armed={armed} onArm={setArmed} approach={null} />
+        <div className="tp-action">
           <div className="duel-pitch"><b>{label}</b> {hint}</div>
           <div className="timing" aria-hidden>
             <i className="timing-sweet" style={{ left: `${(SWEET - WINDOW * 0.2) * 100}%`, width: `${WINDOW * 0.4 * 100}%` }} />
             <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
           </div>
-          <div className="duel-buttons">
-            <button className="primary" onPointerDown={glove} onClick={glove}>Glove it <small className="key">Space</small></button>
+          <div className="tp-swing-row">
+            <button className="swing-btn" onPointerDown={glove}>{GLOVE_VERB[kind]}<small className="key">Space</small></button>
           </div>
-          <small className="muted">Tap when the marker hits the gold. Nail it and you steal a hit; miss and it drops in.</small>
+          <small className="muted tp-hint">Tap when the marker hits the gold. Nail it and you steal a hit; miss and it drops in.{throws ? " Pick the throw first: the wrong base costs the double play." : ""}</small>
         </div>
       </div>
     </div>

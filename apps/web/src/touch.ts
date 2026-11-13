@@ -25,6 +25,7 @@ export const APPROACH_TEXT: Record<Approach, string> = {
 /** One glyph per ability so a chip never relies on colour alone (PUP 12.1). */
 export const ABILITY_ICON: Record<string, string> = {
   BAT_COMET: "☄", BAT_LASER: "━", BAT_GAP_MASTER: "⇔", BAT_SECOND_SWING: "↻", PITCH_MIRAGE: "?", PITCH_VORTEX: "@",
+  FIELD_WALL_REAPER: "▲", FIELD_ACROBAT: "✦", FIELD_CANNON_ARM: "➤",
 };
 
 export interface ChipCtx {

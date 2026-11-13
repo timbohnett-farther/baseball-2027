@@ -9,7 +9,7 @@ import type { AbilityDirection, AbilityId, AbilityRequest, AbilityStatus, Disabl
  *    ability plays out exactly as it did under rules v3.
  */
 
-export type AbilityRole = "bat" | "pitch";
+export type AbilityRole = "bat" | "pitch" | "field";
 export type SwingKind = "contact" | "power";
 
 /**
@@ -23,11 +23,14 @@ export interface Effects {
   missScale: number; locShift: number; whiffAdd: number;
   windowScale: number; rescueQ: number;
   dHr: number; dHit: number; dGround: number; dDouble: number; dFly: number; popupBelowQ: number;
+  /** fielding (rules v5): reach shifts a contested ball toward the out, in fractions of the contest band; fieldWindow widens the glove timing window; dDp / wildThrow change the double-play throw. */
+  reach: number; fieldWindow: number; dDp: number; wildThrow: number;
 }
 
 export const NEUTRAL: Effects = {
   missScale: 1, locShift: 0, whiffAdd: 0, windowScale: 1, rescueQ: 0,
   dHr: 0, dHit: 0, dGround: 0, dDouble: 0, dFly: 0, popupBelowQ: 0,
+  reach: 0, fieldWindow: 1, dDp: 0, wildThrow: 0,
 };
 
 /** PUP 5.1 step 7, global caps: however abilities stack, no field leaves its range. */
@@ -35,6 +38,7 @@ export const BOUNDS: Record<keyof Effects, [number, number]> = {
   missScale: [1, 1.5], locShift: [-0.2, 0.2], whiffAdd: [0, 0.06],
   windowScale: [0.8, 1], rescueQ: [0, 0.3],
   dHr: [-0.03, 0.05], dHit: [-0.08, 0.08], dGround: [-0.1, 0.05], dDouble: [0, 0.1], dFly: [-0.12, 0.05], popupBelowQ: [0, 0.5],
+  reach: [0, 0.6], fieldWindow: [1, 1.4], dDp: [0, 0.2], wildThrow: [0, 0.1],
 };
 
 export interface AbilityDef {
@@ -95,7 +99,38 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     // The break is a 0.12 shift toward the chosen side, dispersion is the miss radius x1.35, and a pitch that bites is slightly harder to square up (+3% whiff).
     effects: (dir) => ({ missScale: 1.35, locShift: dir === "left" ? -0.12 : dir === "right" ? 0.12 : 0, whiffAdd: 0.03 }),
   },
+  FIELD_WALL_REAPER: {
+    id: "FIELD_WALL_REAPER", name: "Wall Reaper", role: "field", cost: 60, swings: [], needsDirection: false, cooldownPitches: 0,
+    summary: "Fly ball at the wall: a better chance to rob a double or triple. Never undoes a home run.",
+    // PRD: outfielder, wall robbery only, no reversal of a declared homer, never forces the catch.
+    // The glove tap still decides the play; this only moves a close extra-base fly half a contest band toward the out.
+    effects: () => ({ reach: 0.5 }),
+  },
+  FIELD_ACROBAT: {
+    id: "FIELD_ACROBAT", name: "Acrobat", role: "field", cost: 50, swings: [], needsDirection: false, cooldownPitches: 0,
+    summary: "Dive for a liner or fly: a wider glove window and a little more range.",
+    // PRD: more catch range on a dive or liner. A wider tap window (x1.3) and 0.15 of a contest band of reach, on top of the tap.
+    effects: () => ({ fieldWindow: 1.3, reach: 0.15 }),
+  },
+  FIELD_CANNON_ARM: {
+    id: "FIELD_CANNON_ARM", name: "Cannon Arm", role: "field", cost: 45, swings: [], needsDirection: false, cooldownPitches: 0,
+    summary: "Turn two with a faster throw: more double plays, with a small chance it sails.",
+    // PRD: throw speed x1.30 and accuracy window x0.65. The speed is +15% on the double-play chance; the tighter window is an 8% chance the throw is wild and the double play is lost.
+    effects: () => ({ dDp: 0.15, wildThrow: 0.08 }),
+  },
 };
+
+/**
+ * The ball a fielding ability is committed on (rules v5). Wall Reaper needs a fly ball, Acrobat a fly or a liner
+ * (the plays you dive for), Cannon Arm a grounder with a double play on.
+ */
+export interface FieldContext { kind: "grounder" | "liner" | "fly"; doublePlay: boolean }
+const FIELD_CONTEXT: Record<string, (c: FieldContext) => boolean> = {
+  FIELD_WALL_REAPER: (c) => c.kind === "fly",
+  FIELD_ACROBAT: (c) => c.kind !== "grounder",
+  FIELD_CANNON_ARM: (c) => c.kind === "grounder" && c.doublePlay,
+};
+export const fieldContextOk = (id: string, c: FieldContext): boolean => FIELD_CONTEXT[id]?.(c) ?? false;
 
 /** Fold ability effects into one set: scales multiply, nudges add, then global caps. The order of `list` is stage order. */
 export function combine(list: Partial<Effects>[]): Effects {
@@ -103,7 +138,7 @@ export function combine(list: Partial<Effects>[]): Effects {
   for (const e of list) {
     for (const k of Object.keys(e) as (keyof Effects)[]) {
       const v = e[k]!;
-      out[k] = k === "missScale" || k === "windowScale" ? out[k] * v : k === "rescueQ" || k === "popupBelowQ" ? Math.max(out[k], v) : out[k] + v;
+      out[k] = k === "missScale" || k === "windowScale" || k === "fieldWindow" ? out[k] * v : k === "rescueQ" || k === "popupBelowQ" ? Math.max(out[k], v) : out[k] + v;
     }
   }
   for (const k of Object.keys(BOUNDS) as (keyof Effects)[]) out[k] = Math.max(BOUNDS[k][0], Math.min(BOUNDS[k][1], out[k]));
