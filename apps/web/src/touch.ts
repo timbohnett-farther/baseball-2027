@@ -3,6 +3,15 @@ import type { Aim, AbilityRequest, AbilityStatus } from "@bb/sim";
 
 export type Approach = "contact" | "power";
 
+/**
+ * Commit a tap to the input log only if it was made in the phase the log is now in. `token` is the
+ * log length the tap's panel was rendered at: a stale tap (an older phase) or a second tap in the
+ * same commit frame finds the log already longer and changes nothing, so it can't spend Heat or act twice.
+ */
+export function appendInput<T>(log: T[], input: T, token: number): T[] {
+  return log.length === token ? [...log, input] : log;
+}
+
 /** The 3x3 pitch grid in reading order (top-left = 0). Edge cells sit on the border of the zone; "chase" pushes the ring off the plate. */
 const EDGE = 0.85, CHASE = 1.4;
 export function cellAim(index: number, chase = false): Aim {

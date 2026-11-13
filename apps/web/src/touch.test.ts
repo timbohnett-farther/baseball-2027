@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AbilityStatus } from "@bb/sim";
-import { cellAim, cellTag, chipState, chipTap, keyCell, reasonText, survivesApproach, type ChipCtx } from "./touch.ts";
+import { appendInput, cellAim, cellTag, chipState, chipTap, keyCell, reasonText, survivesApproach, type ChipCtx } from "./touch.ts";
 
 const st = (o: Partial<AbilityStatus>): AbilityStatus => ({ id: "BAT_COMET", name: "Comet", cost: 50, summary: "", needsDirection: false, swings: ["power"], available: true, ...o });
 const ctx = (o: Partial<ChipCtx> = {}): ChipCtx => ({ armed: null, heat: 80, approach: "power", choosing: null, ...o });
@@ -49,4 +49,20 @@ test("an armed power-only ability does not survive a switch to contact", () => {
   assert.equal(survivesApproach(st({}), "contact"), false);
   assert.equal(survivesApproach(st({}), "power"), true);
   assert.equal(survivesApproach(undefined, "contact"), true);
+});
+
+test("tap contract: a stale or repeated tap adds no input, so no Heat is spent and nothing acts twice", () => {
+  const a = { kind: "swing", swing: "power", timing: 0, ability: { id: "BAT_COMET" } } as never;
+  const b = { kind: "swing", swing: "contact", timing: 0.1 } as never;
+  const log: unknown[] = [];
+  const once = appendInput(log, a, 0);
+  assert.equal(once.length, 1);
+  // Two taps in one commit frame: both carry token 0, the second finds the log already longer.
+  assert.equal(appendInput(once, b, 0), once);
+  // A tap from an earlier phase (token 0) arriving after the log moved on to 3.
+  const later = appendInput(appendInput(once, b, 1), b, 2);
+  assert.equal(later.length, 3);
+  assert.equal(appendInput(later, a, 0), later);
+  // A tap from a phase that hasn't happened yet is refused too.
+  assert.equal(appendInput(later, a, 5), later);
 });

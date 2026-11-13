@@ -15,7 +15,7 @@ import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPl
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
 import { AdvancePanel, RunStrip } from "./run.tsx";
-import { ABILITY_ICON, APPROACH_TEXT, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
+import { ABILITY_ICON, APPROACH_TEXT, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
@@ -90,7 +90,9 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     return () => clearTimeout(t);
   }, [shown, caughtUp, speed, events, paused]);
 
-  const submit = useCallback((input: UserInput) => setInputs((prev) => [...prev, input]), []);
+  // Each render's taps carry that render's phase token (the input count), so a late or repeated tap is dropped.
+  const at = inputs.length;
+  const submit = (input: UserInput) => setInputs((prev) => appendInput(prev, input, at));
   const current = events[Math.min(shown, events.length - 1)];
   useEffect(() => crowdBed(), []);
   const pace = useRef<PaceTracker | null>(null);
