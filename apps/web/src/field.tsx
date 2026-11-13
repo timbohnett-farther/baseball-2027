@@ -4,6 +4,7 @@ import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
+import { getQuality, QUALITY_PROFILE } from "./quality.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
@@ -349,6 +350,7 @@ class Director {
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
   private shake = 0;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
+  private prof = QUALITY_PROFILE[getQuality()]; // graphics tier, read once per renderer
   private raf = 0; private last = performance.now();
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
@@ -357,10 +359,10 @@ class Director {
     this.teams = game.teams;
     this.rand = cosmeticRng(SHOT_MODE ? SHOT_SEED : game.result.seed);
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    r.setPixelRatio(Math.min(window.devicePixelRatio, this.prof.pixelRatio));
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.shadowMap.enabled = true;
+    r.shadowMap.enabled = this.prof.shadowMap > 0;
     this.scene.background = new THREE.Color("#0B0D12");
     this.scene.fog = new THREE.FogExp2("#0B0D12", 0.0028);
 
@@ -368,8 +370,8 @@ class Director {
     // the third-base bank, rim from behind-right (VISUAL_DESIGN 7.2).
     const key = new THREE.DirectionalLight("#fff1d6", 3.0);
     key.position.set(-40, 55, 30);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.castShadow = this.prof.shadowMap > 0;
+    key.shadow.mapSize.set(this.prof.shadowMap || 1, this.prof.shadowMap || 1);
     Object.assign(key.shadow.camera, { left: -55, right: 55, top: 70, bottom: -70, near: 1, far: 220 });
     key.target.position.set(0, 0, -30);
     const fill = new THREE.DirectionalLight("#dfe6ff", 0.9);
@@ -401,8 +403,8 @@ class Director {
     this.onDeck.position.set(5.4, 0, 4.2); this.onDeck.rotation.y = -0.6; this.onDeck.visible = false;
     this.scene.add(this.onDeck);
     const dust = softSprite("rgba(255,255,255,1)");
-    this.burstDust = new Dust(400, false, 0.9, dust, this.rand);
-    this.drift = new Dust(90, true, 0.55, dust, this.rand);
+    this.burstDust = new Dust(Math.round(400 * this.prof.dust), false, 0.9, dust, this.rand);
+    this.drift = new Dust(Math.round(90 * this.prof.dust), true, 0.55, dust, this.rand);
     this.scene.add(this.burstDust.points, this.drift.points);
 
     this.cam.position.copy(this.homePos());
@@ -462,8 +464,8 @@ class Director {
     arc(new THREE.CylinderGeometry(WALL_R + 26, WALL_R + 4, 11, 96, 1, true, Math.PI - 1.4, 2.8), seats, 9);
     arc(new THREE.CylinderGeometry(WALL_R + 27, WALL_R + 27, 3.5, 96, 1, true, Math.PI - 1.4, 2.8), concrete, 16.2);
     arc(new THREE.CylinderGeometry(WALL_R + 46, WALL_R + 28, 13, 96, 1, true, Math.PI - 1.4, 2.8), seats, 24.5);
-    this.crowd(WALL_R + 5, WALL_R + 25, 4, 14, 5200);
-    this.crowd(WALL_R + 29, WALL_R + 45, 18.5, 31, 5200);
+    this.crowd(WALL_R + 5, WALL_R + 25, 4, 14, Math.round(5200 * this.prof.crowd));
+    this.crowd(WALL_R + 29, WALL_R + 45, 18.5, 31, Math.round(5200 * this.prof.crowd));
     const board = new THREE.Mesh(new THREE.BoxGeometry(30, 10, 1.4), concrete);
     board.position.set(0, 24, -(WALL_R + 12)); this.scene.add(board);
     const face = new THREE.Mesh(new THREE.PlaneGeometry(28, 8.4), new THREE.MeshBasicMaterial({ map: signTexture("BASEBALL 2027", "#0a0d14", "#f2e3c6", 1024, 300) }));
@@ -830,6 +832,7 @@ class Director {
 
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
+    if (now - this.last < this.prof.minFrameMs) return; // battery tier: about 30 fps, animation stays wall-clock
     const real = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     let scale = this.speed;

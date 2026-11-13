@@ -3,6 +3,7 @@ import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
 import { useSound, useVolume } from "./audio.ts";
 import { hapticsSupported, useHaptics } from "./haptics.ts";
+import { QUALITIES, QUALITY_LABEL, useQuality, type Quality } from "./quality.ts";
 import { flush, readOutbox } from "./outbox.ts";
 import { clearSnapshot, loadSnapshot, restore, type Restored } from "./resume.ts";
 import { AuthPanel } from "./auth.tsx";
@@ -29,6 +30,7 @@ export function App() {
   const [sound, toggleSound] = useSound();
   const [volume, setVolume] = useVolume();
   const [haptics, toggleHaptics] = useHaptics();
+  const [quality, setQuality] = useQuality();
   const [view, setView] = useState<View>({ kind: "teams" });
   const [offline, setOffline] = useState(false);
 
@@ -117,6 +119,7 @@ export function App() {
           </button>
           <input className="vol" type="range" min={0} max={1} step={0.1} value={volume} onChange={(e) => setVolume(Number(e.target.value))} aria-label="Volume" />
           {hapticsSupported() && <button className="link" onClick={toggleHaptics} aria-pressed={haptics} title="Vibration on hits and abilities">{haptics ? "Haptics on" : "Haptics off"}</button>}
+          <select className="link" value={quality} onChange={(e) => setQuality(e.target.value as Quality)} aria-label="Graphics quality" title="Graphics quality (applies to the next game view)">{QUALITIES.map((q) => <option key={q} value={q}>{QUALITY_LABEL[q]}</option>)}</select>
           <span className="sep">·</span>
           {me ? <>Hi, <b>{me.displayName}</b> · <button className="link" onClick={signOut}>Sign out</button></>
             : me === null && <button className="link" onClick={() => setView({ kind: "sign-in" })}>Sign in</button>}
