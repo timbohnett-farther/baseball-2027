@@ -449,7 +449,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 8 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 9 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
@@ -592,12 +592,15 @@ test("difficulty: a rules 7 game stores its CPU difficulty and replays with CPU 
   assert.equal((await start("nightmare")).statusCode, 400);
   assert.equal((await start()).json().difficulty, "pro");
   const setup = (await start("allstar")).json();
-  assert.equal(setup.rules, 7);
+  assert.equal(setup.rules, CURRENT_RULES);
   assert.equal(setup.difficulty, "allstar");
+  // The server picks a random seed for a new game, and whether the computer spends an ability depends on it. Replay under rules 7
+  // with a fixed seed that is known to, so this test cannot flake; the finish route takes the seed from the body.
+  const SEED = 1;
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
-  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 7, difficulty: "allstar", userSide: "home", inputs: inputs as never });
+  const play = () => playInteractive({ ...setup.teams, seed: SEED, innings: 3, rules: 7, difficulty: "allstar", userSide: "home", inputs: inputs as never });
   let out = play();
   while (out.awaiting) {
     const a = out.awaiting;
@@ -609,7 +612,7 @@ test("difficulty: a rules 7 game stores its CPU difficulty and replays with CPU 
   }
   assert.ok(out.events.some((e) => e.type === "ability" && e.phase === "committed"), "the CPU used an ability");
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
-  const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 3, rules: 7, difficulty: "allstar", final: out.result!.final };
+  const base = { opponentTeamId: opp.id, seed: SEED, inputs, innings: 3, rules: 7, difficulty: "allstar", final: out.result!.final };
   assert.equal((await finish({ ...base, difficulty: "nightmare" })).statusCode, 400);
   assert.equal((await finish({ ...base, inputs: [{ kind: "team", action: "explode" }] })).statusCode, 400);
   const saved = await finish(base);
