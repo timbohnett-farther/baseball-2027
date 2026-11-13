@@ -242,7 +242,7 @@ export async function gameRoutes(app: FastifyInstance) {
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
       const difficulty = req.body?.difficulty ?? "pro";
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7) || !isDifficulty(difficulty)) {
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4 && rules !== 5 && rules !== 6 && rules !== 7 && rules !== 8) || !isDifficulty(difficulty)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       const clientGameId = req.body?.clientGameId;
@@ -259,7 +259,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const { team, opponent, me, season } = m;
       const len = matchInnings(req.body?.innings, season);
       if ("error" in len) return reply.code(400).send({ error: len.error });
-      if (season?.format === ARCADE_FORMAT && rules !== CURRENT_RULES) return reply.code(400).send({ error: "Update the game to play this season." });
+      if (season?.format === ARCADE_FORMAT && rules < 7) return reply.code(400).send({ error: "Update the game to play this season." });
       const teams = { away: opponent, home: me };
       // A log that doesn't fit this seed, lineup or length throws mid-replay; that is a refusal, not a server fault.
       let result: GameResult | null = null;

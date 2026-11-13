@@ -51,7 +51,7 @@ const stealSpots = () => SEEDS.flatMap((seed) => {
 });
 
 test("rules 6 is current and a v6 game with no run inputs plays exactly like v5", () => {
-  assert.equal(CURRENT_RULES, 7);
+  assert.equal(CURRENT_RULES, 8);
   for (const side of ["home", "away"] as const) {
     const log: UserInput[] = [];
     const drive = (rules: 5 | 6) => {

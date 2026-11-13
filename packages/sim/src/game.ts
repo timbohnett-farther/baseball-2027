@@ -33,8 +33,9 @@ const MAX_INNINGS = 9;
  *  7 = ARC 11 / PUP 11+14: three CPU difficulties (cpu.ts), the computer spends Heat on abilities and steals and throws over in
  *      interactive games (its own seeded stream, so replays match), and Rally Breaker. A v7 log that never uses a team input at the
  *      "pro" difficulty with the computer's extras out of reach plays as v6 would; auto-sims (no user seat) are identical to v6.
+ *  8 = W29: the throw-over limit (two) resets for every batter instead of lasting the whole match, for both sides.
  */
-export const CURRENT_RULES: RulesVersion = 7;
+export const CURRENT_RULES: RulesVersion = 8;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -815,6 +816,8 @@ function plateAppearance(c: Ctx) {
   const pLine = arm(c, fSide, pitcher), bLine = bat(c, bSide, batter);
 
   state.balls = 0; state.strikes = 0;
+  // Rules v8: the throw-over limit is per batter, as the field's own doc says. Before v8 it never reset, so it ran out after two a match.
+  if (c.rules >= 8) { c.pickoffs = 0; c.cpuPickoffs = 0; }
   let outcome: Outcome | null = null;
   let lastMph = 0, contactQ: number | undefined;
   while (!outcome) {

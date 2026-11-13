@@ -32,7 +32,7 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type RulesVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 /** Rules v7: how the computer plays, chosen per game and stored with it. Absent = "pro". Ignored below v7. */
 export type Difficulty = "rookie" | "pro" | "allstar";
