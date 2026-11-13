@@ -7,8 +7,9 @@
 
 import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
+import { ABILITIES, arm as armAbility, cancel, combine, commit, expire, newLedger, statuses, type AbilityDef, type Effects, type Ledger } from "./ability.ts";
 import type {
-  Aim, Awaiting, Bases, BattingLine, BoxScore, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
+  AbilityRequest, Aim, Awaiting, Bases, BattingLine, BoxScore, DisabledReason, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
   PitchingLine, PitchResult, PitchType, RulesVersion, Side, SimPlayer, SimTeam, Tier, UserInput,
 } from "./types.ts";
 
@@ -22,8 +23,9 @@ const MAX_INNINGS = 9;
  *  1 = original: ties after 9 innings, no run-ahead rule.
  *  2 = ARC 3: no ties (extra innings until a winner), 10-run run-ahead rule from inning 2.
  *  3 = PUP: Heat (0-100) and Rally are visible resources only. They never touch hit odds, and Super Bats do nothing.
+ *  4 = PUP abilities: the user can spend Heat on a bat or pitch ability (see ability.ts). A game that never uses one plays exactly as v3.
  */
-export const CURRENT_RULES: RulesVersion = 3;
+export const CURRENT_RULES: RulesVersion = 4;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -60,7 +62,7 @@ interface Ctx {
   /** Interactive mode: the user's side and their input log. `autoField` replays logs recorded before fielding existed. */
   user?: { side: Side; inputs: UserInput[]; cursor: number; autoField?: boolean };
   /** Interactive mode: how the user's last swing was timed, for the ball in play. */
-  lastSwing?: { power: boolean; q: number; boost?: { contact: number; power: number } };
+  lastSwing?: { power: boolean; q: number; boost?: { contact: number; power: number }; fx?: Effects };
   /** Interactive mode: Super Power Bat charges left, and whether this at-bat spent one. */
   superLeft: number;
   superUsed: boolean;
@@ -68,6 +70,9 @@ interface Ctx {
   lastField?: { fielderId: number; robbed: boolean; booted: boolean; out: boolean };
   /** Rules v3: the side getting Rally Assist, read at the start of the current pitch. */
   assist: Side | null;
+  /** Rules v4: the user's Heat reservation and cooldowns, and the ability committed on the pitch in progress. */
+  ledger: Ledger;
+  active?: { def: AbilityDef; request: AbilityRequest; playerId: number; side: Side; fx: Effects; triggered: boolean };
 }
 
 /** Thrown in interactive mode when the log runs out; the caller turns it into "waiting for input". */
@@ -205,10 +210,54 @@ function superInfo(c: Ctx, role: Awaiting["role"]): Awaiting["super"] {
 function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null): UserInput {
   const u = c.user!;
   const next = u.inputs[u.cursor];
-  if (!next) throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role) });
+  if (!next) {
+    const actor = role === "swing" ? { id: batter.id, role: "bat" as const } : role === "pitch" ? { id: pitcher.id, role: "pitch" as const } : null;
+    const abilities = c.rules >= 4 && actor ? statuses(ABILITIES, c.ledger, { ...actor, heat: heatOf(c, actor.id) }) : [];
+    throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities });
+  }
   if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
   u.cursor++;
   return next;
+}
+
+/**
+ * Rules v4: commit the ability that rode along with a pitch or swing. A request that can't be honoured
+ * (wrong swing, not enough Heat, ...) costs nothing and just logs why; the pitch carries on without it.
+ * Returns the bounded effects to apply, or null.
+ */
+function useAbility(c: Ctx, role: "bat" | "pitch", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take"): Effects | null {
+  if (c.rules < 4 || !req) return null;
+  const actor = { id: who.id, role, heat: heatOf(c, who.id) };
+  const name = ABILITIES[req.id]?.name ?? "Ability";
+  const note = (phase: "committed" | "triggered" | "expired" | "rejected", text: string, reason?: DisabledReason) =>
+    c.events.push({ type: "ability", state: snapshot(c.state), phase, side, playerId: who.id, ability: req.id, heat: heatOf(c, who.id), ...(reason ? { reason } : {}), text });
+  if (swing === "take") { note("expired", `${who.name} lets it go. ${name} is released and costs no Heat.`); return null; }
+  const v = armAbility(ABILITIES, c.ledger, actor, req);
+  const done = v.ok ? commit(ABILITIES, c.ledger, actor, swing) : v;
+  if (!done.ok || done.heat === undefined || !done.def) {
+    cancel(c.ledger);
+    const r = done.ok ? { reason: "WRONG_CONTEXT" as const, message: "Nothing happened." } : done;
+    note("rejected", `${name} can't be used: ${r.message} No Heat spent.`, r.reason);
+    return null;
+  }
+  const dir = req.direction ? ` ${req.direction}` : "";
+  c.state.heat[who.id] = done.heat;
+  const fx = combine([done.def.effects(req.direction)]);
+  c.active = { def: done.def, request: req, playerId: who.id, side, fx, triggered: role === "pitch" };
+  note("committed", `${who.name} uses ${name}${dir}! ${done.def.cost} Heat spent.`);
+  return fx;
+}
+
+/** Rules v4: close out the pitch's ability. It either took effect or fizzled, and the cost is spent either way (PUP 4.6). */
+function settleAbility(c: Ctx, inPlay: boolean) {
+  const a = c.active;
+  c.active = undefined;
+  expire(c.ledger);
+  if (!a) return;
+  const hit = a.triggered || (inPlay && a.def.role === "bat" && a.def.id !== "BAT_SECOND_SWING");
+  const name = a.def.name;
+  c.events.push({ type: "ability", state: snapshot(c.state), phase: hit ? "triggered" : "expired", side: a.side, playerId: a.playerId, ability: a.def.id, heat: heatOf(c, a.playerId),
+    text: hit ? `${name} takes effect.` : `${name} found nothing to work with. The Heat is spent.` });
 }
 
 const inZone = (a: Aim) => Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1;
@@ -224,12 +273,14 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   let type: PitchType, loc: Aim, mph: number;
   let swingKind: "contact" | "power" | "take" | null = null, q = 0;
   let boost: { contact: number; power: number } | undefined;
+  let pfx: Effects | null = null, bfx: Effects | null = null;
   if (userPitching) {
     const inp = takeInput(c, "pitch", batter, pitcher, null) as Extract<UserInput, { kind: "pitch" }>;
     type = inp.type;
+    pfx = useAbility(c, "pitch", pitcher, fieldingSide(c), inp.ability);
     // Where it actually lands: the aim plus a miss that shrinks with Control.
-    const miss = clamp(0.5 - 0.15 * control, 0.2, 0.8);
-    loc = { x: clamp(inp.aim.x, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss, y: clamp(inp.aim.y, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss };
+    const miss = clamp(0.5 - 0.15 * control, 0.2, 0.8) * (pfx?.missScale ?? 1);
+    loc = { x: clamp(inp.aim.x, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss + (pfx?.locShift ?? 0), y: clamp(inp.aim.y, -1.6, 1.6) + (rng.next() + rng.next() - 1) * miss };
     mph = Math.round(TYPE_MPH[type] + 3 * stuff + (rng.next() - 0.5) * 4);
   } else {
     // The computer pitches. Roll the pitch first so the user can see it coming.
@@ -243,6 +294,8 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
     const inp = takeInput(c, "swing", batter, pitcher, { type, mph, aim: loc }) as Extract<UserInput, { kind: "swing" }>;
     swingKind = inp.swing;
     q = 1 - Math.min(1, Math.abs(inp.timing));
+    bfx = useAbility(c, "bat", batter, battingSide(c), inp.ability, swingKind);
+    if (bfx && bfx.windowScale < 1) q = 1 - Math.min(1, (1 - q) / bfx.windowScale); // a wider window forgives the same timing
     // A Super Swing spends a charge (clutch spots only; an illegal request is just a normal swing).
     const sb = c.teams[c.user!.side].gear?.superBat;
     if (inp.super && sb && swingKind !== "take" && c.superLeft > 0 && isClutch(c.state, c.innings)) {
@@ -265,16 +318,21 @@ function throwUserPitch(c: Ctx, batter: SimPlayer, pitcher: SimPlayer): { result
   let contact = zone
     ? clamp(0.85 + 0.04 * zc - 0.05 * stuff - 0.08 * edge - TYPE_WHIFF[type] + mo, 0.5, 0.97)
     : clamp(0.55 + 0.05 * zc - 0.06 * stuff - TYPE_WHIFF[type] + mo, 0.2, 0.8);
+  if (pfx) contact = Math.max(0.05, contact - pfx.whiffAdd);
   let foul = zone ? 0.42 : 0.5;
   if (swingKind) {
     // The user's timing decides most of it: a perfect swing is a very good one.
     contact = clamp(contact * (0.3 + 0.7 * q) + (swingKind === "contact" ? 0.06 : -0.04), 0.05, 0.97);
     foul = clamp(0.55 - 0.35 * q, 0.15, 0.5);
   }
-  if (rng.next() >= contact) return { result: "swinging_strike", zone, mph };
   const hitQ = () => (swingKind ? q : c.rules >= 3 ? cpuContactQ(c, b?.contact, stuff) : undefined);
+  if (rng.next() >= contact) {
+    // Second Swing turns a badly mistimed miss into a foul. It never makes contact that was not there.
+    if (bfx && q < bfx.rescueQ && c.active) { c.active.triggered = true; return { result: "foul", zone, mph, q: hitQ() }; }
+    return { result: "swinging_strike", zone, mph };
+  }
   if (rng.next() < foul) return { result: "foul", zone, mph, q: hitQ() };
-  if (swingKind) c.lastSwing = { power: swingKind === "power", q, boost };
+  if (swingKind) c.lastSwing = { power: swingKind === "power", q, boost, fx: bfx ?? undefined };
   return { result: "in_play", zone, mph, q: hitQ() };
 }
 
@@ -292,18 +350,21 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
   const dHr = swing ? (swing.power ? 0.06 * swing.q : -0.015) : 0;
   const dHit = swing ? (swing.power ? -0.02 : 0.05 * swing.q) - 0.08 * (1 - swing.q) : 0;
   const mo = momentum(c, batter, pitcher);
-  const hr = clamp(0.05 + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement), 0.005, 0.28);
-  const hit = clamp(0.29 + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense, 0.12, 0.45);
+  const fx = swing?.fx;
+  const popup = fx && swing!.q < fx.popupBelowQ ? 0.06 : 0; // Comet on a mistimed swing climbs too high
+  const hr = clamp(0.05 + dHr + 0.5 * mo + 0.03 * z(b?.power) - 0.012 * z(p?.movement) + (fx?.dHr ?? 0), 0.005, 0.28);
+  const hit = clamp(0.29 + dHit + mo + 0.03 * z(b?.contact) - 0.015 * z(p?.movement) - 0.015 * defense + (fx?.dHit ?? 0) - popup, 0.12, 0.45);
   let r = rng.next();
   if (r < hr) return "home_run";
   // One draw decides what kind of hit or out it is (drawn here so the fielding step below
   // can read it without changing the auto-sim's RNG sequence).
   const x = rng.next();
-  const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement), 0.3, 0.6);
+  const ground = clamp(0.45 - 0.04 * z(b?.power) + 0.03 * z(p?.movement) + (fx?.dGround ?? 0), 0.3, 0.6);
+  const flyEnd = ground + 0.35 + (fx?.dFly ?? 0);
 
   // A close one on the user's defense: their glove tap settles it (contextual takeover).
   if (c.user && fieldingSide(c) === c.user.side && Math.abs(r - (hr + hit)) < CONTEST_BAND) {
-    const kind = x < ground ? "grounder" : x < ground + 0.35 ? "fly" : "liner";
+    const kind = x < ground ? "grounder" : x < flyEnd ? "fly" : "liner";
     const fielder = pickFielder(c.teams[fieldingSide(c)], kind, (x * 1000) % 1);
     const q = takeFieldInput(c, batter, pitcher, { kind, fielderId: fielder.id });
     const wasHit = r < hr + hit;
@@ -314,7 +375,7 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
 
   if (r < hr + hit) {
     const triple = clamp(0.03 + 0.015 * z(b?.speed), 0.005, 0.08);
-    const double = clamp(0.22 + 0.03 * z(b?.power), 0.1, 0.35);
+    const double = clamp(0.22 + 0.03 * z(b?.power) + (fx?.dDouble ?? 0), 0.1, 0.35);
     return x < triple ? "triple" : x < triple + double ? "double" : "single";
   }
   if (x < ground) {
@@ -322,7 +383,7 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
     if (bases.first !== null && outs < 2 && rng.next() < clamp(0.4 - 0.06 * z(b?.speed), 0.15, 0.6)) return "double_play";
     return "groundout";
   }
-  return x < ground + 0.35 ? "flyout" : "lineout";
+  return x < flyEnd ? "flyout" : "lineout";
 }
 
 /** How close to the hit/out line a ball must land to be worth a glove tap (about 1 in 5 balls in play). */
@@ -445,6 +506,7 @@ function plateAppearance(c: Ctx) {
     else if (pitch.result === "foul" && state.strikes < 2) state.strikes++;
     if (c.rules >= 3) { contactQ = pitch.q; pitchHeat(c, bSide, fSide, batter, pitcher, pitch.result, pitch.q); }
     c.events.push({ type: "pitch", state: snapshot(state), batterId: batter.id, pitcherId: pitcher.id, result: pitch.result, mph: pitch.mph, zone: pitch.zone });
+    if (c.user && c.rules >= 4) settleAbility(c, pitch.result === "in_play");
     if (state.balls === 4) outcome = "walk";
     else if (state.strikes === 3) outcome = "strikeout";
     else if (pitch.result === "in_play") { outcome = ballInPlay(c, batter, pitcher, c.lastSwing); c.lastSwing = undefined; }
@@ -596,6 +658,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     superLeft: user && rules < 3 ? (input[user.side].gear?.superBat?.charges ?? 0) : 0,
     superUsed: false,
     assist: null,
+    ledger: newLedger(),
   };
   const s = c.state;
 

@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
-import { autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, playInteractive, simulateGame, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
+import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
@@ -121,11 +121,14 @@ function played(row: typeof games.$inferSelect, opponent: { id: number; name: st
 }
 
 const isAim = (a: unknown): a is Aim => !!a && typeof a === "object" && Number.isFinite((a as Aim).x) && Number.isFinite((a as Aim).y);
+/** An ability request is optional; when present it has to name a real ability (its fit to the swing is the sim's call). */
+const isAbility = (a: unknown) => a === undefined || (!!a && typeof a === "object" && Object.hasOwn(ABILITIES, (a as AbilityRequest).id)
+  && [undefined, "left", "right"].includes((a as AbilityRequest).direction));
 function isInput(i: unknown): i is UserInput {
   if (!i || typeof i !== "object") return false;
   const u = i as Record<string, unknown>;
-  if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim);
-  if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1;
+  if (u.kind === "pitch") return ["fastball", "slider", "change", "curve"].includes(u.type as string) && isAim(u.aim) && isAbility(u.ability);
+  if (u.kind === "swing") return ["contact", "power", "take"].includes(u.swing as string) && typeof u.timing === "number" && Math.abs(u.timing) <= 1 && isAbility(u.ability);
   if (u.kind === "field") return typeof u.timing === "number" && Math.abs(u.timing) <= 1;
   return false;
 }
@@ -215,7 +218,7 @@ export async function gameRoutes(app: FastifyInstance) {
       const { seed, inputs, final } = req.body ?? {};
       // A browser that loaded before rules versioning sends neither field and played rules 1.
       const rules = req.body?.rules ?? 1;
-      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3)) {
+      if (!Number.isInteger(seed) || !Array.isArray(inputs) || inputs.length > 2000 || !inputs.every(isInput) || !final || (rules !== 1 && rules !== 2 && rules !== 3 && rules !== 4)) {
         return reply.code(400).send({ error: "That game can't be saved." });
       }
       // Rules 1-2 games were played with level-boosted ratings; rules 3 ignores levels.

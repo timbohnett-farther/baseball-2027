@@ -32,7 +32,7 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2 | 3;
+export type RulesVersion = 1 | 2 | 3 | 4;
 
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
@@ -78,7 +78,12 @@ export type GameEvent =
       superSwing?: boolean;
     }
   | { type: "pitching_change"; state: GameState; side: Side; pitcherId: number; text: string }
-  | { type: "final"; state: GameState; text: string };
+  | { type: "final"; state: GameState; text: string }
+  /** Rules v4: an ability request was committed, took effect, fizzled, or was refused (and cost nothing). */
+  | {
+      type: "ability"; state: GameState; phase: "committed" | "triggered" | "expired" | "rejected";
+      side: Side; playerId: number; ability: AbilityId; heat: number; reason?: DisabledReason; text: string;
+    };
 
 export interface BattingLine { playerId: number; name: string; pos: string; ab: number; r: number; h: number; hr: number; rbi: number; bb: number; k: number }
 export interface PitchingLine { playerId: number; name: string; outs: number; h: number; r: number; bb: number; k: number; hr: number; pitches: number }
@@ -139,10 +144,22 @@ export type PitchType = "fastball" | "slider" | "change" | "curve";
 /** Position over the plate: x, y in -1..1 is inside the strike zone, beyond that is a ball. */
 export interface Aim { x: number; y: number }
 
+export type AbilityId = "BAT_COMET" | "BAT_LASER" | "BAT_GAP_MASTER" | "BAT_SECOND_SWING" | "PITCH_MIRAGE" | "PITCH_VORTEX";
+export type AbilityDirection = "left" | "right";
+/** What the user committed with a pitch or swing (arming and cancelling happen client-side and are never logged). Rules v4 only. */
+export interface AbilityRequest { id: AbilityId; direction?: AbilityDirection }
+/** PUP 4.3: why an ability can't be used right now. */
+export type DisabledReason = "WRONG_CONTEXT" | "INSUFFICIENT_HEAT" | "COOLDOWN" | "SELECT_DIRECTION" | "ALREADY_USED" | "WRONG_SWING" | "INELIGIBLE_ACTOR";
+/** One ability chip for the UI. `reason`/`message` are set when `available` is false. */
+export interface AbilityStatus {
+  id: AbilityId; name: string; cost: number; summary: string; needsDirection: boolean; swings: ("contact" | "power")[];
+  available: boolean; reason?: DisabledReason; message?: string;
+}
+
 export type UserInput =
-  | { kind: "pitch"; type: PitchType; aim: Aim }
+  | { kind: "pitch"; type: PitchType; aim: Aim; ability?: AbilityRequest }
   /** timing: -1 = very early, 0 = perfect, 1 = very late. `super` spends a Super Power Bat charge (clutch spots only). */
-  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number; super?: boolean }
+  | { kind: "swing"; swing: "contact" | "power" | "take"; timing: number; super?: boolean; ability?: AbilityRequest }
   /** A close ball in play on the user's defense: the glove tap, timed the same way. */
   | { kind: "field"; timing: number };
 
@@ -158,6 +175,8 @@ export interface Awaiting {
   ball: { kind: "grounder" | "liner" | "fly"; fielderId: number } | null;
   /** When batting with a Super Power Bat: charges left this game, and whether this is a clutch spot (the only time a charge can be spent). */
   super: { bat: string; charges: number; clutch: boolean } | null;
+  /** Rules v4: the user's abilities for this role (batter's when swinging, pitcher's when pitching). Empty otherwise. */
+  abilities: AbilityStatus[];
 }
 
 export interface InteractiveGame {

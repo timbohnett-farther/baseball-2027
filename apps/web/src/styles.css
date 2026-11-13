@@ -369,6 +369,11 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 .bat-actions { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 8px; flex-wrap: wrap; }
 .reward { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 16px; }
 .reward-total { font-family: var(--display); letter-spacing: 0.06em; font-size: 22px; color: var(--amber); display: flex; align-items: center; gap: 8px; }
+.ability-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.ability-chip { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ability-chip button { font-family: var(--display); letter-spacing: 0.04em; background: var(--surface-raised); color: var(--text); border: 0; border-radius: 3px; padding: 8px 12px; cursor: pointer; touch-action: manipulation; }
+.ability-chip button:disabled { opacity: 0.45; cursor: default; }
+.ability-chip.on > button:first-child, .ability-chip button.dir.on { box-shadow: inset 0 0 0 1px #c9a8ff; color: #c9a8ff; }
 .duel-buttons button.super { background: #2a1f3d; color: #c9a8ff; box-shadow: inset 0 0 0 1px rgba(201, 168, 255, 0.35); }
 .duel-buttons button.super.ready { background: #4a2d7a; color: #fff; box-shadow: 0 0 14px rgba(201, 168, 255, 0.55); animation: superPulse 0.9s ease-in-out infinite alternate; }
 .duel-buttons button.super:disabled { opacity: 0.45; cursor: default; }

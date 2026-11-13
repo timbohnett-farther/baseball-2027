@@ -128,6 +128,7 @@ export function holdFor(e: GameEvent): number {
     case "pitch": return 450;
     case "half_start": return 1300;
     case "pitching_change": return 1400;
+    case "ability": return 500;
     case "final": return 0;
     case "play": {
       if (reducedMotion()) return e.tier === 1 ? 3600 : e.tier === 2 ? 2800 : e.tier === 3 ? 1500 : 1300;

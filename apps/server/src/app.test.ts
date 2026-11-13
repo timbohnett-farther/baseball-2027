@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { DEFAULT_WOOD, slotsFor, woodDeltas, type MyTeam, type Player } from "@bb/shared";
+import { DEFAULT_WOOD, slotsFor, TEAM_COLORS, woodDeltas, type MyTeam, type Player } from "@bb/shared";
 import { buildApp } from "./app.ts";
 import { closeDb, initDb } from "./db/index.ts";
 import { pool, startStore } from "./store.ts";
@@ -395,7 +395,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   for (const n of [1, 3, 5]) {
     const setup = (await start({ innings: n })).json();
     assert.equal(setup.innings, n);
-    assert.equal(setup.rules, 3);
+    assert.equal(setup.rules, 4);
   }
   const sim = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 1 } });
   assert.equal(sim.statusCode, 201, sim.body);
@@ -422,7 +422,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 4 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 5 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
@@ -444,4 +444,38 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   const replay3 = (await app.inject({ url: `/api/games/${saved3.json().id}`, headers })).json();
   assert.equal(replay3.rules, 3);
   assert.deepEqual(replay3.result.final, out3.result!.final);
+});
+
+test("abilities: a rules 4 game with ability inputs replays and finishes; bad ability ids are refused", async () => {
+  const { res: su, cookie } = await signup("abilities", undefined, "10.0.0.22");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Abilities", color: TEAM_COLORS[2] } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams.find((t) => t.id !== undefined)!;
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3 } })).json();
+  assert.equal(setup.rules, 4);
+
+  const { playInteractive } = await import("@bb/sim");
+  const inputs: unknown[] = [];
+  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 4, userSide: "home", inputs: inputs as never });
+  let out = play();
+  while (out.awaiting) {
+    const a = out.awaiting;
+    const chip = a.abilities.find((x) => x.available && (a.role === "pitch" ? x.id === "PITCH_VORTEX" : x.id === "BAT_LASER"));
+    const ability = chip ? { id: chip.id, direction: chip.needsDirection ? "left" : undefined } : undefined;
+    inputs.push(a.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 }, ability }
+      : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1, ability });
+    out = play();
+  }
+  assert.ok(out.events.some((e) => e.type === "ability" && e.phase === "committed"), "an ability was used");
+  const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
+  const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 3, rules: 4, final: out.result!.final };
+  assert.equal((await finish({ ...base, inputs: [{ kind: "swing", swing: "contact", timing: 0, ability: { id: "BAT_NOPE" } }] })).statusCode, 400);
+  const saved = await finish(base);
+  assert.equal(saved.statusCode, 201, saved.body);
+  const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
+  assert.equal(replay.rules, 4);
+  assert.deepEqual(replay.result.events, out.result!.events);
 });

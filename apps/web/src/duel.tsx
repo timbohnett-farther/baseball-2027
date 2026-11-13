@@ -3,7 +3,7 @@
 // choices so far; each new choice reveals the next few events, which play out on the field.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { playInteractive, type Aim, type Awaiting, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
+import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
@@ -104,12 +104,14 @@ export function DuelView({ setup, seasonId, onDone }: { setup: InteractiveSetup;
 
       {awaiting?.role === "pitch" && (
         <PitchPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
-          heat={awaiting.state.heat} v3={setup.rules >= 3} type={pitchType} onType={setPitchType} onThrow={(aim) => submit({ kind: "pitch", type: pitchType, aim })} />
+          heat={awaiting.state.heat} v3={setup.rules >= 3} type={pitchType} onType={setPitchType} abilities={awaiting.abilities} actorId={awaiting.pitcherId}
+          onThrow={(aim, ability) => submit(ability ? { kind: "pitch", type: pitchType, aim, ability } : { kind: "pitch", type: pitchType, aim })} />
       )}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
           heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super}
-          onSwing={(swing, timing, sup) => submit(sup ? { kind: "swing", swing, timing, super: true } : { kind: "swing", swing, timing })} />
+          abilities={awaiting.abilities} actorId={awaiting.batterId}
+          onSwing={(swing, timing, sup, ability) => submit({ kind: "swing", swing, timing, ...(sup ? { super: true } : {}), ...(ability ? { ability } : {}) })} />
       )}
       {awaiting?.role === "field" && awaiting.ball && (
         <FieldPanel key={inputs.length} batter={players.get(awaiting.batterId)} fielder={players.get(awaiting.ball.fielderId)}
@@ -188,9 +190,47 @@ function Zone({ onPick, children }: { onPick?: (aim: Aim) => void; children?: Re
   );
 }
 
-function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow }: {
-  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim) => void;
+/** Arm/disarm state for the ability chips. Panels remount per pitch, so an armed chip never outlives its pitch. */
+function useArmed() {
+  const [armed, setArmed] = useState<AbilityRequest | null>(null);
+  const ref = useRef(armed);
+  ref.current = armed;
+  return { armed, ref, setArmed };
+}
+
+/** PUP 4: tap a chip to reserve its Heat, tap again to release it. The cost is spent when the pitch or swing goes. */
+function AbilityChips({ abilities, heat, armed, onArm }: {
+  abilities: AbilityStatus[]; heat: number; armed: AbilityRequest | null; onArm: (r: AbilityRequest | null) => void;
 }) {
+  if (!abilities.length) return null;
+  const spent = armed ? abilities.find((a) => a.id === armed.id)?.cost ?? 0 : 0;
+  return (
+    <div className="ability-chips" role="group" aria-label="Abilities">
+      <small className="muted">Heat {Math.floor(heat - spent)}</small>
+      {abilities.map((a) => {
+        const on = armed?.id === a.id;
+        return (
+          <span key={a.id} className={`ability-chip ${on ? "on" : ""}`}>
+            <button disabled={!a.available && !on} aria-pressed={on} title={a.message ?? a.summary}
+              onClick={() => onArm(on ? null : { id: a.id, ...(a.needsDirection ? { direction: "left" as const } : {}) })}>
+              <b>{a.name}</b> <small>{a.cost}{!a.available && !on && a.message ? ` · ${a.message}` : ""}</small>
+            </button>
+            {on && a.needsDirection && (["left", "right"] as const).map((d) => (
+              <button key={d} className={armed?.direction === d ? "dir on" : "dir"} aria-pressed={armed?.direction === d} onClick={() => onArm({ id: a.id, direction: d })}>{d === "left" ? "Left" : "Right"}</button>
+            ))}
+            {on && <small className="muted">{a.swings.length === 1 ? `${a.swings[0]} swing only. ` : ""}{a.summary}</small>}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow, abilities, actorId }: {
+  pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; type: PitchType; onType: (t: PitchType) => void; onThrow: (aim: Aim, ability?: AbilityRequest) => void;
+  abilities: AbilityStatus[]; actorId: number;
+}) {
+  const { armed, setArmed } = useArmed();
   return (
     <div className="duel-panel">
       <Who batter={batter} pitcher={pitcher} heat={heat} v3={v3} />
@@ -203,19 +243,22 @@ function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow }: {
           ))}
         </div>
         <div className="duel-zone-wrap">
-          <Zone onPick={onThrow} />
+          <Zone onPick={(aim) => onThrow(aim, armed ?? undefined)} />
           <small className="muted">Tap where to throw it. Strikes are in the box. <span className="key">Keys 1–9 aim.</span></small>
         </div>
       </div>
+      <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} />
     </div>
   );
 }
 
-function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing }: {
+function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing, abilities, actorId }: {
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType; mph: number; aim: Aim };
   sup: Awaiting["super"];
-  onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean) => void;
+  onSwing: (swing: "contact" | "power" | "take", timing: number, superSwing?: boolean, ability?: AbilityRequest) => void;
+  abilities: AbilityStatus[]; actorId: number;
 }) {
+  const { armed, ref: armedRef, setArmed } = useArmed();
   const ms = flightMs(incoming.mph);
   const startRef = useRef(performance.now());
   const doneRef = useRef(false);
@@ -227,8 +270,9 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing }: {
     if (doneRef.current) return;
     doneRef.current = true;
     const p = (performance.now() - startRef.current) / ms;
-    onSwingRef.current(kind, Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)), superSwing);
-  }, [ms]);
+    // A take releases the reservation, so no ability rides on it.
+    onSwingRef.current(kind, Math.max(-1, Math.min(1, (p - SWEET) / WINDOW)), superSwing, kind === "take" ? undefined : armedRef.current ?? undefined);
+  }, [ms, armedRef]);
 
   // Let it go by and it's a take.
   useEffect(() => {
@@ -274,6 +318,7 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, onSwing }: {
             Swing when the marker hits the gold. Contact for hits, Power for homers.
             {sup && !v3 && (canSuper ? " Clutch spot: a Super Swing is ready." : ` ${sup.bat} charges only in clutch spots.`)}
           </small>
+          <AbilityChips abilities={abilities} heat={heat[actorId] ?? 0} armed={armed} onArm={setArmed} />
         </div>
         <Zone>
           <i className="zone-ball" style={{ left: `${toPct(incoming.aim.x)}%`, top: `${toPct(-incoming.aim.y)}%`, animationDuration: `${ms}ms` }} />

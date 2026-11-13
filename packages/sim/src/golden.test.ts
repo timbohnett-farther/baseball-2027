@@ -25,7 +25,7 @@ const team = (r: number, name: string, superBat = false): SimTeam => ({
 const away = team(72, "Away"), home = team(68, "Home", true);
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 
-function scriptedLog(innings: number, rules: 1 | 2): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
+function scriptedLog(innings: number, rules: 1 | 2 | 3): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
   const inputs: UserInput[] = [];
   for (;;) {
     const out = playInteractive({ away, home, seed: 7, innings, rules, userSide: "home", inputs });
@@ -70,4 +70,16 @@ test("rules 2: an interactive input log replays to the same game", () => {
   const { inputs, result } = scriptedLog(3, 2);
   assert.equal(inputs.length, 41);
   assert.equal(hash(result), "830262917f7ac5d4");
+});
+
+// Golden tests for ruleset 3 (Heat economy), captured before abilities (rules 4) existed.
+test("rules 3: simulateGame output is unchanged", () => {
+  const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 3 })));
+  assert.equal(hash(all.flat()), "2fe9c63061335065");
+});
+
+test("rules 3: an interactive input log replays to the same game", () => {
+  const { inputs, result } = scriptedLog(3, 3);
+  assert.equal(inputs.length, 65);
+  assert.equal(hash(result), "e64775c8594cd0d4");
 });
