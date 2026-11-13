@@ -60,10 +60,11 @@ function DuelShot({ side, wait }: { side: "home" | "away"; wait: number }) {
   }, [side]);
   useEffect(() => {
     const t = setInterval(() => {
-      if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, wait); }
-    }, 100);
+      if (document.querySelector(".tp")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
+    }, 50);
     return () => clearInterval(t);
-  }, [wait]);
+  }, [wait, side]);
+  // The swing panel auto-takes after ~1.25x the pitch flight, so its shot must land well before that.
   return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} /></div>;
 }
 
