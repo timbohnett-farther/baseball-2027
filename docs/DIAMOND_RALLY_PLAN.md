@@ -37,7 +37,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
 - [x] W19 (ac1e4e2) Progression realignment + Heat/Rally economy (PUP 3): numeric Heat per athlete and team Rally meter with the PUP
       award tables and Rally Assist, replacing the current 1-3 heat and the hidden momentum chance boost. Super Bats become
       normalized sidegrades; XP stops raising ratings (keep the level badge).
-- [ ] W20 Activation service + pitch/bat abilities (PUP 4-8): ability catalog, arm/cancel/commit/expire state machine,
+- [x] W20 (8a5f878) Activation service + pitch/bat abilities (PUP 4-8): ability catalog, arm/cancel/commit/expire state machine,
       modifier pipeline, Comet, Laser, Gap Master, Second Swing, Mirage, Vortex. Unit + replay tests.
 - [ ] W21 Tap-only batting/pitching UI (ARC 4-6, 9): four pitch buttons + 9-cell target grid, Contact/Power, power-up
       chips with plain-language disabled reasons, safe-area layout. Replaces the Super button.
