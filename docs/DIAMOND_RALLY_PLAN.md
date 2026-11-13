@@ -50,7 +50,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
       top-4 playoffs, three-star objectives, lifetime track.
 - [ ] W27 Save/resume + PWA (ARC 14): pitch-start local snapshot, resume after backgrounding, manifest + service worker,
       landscape.
-- [ ] W28 Pace + presentation (ARC 10, PUP 12): camera rules, score bug, celebration budgets, haptics, ability VFX/audio.
+- [x] W28 (d142ed9) Pace + presentation (ARC 10, PUP 12): camera rules, score bug, celebration budgets, haptics, ability VFX/audio.
 - [ ] W29 Acceptance (ARC 17, PUP 17): golden replays, pace telemetry vs ARC 1.4 targets, balance report.
 
 Each wave: verify `npm run typecheck && npm test && npm run build --workspace @bb/web`, commit, push
