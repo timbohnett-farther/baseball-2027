@@ -6,7 +6,7 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 |---|---|---|
 | ARC 17.1 telemetry | GAP | No telemetry pipeline. The event log carries pitches, PAs, runs, HRs, steals, abilities (soak.ts reads them). Rejected-intent, tap-by-control and skip-rate counters are not recorded. |
 | ARC 17.2 match rules | PASS | packages/sim rules.test.ts, game.test.ts, run.test.ts, golden.test.ts (rules 1-8). Not checked bullet by bullet: one-inning Quick Match vs second-inning rule, season rejects 1/5 innings. |
-| ARC 17.3 touch contract | PASS (sizes) / GAP (rest) | `shot.mjs --phone --check` now asserts primary >=112x88, gameplay controls >=56x56, base targets >=64 (none exist), 8px gaps; all 14 moments ok. apps/web touch.test.ts covers input routing. Not verified: stale pitch/possession token tap, repeated tap in one frame, windup-tap hint, left-hand mirror, safe-area intersection. |
+| ARC 17.3 touch contract | PASS (sizes, tap token) / GAP (rest) | `shot.mjs --phone --check` asserts primary >=112x88, gameplay controls >=56x56, base targets >=64, 8px gaps; at HEAD it reports 2 failures that predate W29b's uncommitted work (duel-field base targets 70x48 vs 64x64, duel-hint overlap matchup vs heat-meter), so the earlier "all 14 ok" is not reproduced and the cause is uninvestigated. apps/web touch.test.ts covers input routing and `appendInput` (stale and repeated tap in one commit frame change nothing, no Heat spent). An empty-field tap never swings (SWING exists only in SwingPanel once the pitch is incoming), so no SWING target exists during windup and nothing whiffs; an on-screen windup hint does not exist (GAP). Not verified: left-hand mirror, safe-area intersection. |
 | ARC 17.4 fielding/runner | PASS (partial) | fielding.test.ts, run.test.ts. 2.0 s fallback, GO/BACK/STOP isolation not individually confirmed. |
 | ARC 17.5 season/rewards | PASS | apps/server arcade-season.test.ts, packages/sim objectives.test.ts. |
 | ARC 17.6 save/lifecycle | PASS (partial) | apps/web resume.test.ts, outbox.test.ts, app.test.ts (duplicate finish rejection). Background-at-each-phase matrix and atomic-write recovery not tested. |
@@ -25,7 +25,7 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 | PUP 17.5 presentation/accessibility | PASS (partial) | invariance.test.ts (reduced motion identical hashes), shot.mjs checks. Grayscale/colourblind not checked. |
 | PUP 17.6 MVP done | GAP | See Wall Reaper below; Anvil/Ricochet and others are candidates not built. Playtest explainability is EVIDENCE_MISSING. |
 
-Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows).
+Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows). W29b changed no row status; the 17.3 row stays partial.
 
 ## Wall Reaper scope (PUP 9.1)
 
@@ -36,7 +36,22 @@ Not built: the 2.0 m wall-distance test, 2.0-5.0 m height window, +1.25 m vertic
 
 The throw-over limit (two) was documented per batter but never reset, so it was match-wide. Rules 8 resets it for every batter. Rules 1-7 replay unchanged (goldens). In-flight rules 7 season games are still accepted.
 
-## Soak (soak.ts, rules 7, 3 innings, 1000 games, synthetic even 70/70 teams)
+## Rules 9 (W29b)
+
+Outcome-changing balance, gated on ruleset 9 (CURRENT_RULES=9); rules 1-8 goldens unchanged, two new rules 9 goldens. TUNE9 in packages/sim/src/game.ts: `{ foulZone: 0.25, foulOff: 0.32, foulScale: 0.65, contactAdd: 0.04, zoneAdd: 0.10, swingAdd: 0.08, hit: 0.35, hr: 0.06, rallyGain: 0.34 }` (shorter at-bats, more contact, slower Rally fill). rallyGain 0.38 gave Breaker in 58%/62% of games (too common); 0.30 gave 14%/18% (too rare). Server accepts rules 9 (whitelist, `games.rules` column type). Season fixtures alternate home/away (ARC 12.3): `user_side` column (migration 0013), `regularSide`/`semiSide`/`finalSide` in packages/shared; legacy null side means home; replay, score, win, payout and objectives follow the user's side.
+
+## Soak before/after (soak.ts, 3 innings, 1000 games each; est. minutes assume 1.5 s/prompt, not device-measured)
+
+| Roster | Rules | Pitches mean (med / p90) | Runs (in 4-10) | HR | Extra inn. | Ten-run | Breaker/game bot / cpu | Games with Breaker | Est. min |
+|---|---|---|---|---|---|---|---|---|---|
+| Synthetic | 8 | 80.8 (77 / 108) | 2.93 (28%) | 0.76 | 29.8% | 0.1% | 0.95 / 0.79 | 98% | 3.2 |
+| Synthetic | 9 | 68.6 (66 / 90) | 4.37 (48%) | 1.17 | 18.3% | 0.3% | 0.321 / 0.252 | 43% | 2.8 (p90 3.9) |
+| Real (data/players.json, `SOAK_REAL=1`) | 8 | 79.4 (76 / 104) | 3.09 (31%) | 1.04 | 25.0% | 0.0% | 0.94 / 0.83 | 98% | 3.1 |
+| Real | 9 | 69.0 (67 / 89) | 4.68 (55%) | 1.49 | 16.1% | 0.0% | 0.357 / 0.260 | 47% | 2.8 (p90 3.8) |
+
+The 5-8 min median is NOT met (estimate 2.8 min, computed only; a human timing is EVIDENCE_MISSING). The rules 7 section below is the original baseline.
+
+## Soak (soak.ts, rules 7 baseline, 3 innings, 1000 games, synthetic even 70/70 teams)
 
 Run with `SOAK_N=200 node packages/sim/src/soak.ts`. Bot win rate by pairing 52-70%. Per game: pitches mean 80.7 (median 77, p90 110; ARC target ~45-70, over; extra innings in 29% of games inflate it), PAs 26.2, runs 2.96 combined (target 4-10; 29% of games in range), HRs 0.75, ability commits 3.5 (39% in the 4-10 range), Rally Breaker 0.95 (bot) / 0.79 (CPU) per game, 98% of games use at least one. Ten-run rule ended 0.2% of games.
 Estimated match length (computed, not measured): blocking presentation median 65 s, p90 98 s; with 1.0/1.5/2.0 s per prompt and ~86 inputs, median 2.5/3.1/3.8 min, p90 3.6/4.5/5.5 min. Below the 5-8 min target. Half-inning transition budget 1300 ms (cap 1500).
@@ -45,6 +60,6 @@ Recommendations (not changed, judgment calls): Rally Breaker fires nearly every 
 
 ## Not done
 
-- Home/away alternation for new seasons (ARC 12.3): not implemented; season games keep the current side assignment. Needs a format-gated change in the season fixture creation.
-- Telemetry (ARC 17.1), per-ability golden fixtures, stale-token/windup-hint tap tests.
-- RNG streams: sim gameplay uses the seeded rng, the computer uses `seed ^ 0x5bd1e995`, the bot `seed ^ 0x9e3779b9`; cosmetic effects use `Math.random` only in apps/web (audio.ts, field.tsx, resume.ts id) and never reach the sim, so they cannot change a replay.
+- Home/away alternation is implemented. The playoff final site is treated as higher seed home, not neutral (not modeled).
+- Telemetry (ARC 17.1), per-ability golden fixtures, windup-hint, left-hand mirror and safe-area checks, investigation of the 2 shot.mjs layout failures.
+- RNG streams: sim gameplay uses the seeded rng, the computer uses `seed ^ 0x5bd1e995`, the bot `seed ^ 0x9e3779b9`; cosmetic effects use `Math.random` only in apps/web (audio.ts, field.tsx, resume.ts id) and never reach the sim, so they cannot change a replay. Confirmed separate in W29b: no Math.random in packages/sim.
