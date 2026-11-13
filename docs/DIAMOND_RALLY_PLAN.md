@@ -48,7 +48,7 @@ version 1), and the old behavior must keep producing identical results. Add a go
 - [x] W25 (b8f38ae) Rookie Rally tutorial + coach hints (ARC Appendix C): 1-inning fixed-seed game, server-verified completion + 100 coins once, one-time hints.
 - [x] W26 (67fb470) Season in PRD format + objectives/unlocks (ARC 12-13): migration, 7-game round-robin with the rival in round 4,
       top-4 playoffs, three-star objectives, lifetime track.
-- [ ] W27 Save/resume + PWA (ARC 14): pitch-start local snapshot, resume after backgrounding, manifest + service worker,
+- [x] W27 (1b69472) Save/resume + PWA (ARC 14): pitch-start local snapshot, resume after backgrounding, manifest + service worker,
       landscape.
 - [x] W28 (d142ed9) Pace + presentation (ARC 10, PUP 12): camera rules, score bug, celebration budgets, haptics, ability VFX/audio.
 - [ ] W29 Acceptance (ARC 17, PUP 17): golden replays, pace telemetry vs ARC 1.4 targets, balance report.
