@@ -25,7 +25,7 @@ const team = (r: number, name: string, superBat = false): SimTeam => ({
 const away = team(72, "Away"), home = team(68, "Home", true);
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 
-function scriptedLog(innings: number, rules: 1 | 2 | 3 | 4 | 5, abilities = false, startHeat?: number): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
+function scriptedLog(innings: number, rules: 1 | 2 | 3 | 4 | 5 | 6, abilities = false, startHeat?: number): { inputs: UserInput[]; result: ReturnType<typeof playInteractive>["result"] } {
   const inputs: UserInput[] = [];
   for (;;) {
     const out = playInteractive({ away, home, seed: 7, innings, rules, userSide: "home", inputs, ...(startHeat === undefined ? {} : { startHeat }) });
@@ -145,4 +145,16 @@ test("rules 5: interactive logs with glove taps, throws and field abilities repl
   assert.ok(taps.length > 10, `only ${taps.length} glove taps`);
   assert.ok(taps.some((i) => i.kind === "field" && i.ability));
   assert.equal(hash(runs.map((r) => r.result)), "6528f131100a1cb9");
+});
+
+// Golden tests for ruleset 6 (baserunning), captured before rules 7 (Rally Breaker, CPU profiles) existed.
+test("rules 6: simulateGame output is unchanged", () => {
+  const all = [1, 3, 5, 9].map((innings) => Array.from({ length: 25 }, (_, seed) => simulateGame({ away, home, seed, innings, rules: 6 })));
+  assert.equal(hash(all.flat()), "2fe9c63061335065");
+});
+
+test("rules 6: interactive logs replay to the same games", () => {
+  const plain = scriptedLog(3, 6), spent = scriptedLog(3, 6, true, 100);
+  assert.ok(spent.inputs.some((i) => "ability" in i && i.ability));
+  assert.equal(hash([plain.result, spent.result]), "cb0425f7f4ec055a");
 });
