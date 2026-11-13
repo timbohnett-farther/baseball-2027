@@ -2,6 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { DEFAULT_WOOD, slotsFor, TEAM_COLORS, woodDeltas, type MyTeam, type Player } from "@bb/shared";
+import { CURRENT_RULES } from "@bb/sim";
 import { buildApp } from "./app.ts";
 import { closeDb, initDb } from "./db/index.ts";
 import { pool, startStore } from "./store.ts";
@@ -177,6 +178,7 @@ test("play a game against an MLB team, then see it in your history", async () =>
   let out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: [] });
   while (out.awaiting) {
     inputs.push(out.awaiting.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : out.awaiting.role === "run" ? { kind: "run", action: "advance", send: [] }
       : out.awaiting.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
     out = playInteractive({ ...setup.teams, seed: setup.seed, innings: setup.innings, rules: setup.rules, userSide: "home", inputs: inputs as never });
   }
@@ -395,7 +397,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   for (const n of [1, 3, 5]) {
     const setup = (await start({ innings: n })).json();
     assert.equal(setup.innings, n);
-    assert.equal(setup.rules, 5);
+    assert.equal(setup.rules, CURRENT_RULES);
   }
   const sim = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id, innings: 1 } });
   assert.equal(sim.statusCode, 201, sim.body);
@@ -422,7 +424,7 @@ test("match length: quick matches are 1, 3 or 5 innings, seasons stay 3, rules r
   }
   const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
   const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 1, final: out.result!.final };
-  assert.equal((await finish({ ...base, rules: 6 })).statusCode, 400);
+  assert.equal((await finish({ ...base, rules: 7 })).statusCode, 400);
   assert.equal((await finish({ ...base, innings: 4 })).statusCode, 400);
   const { innings: _i, ...legacy } = base; // old bundle: no innings, no rules => 3 innings under rules 1
   assert.equal((await finish({ ...legacy, final: { away: 99, home: 0 } })).statusCode, 409);
@@ -455,7 +457,7 @@ test("abilities: a rules 5 game with ability inputs replays and finishes; bad ab
   await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
   const opp = pool().teams.find((t) => t.id !== undefined)!;
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3 } })).json();
-  assert.equal(setup.rules, 5);
+  assert.equal(setup.rules, CURRENT_RULES);
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
@@ -489,7 +491,7 @@ test("fielding: a rules 5 game with throw and ability choices on field inputs re
   await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
   const opp = pool().teams.find((t) => t.id !== undefined)!;
   const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3 } })).json();
-  assert.equal(setup.rules, 5);
+  assert.equal(setup.rules, CURRENT_RULES);
 
   const { playInteractive } = await import("@bb/sim");
   const inputs: unknown[] = [];
@@ -510,4 +512,45 @@ test("fielding: a rules 5 game with throw and ability choices on field inputs re
   assert.equal(saved.statusCode, 201, saved.body);
   const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
   assert.deepEqual(replay.result.events, out.result!.events);
+});
+
+test("baserunning: a rules 6 game with steal, pickoff and send/hold inputs replays and finishes; bad run inputs are refused", async () => {
+  const { res: su, cookie } = await signup("runners", undefined, "10.0.0.30");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Runners", color: TEAM_COLORS[3] } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams.find((t) => t.id !== undefined)!;
+  const setup = (await app.inject({ method: "POST", url: "/api/games/interactive", headers, payload: { opponentTeamId: opp.id, innings: 3 } })).json();
+  assert.equal(setup.rules, 6);
+
+  const { playInteractive } = await import("@bb/sim");
+  const inputs: any[] = [];
+  const play = () => playInteractive({ ...setup.teams, seed: setup.seed, innings: 3, rules: 6, userSide: "home", inputs: inputs as never });
+  let out = play();
+  let steals = 0, picks = 0;
+  while (out.awaiting) {
+    const a = out.awaiting;
+    const steal = a.role === "swing" ? a.run?.steal.find((o) => o.base !== "third") : undefined;
+    const pick = a.role === "pitch" ? a.run?.pickoff[0] : undefined;
+    if (steal && steals < 4) { steals++; inputs.push({ kind: "run", action: "steal", from: steal.base }); }
+    else if (pick && a.run!.pickoffsLeft > 0 && picks < 4) { picks++; inputs.push({ kind: "run", action: "pickoff", at: pick.base }); }
+    else if (a.role === "run") inputs.push({ kind: "run", action: "advance", send: a.run!.advance!.runners.map((r) => r.base) });
+    else inputs.push(a.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0.2, y: -0.3 } }
+      : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0.1 });
+    out = play();
+  }
+  assert.ok(inputs.some((i) => i.kind === "run"), "the game used run inputs");
+  const finish = (body: object) => app.inject({ method: "POST", url: "/api/games/interactive/finish", headers, payload: body });
+  const base = { opponentTeamId: opp.id, seed: setup.seed, inputs, innings: 3, rules: 6, final: out.result!.final };
+  const saved = await finish(base);
+  assert.equal(saved.statusCode, 201, saved.body);
+  const replay = (await app.inject({ url: `/api/games/${saved.json().id}`, headers })).json();
+  assert.equal(replay.rules, 6);
+  assert.deepEqual(replay.result.events, out.result!.events);
+  assert.equal((await finish({ ...base, final: { away: 99, home: 0 } })).statusCode, 409);
+  for (const bad of [{ kind: "run", action: "steal", from: "third" }, { kind: "run", action: "pickoff", at: "home" }, { kind: "run", action: "advance", send: ["home"] }, { kind: "run", action: "dive" }]) {
+    assert.equal((await finish({ ...base, inputs: [bad] })).statusCode, 400, JSON.stringify(bad));
+  }
 });
