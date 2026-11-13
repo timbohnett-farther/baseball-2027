@@ -2,19 +2,27 @@
 // Browsers only let audio start after a user gesture, so the context is created lazily on the
 // first pointer/key event and every cue is a no-op until then. Mute is remembered per browser.
 import { useEffect, useState } from "react";
-import type { GameEvent } from "@bb/sim";
+import type { AbilityId, GameEvent } from "@bb/sim";
+import { ABILITY_FX } from "./abilityfx.ts";
 
 const KEY = "bb.sound";
+const VOL_KEY = "bb.volume";
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
 let crowd: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
 let enabled = read();
+let volume = readVolume();
 const listeners = new Set<() => void>();
 
 function read(): boolean {
   try { return localStorage.getItem(KEY) !== "off"; } catch { return true; }
 }
+
+function readVolume(): number {
+  try { const v = Number(localStorage.getItem(VOL_KEY)); return localStorage.getItem(VOL_KEY) !== null && v >= 0 && v <= 1 ? v : 0.8; } catch { return 0.8; }
+}
+const level = () => (enabled ? volume : 0);
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -25,7 +33,7 @@ function unlock() {
     if (!AC) return;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = enabled ? 1 : 0;
+    master.gain.value = level();
     master.connect(ctx.destination);
     // Two seconds of white noise, looped and filtered into everything from crowd murmur to a bat crack.
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -167,6 +175,7 @@ export function playEvent(e: GameEvent, home: boolean) {
       else if (hit) swell(good ? 0.15 : 0.04, 0.8);
       return;
     }
+    case "ability": if (e.phase === "committed") abilityCue(e.ability); return;
     case "final": swell(e.state.score.home > e.state.score.away ? 0.5 : 0.15, 4); if (!calm) sting(e.state.score.home > e.state.score.away); return;
     default: return;
   }
@@ -175,8 +184,48 @@ export function playEvent(e: GameEvent, home: boolean) {
 function setEnabled(on: boolean) {
   enabled = on;
   try { localStorage.setItem(KEY, on ? "on" : "off"); } catch { /* private mode */ }
-  if (master && ctx) master.gain.linearRampToValueAtTime(on ? 1 : 0, ctx.currentTime + 0.2);
+  if (master && ctx) master.gain.linearRampToValueAtTime(level(), ctx.currentTime + 0.2);
   for (const l of listeners) l();
+}
+
+/** One synthesized cue per ability (PUP 12): a swept tone, optionally with a noise burst. */
+export function abilityCue(id: AbilityId) {
+  if (!ready() || !enabled) return;
+  const { sound: s } = ABILITY_FX[id];
+  const t = ctx!.currentTime;
+  const o = ctx!.createOscillator();
+  o.type = s.wave;
+  o.frequency.setValueAtTime(s.from, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, s.to), t + s.dur);
+  const g = ctx!.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.16, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + s.dur + 0.05);
+  o.connect(g); g.connect(master!);
+  o.start(t); o.stop(t + s.dur + 0.1);
+  if (s.noise) {
+    const n = noise(s.noise === "high" ? "highpass" : s.noise === "band" ? "bandpass" : "lowpass", s.noise === "high" ? 3000 : s.noise === "band" ? 1200 : 300, 1);
+    env(n.out, 0.14, 0.01, s.dur * 0.8);
+    n.src.start(); n.src.stop(t + s.dur + 0.1);
+  }
+}
+
+function setVolume(v: number) {
+  volume = Math.min(1, Math.max(0, v));
+  try { localStorage.setItem(VOL_KEY, String(volume)); } catch { /* private mode */ }
+  if (master && ctx) master.gain.linearRampToValueAtTime(level(), ctx.currentTime + 0.1);
+  for (const l of listeners) l();
+}
+
+/** Master volume 0..1 for the slider; mute stays a separate switch. */
+export function useVolume(): [number, (v: number) => void] {
+  const [v, setV] = useState(volume);
+  useEffect(() => {
+    const l = () => setV(volume);
+    listeners.add(l);
+    return () => { listeners.delete(l); };
+  }, []);
+  return [v, setVolume];
 }
 
 /** Sound on/off for the mute button. */

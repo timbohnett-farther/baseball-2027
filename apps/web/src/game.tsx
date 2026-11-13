@@ -3,6 +3,8 @@ import type { Me, MyTeam, TeamSummary } from "@bb/shared";
 import { DIFFICULTIES, rallyAssist, tutorialSetup, type Difficulty, type GameEvent, type GameHistory, type InteractiveSetup, type PlayedGame, type Side, type SimPlayer } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
+import { cueFor, DOMAIN_COLOR } from "./abilityfx.ts";
+import { blockingBudgetMs, cardWindowMs, skipAfterMs } from "./presentation.ts";
 import { useCoachTips } from "./coach.tsx";
 import { Ovr } from "./players.tsx";
 import { RewardLine } from "./store.tsx";
@@ -156,36 +158,12 @@ export function PlayView({ teams, onDraft }: { teams: TeamSummary[]; onDraft: ()
 // --- Watch the game ----------------------------------------------------------------------
 
 const SPEEDS = [1, 2, 4];
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-/** How long each event stays on screen at 1x (ms). Big plays run their camera sequence (VISUAL_DESIGN 3.1). */
-export function holdFor(e: GameEvent): number {
-  switch (e.type) {
-    case "pitch": return 450;
-    case "half_start": return 1300;
-    case "pitching_change": return 1400;
-    case "ability": return 500;
-    case "team": return 500;
-    case "run": return 700;
-    case "final": return 0;
-    case "play": {
-      if (reducedMotion()) return e.tier === 1 ? 3600 : e.tier === 2 ? 2800 : e.tier === 3 ? 1500 : 1300;
-      return e.tier === 1 ? 8500 : e.tier === 2 ? 5200 : e.tier === 3 ? 1800 : 1300;
-    }
-  }
-}
+/** How long each event stays on screen at 1x (ms): the ARC 10.3 blocking budget. */
+export function holdFor(e: GameEvent): number { return blockingBudgetMs(e); }
 
-/** A big play may be skipped once its first beats have landed (3 s signature, 1.5 s highlight). */
-export function skipAfter(e: GameEvent): number | null {
-  if (e.type !== "play" || !(e.tier === 1 || e.tier === 2)) return null;
-  return e.tier === 1 ? 3000 : 1500;
-}
-
-/** The overlay card lands late in the sequence, after the ball has been ridden out. */
-function cardTiming(e: Extract<GameEvent, { type: "play" }>): [delay: number, dur: number] {
-  if (reducedMotion()) return [200, e.tier === 1 ? 3000 : 2200];
-  return e.tier === 1 ? [3800, 4200] : [2200, 2800];
-}
+/** A big play may be skipped by tap once its opening beat has landed. */
+export function skipAfter(e: GameEvent): number | null { return skipAfterMs(e); }
 
 /** Show the card after `delay`, for `dur`, both scaled by playback speed. */
 export function usePlayCard(e: GameEvent | undefined, speed: number, key: unknown) {
@@ -193,7 +171,7 @@ export function usePlayCard(e: GameEvent | undefined, speed: number, key: unknow
   useEffect(() => {
     setCard(null);
     if (!e || e.type !== "play" || !e.card || !(e.tier === 1 || e.tier === 2)) return;
-    const [delay, dur] = cardTiming(e);
+    const [delay, dur] = cardWindowMs(e);
     const show = setTimeout(() => setCard(e), delay / speed);
     const hide = setTimeout(() => setCard(null), (delay + dur) / speed);
     return () => { clearTimeout(show); clearTimeout(hide); };
@@ -213,6 +191,20 @@ export function PlayCard({ card, players }: { card: Extract<GameEvent, { type: "
 }
 
 /** A "skip" affordance for a big play that unlocks after its opening beats. */
+/** Ability cue: icon + name in the domain colour, top of the field, away from the lower-third card. Names only; nothing about hidden info. */
+export function AbilityCue({ e, speed }: { e: GameEvent | undefined; speed: number }) {
+  const cue = e ? cueFor(e) : null;
+  if (!cue) return null;
+  const mine = cue.phase === "triggered";
+  return (
+    <div className={`ability-cue ${cue.phase}`} key={`${cue.id}-${cue.phase}-${cue.side}`} role="status"
+      style={{ ["--cue" as string]: DOMAIN_COLOR[cue.fx.domain], animationDuration: `${cue.fx.ms / speed}ms` }}>
+      <span className="ability-icon" aria-hidden>{cue.fx.icon}</span>
+      <span>{cue.fx.name}{mine ? "!" : ""}</span>
+    </div>
+  );
+}
+
 export function SkipPlay({ e, speed, onSkip }: { e: GameEvent | undefined; speed: number; onSkip: () => void }) {
   const [ready, setReady] = useState(false);
   const after = e ? skipAfter(e) : null;
@@ -378,7 +370,6 @@ function FeedItem({ e }: { e: GameEvent }) {
 export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   const e = game.result.events[index];
   const s = e.state;
-  const showCount = e.type === "pitch";
   const flash = e.type === "play" && e.runs > 0;
   const assist = (game.rules ?? 0) >= 3 ? rallyAssist(s) : null;
   const row = (side: Side) => (
@@ -393,12 +384,15 @@ export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   );
   return (
     <div className="scorebug" aria-label={`${game.teams.away.abbr} ${s.score.away}, ${game.teams.home.abbr} ${s.score.home}`}>
-      <div className="bug-teams">{row("away")}{row("home")}</div>
+      {/* ARC 10.6 reading order: inning, score, outs, count, bases. Heat and Rally stay secondary. */}
+      <div className="bug-teams">
+        <span className="bug-inning">{s.half === "top" ? "▲ Top" : "▼ Bot"} {s.inning}</span>
+        {row("away")}{row("home")}
+      </div>
       <div className="bug-state">
-        <span className="bug-inning">{s.half === "top" ? "▲" : "▼"} {s.inning}</span>
+        <span className="bug-outs" aria-label={`${s.outs} out`}>{[0, 1, 2].map((n) => <i key={n} className={n < Math.min(s.outs, 3) ? "on" : ""} />)}</span>
+        <span className="bug-count" aria-label="Count">{s.balls}-{s.strikes}</span>
         <Diamond bases={s.bases} />
-        <span className="bug-outs">{[0, 1, 2].map((n) => <i key={n} className={n < Math.min(s.outs, 3) ? "on" : ""} />)}</span>
-        <span className="bug-count">{showCount ? `${s.balls}-${s.strikes}` : " "}</span>
       </div>
     </div>
   );

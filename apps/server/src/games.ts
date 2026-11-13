@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { ARCADE_FORMAT, BAT_BY_ID, chemistry, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
+import { ARCADE_FORMAT, BAT_BY_ID, chemistry, cleanPace, coinsFor, DEFAULT_WOOD, LEGENDARY_MILESTONES, levelFor, slotsFor, teamAbbreviation, woodDeltas, XP_RULES, type Gear, type Player } from "@bb/shared";
 import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, isDifficulty, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
@@ -235,7 +235,7 @@ export async function gameRoutes(app: FastifyInstance) {
 
   // The game is over: replay the user's choices against the seed with today's lineups, and record
   // what that gives. The browser sends the score it saw so a lineup edited mid-game is caught.
-  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number; difficulty?: string } }>(
+  app.post<{ Body: { opponentTeamId?: number; seasonId?: number; seed?: number; inputs?: unknown[]; final?: { away: number; home: number }; innings?: number; rules?: number; difficulty?: string; pace?: unknown } }>(
     "/api/games/interactive/finish", { preHandler: requireUser }, async (req, reply) => {
       const db = getDb();
       const { seed, inputs, final } = req.body ?? {};
@@ -259,6 +259,8 @@ export async function gameRoutes(app: FastifyInstance) {
       if (!result || result.final.away !== final.away || result.final.home !== final.home) {
         return reply.code(409).send({ error: "Your lineup changed during the game, so it couldn't be saved." });
       }
+      const pace = cleanPace(req.body?.pace);
+      if (pace) req.log.info({ pace, seed }, "match pace");
       const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
       const reward = await payout(db, req.user!.id, result, outcome);
       const [row] = await db.insert(games).values({

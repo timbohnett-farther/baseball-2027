@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
+import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type GameEvent, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
 import { UNLOCKS, type ArcadeFixture, type ArcadeSeasonState, type ArcadeStanding, type BracketGame, type ClubStyle, type SuggestedDifficulty } from "@bb/shared";
 import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
 import { DuelView } from "./duel.tsx";
+import { AbilityCue, PlayCard } from "./game.tsx";
 
 // Dev-only art review: `/?shot=hr` renders the ballpark full-screen at a named moment of a fixture game
 // (no server, no sign-in) so `scripts/shot.mjs` can screenshot it. Moments: pitch, swing, hr, k, single,
 // double, final. `&t=<ms>` is how long after the moment lands the page declares itself ready.
 
-const MOMENTS = ["pitch", "swing", "hr", "k", "single", "double", "final"] as const;
+const MOMENTS = ["pitch", "swing", "hr", "k", "single", "double", "final", "ability", "bigplay"] as const;
 type Moment = typeof MOMENTS[number];
 
 let nextId = 1;
@@ -45,7 +46,8 @@ function find(game: PlayedGame, m: Moment): number {
   switch (m) {
     case "pitch": return ev.findIndex((e) => e.type === "pitch");
     case "swing": return ev.findIndex((e) => e.type === "pitch" && (e.result === "foul" || e.result === "swinging_strike"));
-    case "hr": return play("home_run");
+    case "hr": case "bigplay": return play("home_run");
+    case "ability": return ev.findIndex((e) => e.type === "pitch");
     case "k": return play("strikeout");
     case "single": return play("single");
     case "double": { const i = play("double"); return i >= 0 ? i : play("triple"); }
@@ -195,7 +197,10 @@ export function ShotView() {
   const e = game.result.events[index];
   return (
     <div className="shot">
-      <FieldView game={game} index={index} speed={1} />
+      <FieldView game={game} index={index} speed={1}>
+        {moment === "ability" && <AbilityCue speed={1} e={{ ...e, type: "ability", phase: "triggered", side: "home", playerId: 0, ability: "RUN_AFTERBURNER", heat: 0, text: "" } as GameEvent} />}
+      </FieldView>
+      {moment === "bigplay" && e.type === "play" && <PlayCard card={e.card ? e : { ...e, card: "HOME RUN", tier: 1 }} players={new Map(Object.values(game.teams).flatMap((t) => [...t.lineup, ...t.pitchers]).map((p) => [p.id, p]))} />}
       <div className="shot-tag">{moment} · seed {game.result.seed} · ev {index}/{game.result.events.length - 1} · {"text" in e ? e.text : e.type}</div>
     </div>
   );

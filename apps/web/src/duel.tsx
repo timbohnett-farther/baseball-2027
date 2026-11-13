@@ -7,7 +7,9 @@ import type { TutorialCompleteResponse } from "@bb/shared";
 import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api } from "./api.ts";
 import { crowdBed, playEvent } from "./audio.ts";
-import { BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
+import { hapticFor, vibrate } from "./haptics.ts";
+import { PaceTracker } from "./pace.ts";
+import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
 import { AdvancePanel, RunStrip } from "./run.tsx";
@@ -78,7 +80,16 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
   const submit = useCallback((input: UserInput) => setInputs((prev) => [...prev, input]), []);
   const current = events[Math.min(shown, events.length - 1)];
   useEffect(() => crowdBed(), []);
-  useEffect(() => { playEvent(current, (current.state.half === "top" ? "away" : "home") === setup.userSide); }, [current, setup.userSide]);
+  const pace = useRef<PaceTracker | null>(null);
+  if (!pace.current) { pace.current = new PaceTracker(); pace.current.begin(Date.now()); }
+  useEffect(() => {
+    const mine = (current.state.half === "top" ? "away" : "home") === setup.userSide;
+    playEvent(current, mine);
+    vibrate(hapticFor(current, mine));
+    if (current.type === "pitch") pace.current!.onPitch(Date.now());
+    else if (current.type === "half_start") pace.current!.onHalfStart(Date.now());
+  }, [current, setup.userSide]);
+  useEffect(() => { pace.current!.setBusy(!caughtUp, Date.now()); }, [caughtUp]);
   const highlights = useReel(events, speed);
   const fieldIndex = highlights.index ?? Math.min(shown, events.length - 1);
   const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);
@@ -98,7 +109,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
         .then((r) => { setBadge(r.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
       return;
     }
-    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final } })
+    api<PlayedGame>("/api/games/interactive/finish", { body: { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final, pace: pace.current!.report(Date.now()) } })
       .then((p) => { setReward(p.reward); setSaved("saved"); }, (e: Error) => setSaved(e.message));
   }, [g.result, saved, inputs, setup, tutorial]);
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
@@ -118,7 +129,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip }:
       </div>
 
       <p className="rotate-hint" aria-hidden>Turn your phone sideways for the full field.</p>
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} /></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 

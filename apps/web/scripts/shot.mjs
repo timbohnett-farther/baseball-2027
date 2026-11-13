@@ -17,11 +17,13 @@ const check = args.includes("--check");
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check");
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach" };
+// Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
+const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
-const moments = only.length ? only : check ? [...DUELS, ...Object.keys(HUBS)] : ["pitch", "swing", "hr", "k", "single", "double", "final"];
-const HUD = ".scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
+const moments = only.length ? only : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
+const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
   // The ballpark is a lazy chunk: wait for its canvas to exist and draw a few frames before sampling.
@@ -92,9 +94,9 @@ try {
   for (const m of moments) {
     await page.goto(`http://localhost:${port}/?shot=${m}&t=700`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
-    if (CONTROLS[m]) {
-      const n = await page.locator(CONTROLS[m]).count();
-      if (!n) throw new Error(`${m}: controls (${CONTROLS[m]}) missing from the shot`);
+    if (CONTROLS[m] || STATIC[m]) {
+      const n = await page.locator(CONTROLS[m] ?? STATIC[m]).count();
+      if (!n) throw new Error(`${m}: controls (${CONTROLS[m] ?? STATIC[m]}) missing from the shot`);
     }
     if (HUBS[m]) {
       if (check) { failures += await hubCheck(page, m); continue; }

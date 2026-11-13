@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
+import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -302,6 +303,8 @@ class Director {
   private tweens: Tween[] = [];
   private ball: THREE.Mesh;
   private ballFlying = false;
+  private view: CameraView = "plate";
+  private budget = 1.2; // real seconds the current event may block (ARC 10.3, already divided by speed)
   private fielders: THREE.Group[] = [];
   private batter: THREE.Group | null = null;
   private batterId: number | null = null;
@@ -500,7 +503,7 @@ class Director {
   }
 
   /** Replace the shot list; the first shot (or the gameplay camera) starts with a hard cut. */
-  private cutTo(shots: Shot[]) { this.shots = shots; this.shotT = 0; this.cut = true; }
+  private cutTo(shots: Shot[]) { this.shots = fitShots(shots, this.budget); this.shotT = 0; this.cut = true; }
 
   private flight(from: THREE.Vector3, to: THREE.Vector3, peak: number, dur: number, delay = 0, hold = false) {
     this.tween(dur, (p) => {
@@ -535,6 +538,8 @@ class Director {
 
   handle(e: GameEvent, jumped: boolean) {
     this.flush();
+    this.view = cameraViewFor(e);
+    this.budget = blockingBudgetMs(e) / 1000 / this.speed;
     this.syncHalf(e);
     this.syncPitcher(e);
     if (jumped) this.resync(e);
@@ -777,6 +782,16 @@ class Director {
 
   private homePos() { return V(0, 4.6, 12.5); }
 
+  /** ARC 10.1 gameplay views: behind the catcher for pitches, a high broadcast view once the ball is hit. */
+  private viewPose(): { pos: THREE.Vector3; look: THREE.Vector3; fov: number } {
+    switch (this.view) {
+      case "field": return { pos: V(0, 15, 17), look: V(0, 0.5, -34), fov: 55 };
+      case "runners": return { pos: V(0, 19, 20), look: V(0, 0, -16), fov: 55 };
+      case "stadium": return { pos: V(0, 30, 34), look: V(0, 0, -40), fov: 58 };
+      default: return { pos: this.homePos(), look: HOME_LOOK.clone(), fov: 48 };
+    }
+  }
+
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
     const real = Math.min(0.05, (now - this.last) / 1000);
@@ -811,7 +826,8 @@ class Director {
 
   /** The named cameras (VISUAL_DESIGN 3.3): low, close and long-lensed; the gameplay camera when no shot runs. */
   private updateCamera(dt: number) {
-    let pos = this.homePos(), look = HOME_LOOK.clone(), fov = 48, rate = 2.5, hand = 0;
+    const vp = this.viewPose();
+    let pos = vp.pos, look = vp.look, fov = vp.fov, rate = blendRate(this.reduced), hand = 0;
     const b = this.ball.position;
     const shot = this.shots[0];
     const t = shot?.target?.position ?? V(-0.95, 0, 0.3);
@@ -826,9 +842,10 @@ class Director {
       case "hero": pos = t.clone().add(V(1.5, 0.45, 1.9)); look = t.clone().add(V(0, 1.55, 0)); fov = 22; rate = 10; hand = 0.02; break;
       case "dive": pos = t.clone().add(V(3.4, 0.3, 2.4)); look = t.clone().add(V(0, 0.7, 0)); fov = 26; rate = 10; hand = 0.015; break;
       default:
-        if (this.ballFlying && this.ball.visible) { look = HOME_LOOK.clone().lerp(b, 0.55); rate = 3; }
+        if (this.ballFlying && this.ball.visible) { look = vp.look.clone().lerp(b, 0.55); rate = Math.min(rate, 3); }
     }
-    const k = this.cut ? 1 : 1 - Math.exp(-dt * rate);
+    if (this.reduced) hand = 0;
+    const k = this.cut || !isFinite(rate) ? 1 : 1 - Math.exp(-dt * rate);
     this.cut = false;
     this.cam.position.lerp(pos, k);
     this.look.lerp(look, k);
@@ -844,7 +861,7 @@ class Director {
 }
 
 /** The ballpark. `index` is the current event; a jump of more than one event (skip, replay) re-syncs runners. */
-export function FieldView({ game, index, speed }: { game: PlayedGame; index: number; speed: number }) {
+export function FieldView({ game, index, speed, children }: { game: PlayedGame; index: number; speed: number; children?: ReactNode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dirRef = useRef<Director | null>(null);
   const lastRef = useRef(-1);
@@ -872,5 +889,5 @@ export function FieldView({ game, index, speed }: { game: PlayedGame; index: num
     lastRef.current = index;
   }, [index, game]);
 
-  return <div className="field"><canvas ref={canvasRef} aria-label="Ballpark view" /></div>;
+  return <div className="field"><canvas ref={canvasRef} aria-label="Ballpark view" />{children}</div>;
 }

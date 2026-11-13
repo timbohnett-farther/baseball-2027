@@ -59,6 +59,7 @@ h1, h2, h3, .display { font-family: var(--display); text-transform: uppercase; l
 .hero .tag { margin: 8px 0 0; color: var(--text-2); font-size: 18px; }
 .userbar { position: absolute; top: 16px; right: 0; font-size: 14px; color: var(--text-2); }
 .userbar b { color: var(--text); }
+.userbar .vol { width: 64px; vertical-align: middle; margin: 0 6px; accent-color: var(--accent, #3b82f6); }
 .status { margin-top: 14px; font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); display: inline-block; }
 .dot.ok { background: var(--amber); }
@@ -228,7 +229,8 @@ input:focus, select:focus { outline: none; border-color: var(--amber); box-shado
 @keyframes burn { from { opacity: 0.7; } to { opacity: 1; } }
 @keyframes flash { from { color: #fff; text-shadow: 0 0 14px #fff; } to { color: var(--text); text-shadow: none; } }
 .bug-state { display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; align-items: center; gap: 4px 10px; padding: 6px 10px; }
-.bug-inning { font-family: var(--display); font-size: 18px; color: var(--text); }
+.bug-inning { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); padding: 4px 10px 0 13px; }
+.bug-diamond { grid-column: 1 / -1; justify-self: center; }
 .bug-diamond { width: 30px; height: 22px; }
 .bug-diamond rect { fill: none; stroke: var(--text-2); stroke-width: 1.2; }
 .bug-diamond rect.on { fill: var(--amber); stroke: var(--amber); }
@@ -518,8 +520,10 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
   .game:has(.tp) .bug-rally { width: 28px; }
   .game:has(.tp) .bug-assist { display: none; }
   .game:has(.tp) .bug-state { padding: 1px 8px; gap: 1px 8px; }
-  .game:has(.tp) .bug-inning { font-size: 14px; }
-  .game:has(.tp) .bug-diamond { width: 26px; height: 18px; }
+  .game:has(.tp) .bug-inning { font-size: 10px; line-height: 1; padding: 2px 8px 0 11px; }
+  .game:has(.tp) .bug-row { line-height: 1; }
+  .game:has(.tp) .bug-state { grid-template-columns: auto auto auto; }
+  .game:has(.tp) .bug-diamond { grid-column: 3; grid-row: 1 / span 2; width: 26px; height: 18px; }
   .game:has(.tp) .bug-count { font-size: 13px; }
   .game:has(.tp) .game-controls { gap: 6px; background: rgba(11, 13, 18, 0.6); border-radius: 4px; padding: 0 4px; }
   .game:has(.tp) .matchup { position: absolute; left: 50%; transform: translateX(-50%); top: calc(4px + env(safe-area-inset-top)); margin: 0; gap: 12px; flex-wrap: nowrap; white-space: nowrap; font-size: 12px; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
@@ -614,3 +618,11 @@ tr.in td { background: rgba(224, 164, 60, 0.05); }
   .arc-next { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .arc-rounds { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
 }
+/* --- Ability cue (W28): small icon + name at the top of the field, never full-screen --- */
+.ability-cue { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(11, 13, 18, 0.78); border: 1px solid var(--cue, #f5a524); color: var(--cue, #f5a524); font-family: var(--display); letter-spacing: 0.08em; font-size: 13px; pointer-events: none; animation: ability-cue 700ms ease-out both; }
+.ability-cue.committed { opacity: 0.8; }
+.ability-icon { font-size: 15px; line-height: 1; }
+@keyframes ability-cue { 0% { opacity: 0; transform: translate(-50%, -6px) scale(0.92); } 20% { opacity: 1; transform: translate(-50%, 0) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ability-cue { animation-name: ability-cue-flat; } @keyframes ability-cue-flat { 0%, 85% { opacity: 1; } 100% { opacity: 0; } } }
+.shot .ability-cue { animation: none; opacity: 1; }
+.shot .big-play { position: fixed; left: 12px; right: 12px; bottom: 44px; margin: 0; z-index: 2; }
