@@ -1,0 +1,66 @@
+{
+  "rules": 9,
+  "seeds": 40,
+  "abilities": {
+    "BAT_COMET": {
+      "seed": 900,
+      "hash": "3908f00035c21e50",
+      "events": 138,
+      "committed": 551
+    },
+    "BAT_LASER": {
+      "seed": 900,
+      "hash": "1a416519bfaf6d8f",
+      "events": 88,
+      "committed": 547
+    },
+    "BAT_GAP_MASTER": {
+      "seed": 900,
+      "hash": "011059b9b7e32e12",
+      "events": 92,
+      "committed": 600
+    },
+    "BAT_SECOND_SWING": {
+      "seed": 900,
+      "hash": "a73a93119bac65af",
+      "events": 97,
+      "committed": 427
+    },
+    "PITCH_MIRAGE": {
+      "seed": 900,
+      "hash": "cf7cd2f7c56f4135",
+      "events": 116,
+      "committed": 218
+    },
+    "PITCH_VORTEX": {
+      "seed": 900,
+      "hash": "e36fb0cc1a388f1d",
+      "events": 114,
+      "committed": 130
+    },
+    "FIELD_WALL_REAPER": {
+      "seed": 901,
+      "hash": "883083a32f31107a",
+      "events": 84,
+      "committed": 16
+    },
+    "FIELD_ACROBAT": {
+      "seed": 900,
+      "hash": "ab3f2b72bf861ece",
+      "events": 108,
+      "committed": 24
+    },
+    "FIELD_CANNON_ARM": {
+      "seed": 901,
+      "hash": "66887c0cfb94fab4",
+      "events": 66,
+      "committed": 3
+    },
+    "RUN_AFTERBURNER": {
+      "seed": 900,
+      "hash": "5d473f45bd0a993d",
+      "events": 107,
+      "committed": 247
+    }
+  }
+}
