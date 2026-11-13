@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as THREE from "three";
 import type { GameEvent } from "@bb/sim";
+import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
+import { shotPose } from "./actionshot.ts";
 import {
-  BALL_RADIUS, BALL_SCALE, CONTACT_Q, FIELD_XZ, RELEASE_Q, REC_MAX_FRAMES, SLIDER_HIP, SLIDER_TILT, TAG_Q, TransformRecorder,
+  BALL_RADIUS, BALL_SCALE, CONTACT_Q, CONTACT_SLOW, FIELDER_BACK, HIT_DEFAULT, contactBall, tagPoint, throwIndex, FIELD_XZ, RELEASE_Q, REC_MAX_FRAMES, SLIDER_HIP, SLIDER_TILT, TAG_Q, TransformRecorder,
   batSide, canFrame, contactPose, contactScene, fielderPose, footHeights, framesFor, hiddenBy, mirrorPose, project, releasePose, releaseScene,
   sliderPose, slideScene, slideSubject, type Placement,
 } from "./shotscene.ts";
@@ -122,4 +125,61 @@ test("framesFor: early/mid/late fixtures per family, and the staged scene frames
     }
   }
   assert.deepEqual(framesFor("slide", [ev("pitch", {})], 0, 1.8), []);
+});
+
+const dist = (a: [number, number, number], b: [number, number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const events = (shot: object) => [ev("pitch", {}), ev("play", { bases: bases(9) }, { batterId: 9, outcome: "home_run", shot })];
+
+test("release: the camera is on the throwing-arm side and the throwing hand is in frame, for both hands", () => {
+  for (const hand of ["R", "L"] as const) for (const aspect of [1.8, 0.5]) {
+    const fig = makeShotFigure(new THREE.Color("#c33"), "#e0b090", false, false, throwIndex(hand) === 0 ? 1 : 0);
+    const rs = releaseScene(null, 0, undefined);
+    fig.position.set(rs.pitcher.x, 0, rs.pitcher.z + 0.44);
+    applyPose(fig, releasePose(RELEASE_Q, hand));
+    const throwing = handWorld(fig, throwIndex(hand)).toArray() as [number, number, number];
+    const glove = handWorld(fig, throwIndex(hand) === 0 ? 1 : 0).toArray() as [number, number, number];
+    const [fr] = framesFor("release", events({ kind: "fly", spray: 0.5, strength: 1 }), 1, aspect, undefined, hand);
+    assert.equal(Math.sign(fr.pos[0] - rs.pitcher.x), Math.sign(throwing[0] - rs.pitcher.x), `${hand}: camera is on the throwing side`);
+    assert.notEqual(Math.sign(fr.pos[0] - rs.pitcher.x), Math.sign(glove[0] - rs.pitcher.x), `${hand}: glove arm is on the far side`);
+    const p = shotPose("release", RELEASE_Q, false, 1, hand === "L" ? 1 : -1);
+    assert.ok(canFrame({ pos: p.pos, look: p.look, fov: p.fov, aspect, subjects: [throwing], blockers: [] }), `${hand} @${aspect}: throwing hand in frame`);
+    assert.ok(throwing[1] > 1.5, `${hand}: arm is up at release`);
+  }
+});
+
+test("contact: the ball is inside the frame near the bat at early and mid, for lefties, righties and every hit kind", () => {
+  for (const bats of ["R", "L"] as const) for (const kind of ["grounder", "liner", "fly"] as const) for (const spray of [0, 0.5, 1]) for (const aspect of [1.8, 0.5]) {
+    const fr = framesFor("contact", events({ kind, spray, strength: 1 }), 1, aspect, bats);
+    assert.equal(fr.length, 3);
+    for (const q of [0, 1]) assert.equal(fr[q].ball?.length, 1, "early and mid carry a ball");
+    assert.ok(fr.every((c) => canFrame(c)), `${bats} ${kind} ${spray} @${aspect}`);
+  }
+  const hit = HIT_DEFAULT[0], b = contactBall(0.5, hit, [0, 0.6, -0.8]);
+  assert.ok(dist(b, hit) <= CONTACT_SLOW * 0.25, "shown ball stays within arm's length of the bat early");
+  assert.deepEqual(contactBall(CONTACT_Q - 0.1, hit, [0, 1, 0]), [...hit], "no flight before contact");
+});
+
+test("the ball is never closer to the camera than 0.8x the subject distance (ball size is fixed, so framing carries it)", () => {
+  const ratio = (c: { pos: [number, number, number]; ball?: [number, number, number][]; subjects: [number, number, number][] }) =>
+    dist(c.pos, c.ball![0]) / (c.subjects.reduce((n, p) => n + dist(c.pos, p), 0) / c.subjects.length); // vs the subjects' mean distance
+  for (const cam of ["release", "slide"] as const) for (const aspect of [1.8, 0.5]) {
+    const fr = framesFor(cam, events({ kind: "grounder", spray: 0.5, strength: 1 }), 1, aspect);
+    for (const c of fr) if (c.ball?.length) assert.ok(ratio(c as never) >= 0.8, `${cam} @${aspect} ball ${ratio(c as never).toFixed(2)}x`);
+  }
+  assert.equal(BALL_SCALE, 1);
+});
+
+test("reachTo: the palm lands on a reachable target and points at an unreachable one", () => {
+  const fig = makeShotFigure(new THREE.Color("#33c"), "#e0b090", false);
+  fig.position.set(1, 0, -2); fig.rotation.y = 0.7;
+  for (const t of [[0.2, 0.4, -1.6], [1.6, 0.9, -1.8], [0.4, 1.4, -1.3]]) {
+    applyPose(fig, fielderPose(0.9));
+    const target = new THREE.Vector3(...(t as [number, number, number]));
+    const left = reachTo(fig, 0, target), palm = handWorld(fig, 0);
+    if (left === 0) assert.ok(palm.distanceTo(target) < 0.02, `reached ${t}`);
+    else assert.ok(palm.distanceTo(target) < left + 0.02, `reached as far as the arm goes toward ${t}`);
+  }
+  const far = new THREE.Vector3(5, 0.3, -2); applyPose(fig, fielderPose(0.9));
+  assert.ok(reachTo(fig, 0, far) > 3, "unreachable target reports the shortfall");
+  assert.ok(tagPoint({ bx: 0, bz: 0, dx: 1, dz: 0 }, 1)[1] < 0.5 && FIELDER_BACK > 0);
 });

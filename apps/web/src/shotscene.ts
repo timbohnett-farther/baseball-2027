@@ -282,6 +282,14 @@ const pose = (o: Partial<Pose>): Pose => ({ ...REST, ...o });
 
 // Contact (right-handed, the figure faces +z at zero): load, swing, contact at q = CONTACT_Q, follow through.
 export const CONTACT_Q = 0.3;
+/** Metres the ball is shown to travel per unit of shot time after contact. The recorded direction is kept; only the display speed is slowed so the ball stays beside the bat in a close frame. */
+export const CONTACT_SLOW = 3;
+export const contactBall = (q: number, hit: Vec3, dir: Vec3): Vec3 => {
+  const d = Math.max(0, q - CONTACT_Q) * CONTACT_SLOW;
+  return [hit[0] + dir[0] * d, Math.max(BALL_RADIUS, hit[1] + dir[1] * d), hit[2] + dir[2] * d];
+};
+/** Where the bat meets the ball for the default batter (right, left); the live stage measures the real barrel. */
+export const HIT_DEFAULT: [Vec3, Vec3] = [[0.16, 1.1, -0.3], [0.03, 1.07, -0.75]];
 const C_LOAD = pose({
   hips: [0, -0.15, 0], torso: [0.12, -0.45, 0], head: [0, 0.15, 0],
   armL: [-0.55, 0.1, 0.55], foreL: -1.55, armR: [-0.55, -0.2, -0.55], foreR: -1.75,
@@ -302,34 +310,46 @@ const C_FOLLOW = pose({
 });
 export const contactPose = (q: number): Pose => keyed([[0, C_LOAD], [CONTACT_Q - 0.12, C_LOAD], [CONTACT_Q, C_HIT], [0.7, C_FOLLOW], [1, C_FOLLOW]], c01(q));
 
-// Release (right-handed pitcher): cocked, release at q = RELEASE_Q with the stride leg planted, follow through.
+// Release (right-handed pitcher, throwing with the figure's right arm, index 0; the glove is on the left): cocked, release at
+// q = RELEASE_Q with the stride leg planted and the chest upright over it, the throwing arm reaching out front, follow through.
 export const RELEASE_Q = 0.3;
+export type Hand = "L" | "R";
 const R_COCK = pose({
-  hips: [0, -0.2, 0], torso: [-0.2, -0.25, 0.1], head: [0, 0, 0],
+  hips: [0, -0.2, 0], torso: [-0.15, -0.25, 0.1], head: [0, 0, 0],
   armL: [-0.9, 0, 0.6], foreL: -1.3, armR: [0.7, 0, -1.25], foreR: -1.5,
-  legL: [-0.95, 0, 0.1], shinL: 0.55, legR: [0.1, 0, -0.1], shinR: 0.1,
+  legL: [-0.7, 0, 0.1], shinL: 0.4, legR: [0.1, 0, -0.1], shinR: 0.1,
 });
 const R_REL = pose({
-  hips: [0, 0.25, 0], torso: [0.35, 0.15, -0.15], head: [0.1, 0, 0],
-  armL: [-0.4, 0.3, 0.55], foreL: -2.0, armR: [-2.35, 0, -0.2], foreR: -0.12,
-  legL: [-0.85, 0, 0.12], shinL: 0.15, legR: [0.5, 0, -0.15], shinR: 0.6,
+  hips: [0, 0.1, 0], torso: [0.02, 0.05, 0], head: [-0.05, 0, 0],
+  armL: [-0.55, -0.1, 0.5], foreL: -1.9, armR: [-2.5, 0, -0.3], foreR: -0.05,
+  legL: [-0.6, 0, 0.12], shinL: 0.1, legR: [0.35, 0, -0.15], shinR: 0.5,
 });
 const R_FOLLOW = pose({
-  hips: [0, 0.45, 0], torso: [0.85, 0.35, -0.1], head: [0.2, 0, 0],
+  hips: [0, 0.3, 0], torso: [0.6, 0.2, 0], head: [-0.1, 0, 0],
   armL: [-0.3, 0.2, 0.7], foreL: -1.6, armR: [-1.0, -0.2, -0.1], foreR: -0.5,
-  legL: [-0.85, 0, 0.12], shinL: 0.2, legR: [0.6, 0, -0.15], shinR: 0.9,
+  legL: [-0.65, 0, 0.12], shinL: 0.15, legR: [0.5, 0, -0.15], shinR: 0.8,
 });
-export const releasePose = (q: number): Pose => mirrorPose(keyed([[0, R_COCK], [0.1, R_COCK], [RELEASE_Q, R_REL], [0.7, R_FOLLOW], [1, R_FOLLOW]], c01(q)));
+/** A left-hander is the mirror image: he throws with the figure's left arm (index 1) and wears the glove on the right. */
+export const releasePose = (q: number, hand: Hand = "R"): Pose => {
+  const p = keyed([[0, R_COCK], [0.1, R_COCK], [RELEASE_Q, R_REL], [0.7, R_FOLLOW], [1, R_FOLLOW]], c01(q));
+  return hand === "L" ? mirrorPose(p) : p;
+};
+/** Which palm (shot figure index) throws: 0 is the figure's right (-x when it faces +z), 1 its left. */
+export const throwIndex = (hand: Hand): 0 | 1 => (hand === "L" ? 1 : 0);
 
 // Fielder at the bag: crouched, glove reaching toward the runner, tag at q = TAG_Q.
 export const TAG_Q = 0.55;
+/** Where the covering fielder stands, behind the bag on the camera side's far edge (metres from the bag along the camera normal). */
+export const FIELDER_BACK = 0.45;
+/** The tag point: low, on the runner's leading foot, which is `run` metres short of the bag along the travel direction. */
+export const tagPoint = (a: { bx: number; bz: number; dx: number; dz: number }, run: number): Vec3 => [a.bx - a.dx * (run + 0.1), 0.3, a.bz - a.dz * (run + 0.1)];
 const F_SET = pose({
   hips: [0, 0, 0], torso: [0.55, 0, 0], head: [-0.4, 0, 0],
   armR: [-1.0, 0, -0.35], foreR: -0.55, armL: [-0.8, 0, 0.5], foreL: -1.3,
   legL: [-1.0, 0, 0.35], shinL: 1.6, legR: [-0.85, 0, -0.35], shinR: 1.45,
 });
 const F_TAG = pose({
-  hips: [0, 0.2, 0], torso: [0.7, 0.2, 0], head: [-0.5, 0, 0],
+  hips: [0, 0.2, 0], torso: [1.0, 0.2, 0], head: [-0.7, 0, 0],
   armR: [-1.45, 0, -0.1], foreR: -0.1, armL: [-0.9, 0, 0.55], foreL: -1.45,
   legL: [-1.0, 0, 0.35], shinL: 1.65, legR: [-0.95, 0, -0.3], shinR: 1.5,
 });
@@ -418,31 +438,36 @@ const body = (x: number, z: number, top = FIG_TOP): Vec3[] => [[x, 0.1, z], [x, 
  * The subjects and the ball the shot must keep in frame, at the three timing fixtures (early, mid, late), for a plan's
  * event. Built from the event facts (the stage re-derives the same anchors from the recording). `aspect` is the screen's.
  */
-export function framesFor(camera: ShotCamera, events: GameEvent[], i: number, aspect: number, bats?: "L" | "R" | "S"): FrameCheck[] {
+export function framesFor(camera: ShotCamera, events: GameEvent[], i: number, aspect: number, bats?: "L" | "R" | "S", throws: Hand = "R"): FrameCheck[] {
   const e = events[i];
   const standing = (skip: number[]): Blocker[] => FIELD_XZ.filter((_, k) => !skip.includes(k)).map(([x, z]) => ({ x, z }));
   const out: FrameCheck[] = [];
   for (const q of [0.15, 0.5, 0.85]) {
     if (camera === "contact" && e?.type === "play") {
       const sc = contactScene(null, i, bats, e.shot), p = shotPose("contact", q, false, 1, sc.side);
-      const flown = Math.max(0, q - CONTACT_Q) * 8, b = sc.batter;
+      const b = sc.batter, ball = contactBall(q, HIT_DEFAULT[sc.side === 1 ? 0 : 1], sc.dir);
       out.push({
         pos: p.pos, look: p.look, fov: p.fov, aspect, subjects: body(b.x, b.z),
         // The ball must be in frame while it leaves the bat (early, mid); by the late fixture it is allowed to have flown on.
-        ball: q <= 0.5 ? [[sc.origin[0] + sc.dir[0] * flown, sc.origin[1] + sc.dir[1] * flown, sc.origin[2] + sc.dir[2] * flown]] : [],
+        ball: q <= 0.5 ? [ball] : [],
         blockers: [],
       });
     } else if (camera === "release") {
-      const p = shotPose("release", q, false, 1), rs = releaseScene(null, i, undefined);
-      out.push({ pos: p.pos, look: p.look, fov: p.fov, aspect, subjects: body(rs.pitcher.x, rs.pitcher.z), blockers: standing([0]) });
+      const sc = releaseScene(null, i, undefined), pt = sc.pitcher, hs = throws === "L" ? 1 : -1;
+      const p = shotPose("release", q, false, 1, hs);
+      const root = pt.z + 0.6 * Math.min(1, q / 0.35) ** 2, palm: Vec3 = [pt.x + hs * 0.35, 1.82, root + 0.42];
+      const f = Math.max(0, (q - RELEASE_Q) / (1 - RELEASE_Q)), ee = f * f * 0.9 + f * 0.1, tg = sc.target;
+      const ball: Vec3 = [palm[0] + (tg[0] - palm[0]) * ee, palm[1] + (tg[1] - palm[1]) * ee, palm[2] + (tg[2] - palm[2]) * ee];
+      out.push({ pos: p.pos, look: p.look, fov: p.fov, aspect, subjects: [...body(pt.x, root), palm], ball: q <= 0.5 ? [ball] : [], blockers: standing([0]) });
     } else if (camera === "slide") {
       const sub = slideSubject(events, i);
       if (!sub) return [];
       const sc = slideScene(null, i, sub), a = sc.axes, p = shotPose("slide", q, false, sub.base);
-      const run = 1.7 - 1.35 * q;
+      const run = 1.7 - 1.35 * q, tag = tagPoint(a, run);
       out.push({
         pos: p.pos, look: p.look, fov: p.fov, aspect,
-        subjects: [[a.bx - a.dx * run, 0.3, a.bz - a.dz * run], ...body(a.bx - a.nx * 0.6, a.bz - a.nz * 0.6, 1.4)],
+        subjects: [[a.bx - a.dx * run, 0.3, a.bz - a.dz * run], ...body(a.bx - a.nx * FIELDER_BACK, a.bz - a.nz * FIELDER_BACK, 1.4)],
+        ball: q >= TAG_Q ? [tag] : [],
         blockers: standing([0, sc.slot]),
       });
     }

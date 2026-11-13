@@ -17,9 +17,15 @@ const check = args.includes("--check");
 // --perf: no pictures; print renderer stats (draw calls, triangles, frame time) per moment. --json=FILE also writes them.
 // --quality=high|standard|battery sets the stored quality tier before the page loads.
 const perf = args.includes("--perf");
+// --phase=early|mid|late freezes an action shot at 0.15 / 0.5 / 0.85 of its run; --hand=L|R picks a left- or right-handed batter; --seed=N starts the fixture seed walk there.
+const phase = args.find((a) => a.startsWith("--phase="))?.slice(8);
+const hand = args.find((a) => a.startsWith("--hand="))?.slice(7);
+const throwsArg = args.find((a) => a.startsWith("--throws="))?.slice(9); // pitcher throwing hand for the release shot
+const seedArg = args.find((a) => a.startsWith("--seed="))?.slice(7);
+const hold = { early: 0.15, mid: 0.5, late: 0.85 }[phase ?? ""];
 const jsonOut = args.find((a) => a.startsWith("--json="))?.slice(7);
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
-const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && !a.startsWith("--json=") && !a.startsWith("--quality="));
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
@@ -123,12 +129,12 @@ try {
   let failures = 0;
   const rows = [];
   for (const m of moments) {
-    await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}`, { waitUntil: "load" });
+    await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}${hold !== undefined ? `&hold=${hold}` : ""}${hand ? `&hand=${hand}` : ""}${throwsArg ? `&throws=${throwsArg}` : ""}${seedArg ? `&seed=${seedArg}` : ""}`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
     let shotStats = null;
     if (m.startsWith("shot-")) { // an action shot lasts about a second: wait until its camera is a third of the way through
       const want = { "shot-contact": "contact", "shot-release": "release", "shot-slide": "slide" }[m];
-      await page.waitForFunction(([k]) => { const r = window.__renderStats; return r && r.shotKind === k && r.shotP > 0.35; }, [want], { timeout: 60000, polling: 20 });
+      await page.waitForFunction(([k, h]) => { const r = window.__renderStats; return r && r.shotKind === k && r.shotP > (h ?? 0.35) - 0.01; }, [want, hold], { timeout: 60000, polling: 20 });
       shotStats = await page.evaluate(() => ({ ...window.__renderStats }));
     }
     if (CONTROLS[m] || STATIC[m]) {
@@ -153,7 +159,7 @@ try {
     if (check) { failures += await layoutCheck(page, m); continue; }
     await page.waitForSelector(".field canvas", { timeout: 15000 }); // the ballpark is a lazy chunk; never shoot before it mounts
     if (!shotStats) await page.waitForTimeout(800);
-    const file = join(outDir, `${m}${phone ? "-phone" : ""}.jpg`);
+    const file = join(outDir, `${m}${phase ? "-" + phase : ""}${hand ? "-" + hand : ""}${throwsArg ? "-t" + throwsArg : ""}${phone ? "-phone" : ""}.jpg`);
     await page.screenshot({ path: file, type: "jpeg", quality: 82 });
     console.log(file);
   }

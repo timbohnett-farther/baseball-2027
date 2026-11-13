@@ -180,16 +180,19 @@ export function ShotView() {
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);
+  const hand = q.get("hand"); // art review: L or R, the batter's hand at the moment (a left-hander is the mirrored stance)
 
   // Walk seeds until the fixture game contains the moment, so every named shot exists.
   const { game, target } = useMemo(() => {
     for (let s = want || 1; s < (want || 1) + 60; s++) {
       const g = fixture(s), i = find(g, moment);
-      if (i >= 0) return { game: g, target: i };
+      const e = g.result.events[i];
+      const bats = e && e.type === "play" ? [...g.teams.away.lineup, ...g.teams.home.lineup].find((p) => p.id === e.batterId)?.bats : undefined;
+      if (i >= 0 && (!hand || bats === hand)) return { game: g, target: i };
     }
     const g = fixture(1);
     return { game: g, target: 0 };
-  }, [moment, want]);
+  }, [moment, want, hand]);
 
   // Jump to just before the moment (runners resync), then step onto it so its camera sequence plays.
   const [index, setIndex] = useState(Math.max(0, target - 1));

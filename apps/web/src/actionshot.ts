@@ -288,11 +288,11 @@ export function shotPose(camera: ShotCamera, p: number, still: boolean, base = 1
   switch (camera) {
     case "contact": // low, first-base side of the plate, looking across the open stance: swing-through, bat and ball with the stadium behind
       return { pos: [side * (3.6 - 0.3 * q), 1.0, 3.6 - 0.2 * q], look: [side * -0.7, 1.05, -1.1], fov: 30 };
-    case "release": // plate side, off the line to the mound: release pose and the ball in flight with the stands behind the pitcher
-      return { pos: [3.4, 1.4, -10.4 + 0.4 * q], look: [0.1, 1.3, -17.8], fov: 22 };
+    case "release": // on the throwing-arm side (side = world-x sign of that arm), three-quarter from the plate: the arm, ball and hand read in profile
+      return { pos: [side * 6.6, 1.3, -11.6 + 0.4 * q], look: [side * -0.2, 1.25, -17.6], fov: 17 };
     case "slide": { // low and outside, looking across the bag at runner and fielder
-      const a = slideAxes(base), d = 4.4 - 0.4 * q;
-      return { pos: [a.bx + a.nx * d, 0.6, a.bz + a.nz * d], look: [a.bx - a.dx * 0.4, 0.85, a.bz - a.dz * 0.4], fov: 34 };
+      const a = slideAxes(base), d = 7.6 - 0.6 * q; // far back on a longer lens: same framing, so the ball is not magnified by perspective
+      return { pos: [a.bx + a.nx * d, 0.6, a.bz + a.nz * d], look: [a.bx - a.dx * 0.4, 0.85, a.bz - a.dz * 0.4], fov: 21 };
     }
   }
 }

@@ -15,10 +15,11 @@ export interface ShotParts {
   thigh: THREE.Group[]; shin: THREE.Group[]; upper: THREE.Group[]; fore: THREE.Group[]; palm: THREE.Object3D[];
   bat: THREE.Group | null;
 }
-/** Index 0 is the figure's right (-x, the glove side), index 1 its left (+x), matching the live rig's s = -1, +1. */
+/** Index 0 is the figure's right (-x), index 1 its left (+x), matching the live rig's s = -1, +1. */
 const SIDE = [-1, 1] as const;
 
-export function makeShotFigure(color: THREE.Color, skinHex: string, hasBat: boolean, ump = false): THREE.Group {
+/** `glove` is the palm index that wears the brown glove (0 = the figure's right, 1 = its left), or null for none (a runner). */
+export function makeShotFigure(color: THREE.Color, skinHex: string, hasBat: boolean, ump = false, glove: 0 | 1 | null = 0): THREE.Group {
   const root = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
   const sleeveMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
@@ -67,9 +68,9 @@ export function makeShotFigure(color: THREE.Color, skinHex: string, hasBat: bool
     const fore = new THREE.Group(); fore.position.y = -UPPER;
     fore.add(limb(V(0, 0, 0), down(FOREARM), 0.05, skin, 0.04));
     const palm = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), gloveMat); palm.position.y = -FOREARM; fore.add(palm);
-    if (!hasBat && !ump && s < 0) {
+    if (!hasBat && !ump && glove !== null && SIDE[glove] === s) {
       const glove = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), std("#6d4327", 0.7));
-      glove.position.set(-0.03, -FOREARM - 0.02, 0.05); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; fore.add(glove);
+      glove.position.set(s * 0.03, -FOREARM - 0.02, 0.05); glove.scale.set(1, 1.15, 0.6); glove.castShadow = true; fore.add(glove);
     }
     mergeByMaterial(fore); upper.add(fore); mergeByMaterial(upper);
     torso.add(upper); parts.upper.push(upper); parts.fore.push(fore); parts.palm.push(palm);
@@ -107,8 +108,44 @@ export function applyPose(fig: THREE.Group, p: Pose) {
   }
 }
 
-/** World position of a figure's palm (0 = right/glove side, 1 = left), after applyPose. */
+/** World position of a figure's palm (0 = the figure's right, 1 = its left), after applyPose. */
 export function handWorld(fig: THREE.Group, side: 0 | 1, out = new THREE.Vector3()): THREE.Vector3 {
   fig.updateMatrixWorld(true);
   return (fig.userData.parts as ShotParts).palm[side].getWorldPosition(out);
+}
+
+const _S = new THREE.Vector3(), _d = new THREE.Vector3(), _dir = new THREE.Vector3(), _pole = new THREE.Vector3(), _el = new THREE.Vector3();
+const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _fd = new THREE.Vector3();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _pq = new THREE.Quaternion();
+
+/**
+ * Two-bone reach: swing arm `idx` so its palm lands on `target` (world), or as far toward it as the arm reaches. Call after
+ * applyPose (which sets joint Euler angles; this overwrites the upper arm's quaternion and the forearm's x rotation).
+ * The elbow bends toward world down. Returns the palm-to-target distance left over (0 when reached).
+ */
+export function reachTo(fig: THREE.Group, idx: 0 | 1, target: THREE.Vector3): number {
+  const k = fig.userData.parts as ShotParts, upper = k.upper[idx], fore = k.fore[idx];
+  fig.updateMatrixWorld(true);
+  upper.getWorldPosition(_S);
+  _d.copy(target).sub(_S);
+  const full = _d.length(), reach = UPPER + FOREARM - 0.005, D = Math.max(0.05, Math.min(full, reach));
+  _dir.copy(_d).normalize();
+  const cosA = Math.min(1, Math.max(-1, (UPPER * UPPER + D * D - FOREARM * FOREARM) / (2 * UPPER * D))), sinA = Math.sqrt(1 - cosA * cosA);
+  _pole.set(0, -1, 0).addScaledVector(_dir, _dir.y); // world down, made perpendicular to the reach line
+  if (_pole.lengthSq() < 1e-6) _pole.set(0, 0, 1).addScaledVector(_dir, -_dir.z);
+  _pole.normalize();
+  _el.copy(_dir).multiplyScalar(cosA).addScaledVector(_pole, sinA); // upper-arm direction in the world
+  _fd.copy(_dir).multiplyScalar(D).addScaledVector(_el, -UPPER).normalize(); // forearm direction (elbow to palm)
+  const cosP = Math.min(1, Math.max(-1, _el.dot(_fd))), sinP = Math.sqrt(1 - cosP * cosP);
+  // Local axes: -y runs along the upper arm; the forearm flexes toward local +z.
+  _y.copy(_el).negate();
+  if (sinP > 1e-4) _z.copy(_fd).addScaledVector(_el, -cosP).divideScalar(sinP);
+  else _z.copy(_pole).addScaledVector(_el, -_pole.dot(_el)).normalize();
+  _x.crossVectors(_y, _z);
+  _m.makeBasis(_x, _y, _z); _q.setFromRotationMatrix(_m);
+  (upper.parent as THREE.Object3D).getWorldQuaternion(_pq);
+  upper.quaternion.copy(_pq.invert().multiply(_q));
+  fore.rotation.set(-Math.acos(cosP), 0, 0);
+  fig.updateMatrixWorld(true);
+  return Math.max(0, full - reach);
 }

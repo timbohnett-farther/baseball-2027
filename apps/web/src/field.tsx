@@ -8,9 +8,9 @@ import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView }
 import { holdWithShot, shotPose, type ActionShotDirector, type ShotPlan } from "./actionshot.ts";
 import {
   BALL_RADIUS, BALL_SCALE, CONTACT_Q, batSide, RELEASE_Q, SLIDER_HIP, SLIDER_TILT, TransformRecorder, contactPose, contactScene, fielderPose, fitFov, mirrorPose, pitchTarget,
-  releasePose, releaseScene, slideScene, slideSubject, sliderPose, type Placement, type SlideSubject,
+  releasePose, releaseScene, throwIndex, contactBall, tagPoint, FIELDER_BACK, type Hand, slideScene, slideSubject, sliderPose, type Placement, type SlideSubject,
 } from "./shotscene.ts";
-import { applyPose, handWorld, makeShotFigure } from "./shotfigure.ts";
+import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
 import { limb, mergeByMaterial } from "./rigutil.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
@@ -21,6 +21,10 @@ import { limb, mergeByMaterial } from "./rigutil.ts";
 type Play = Extract<GameEvent, { type: "play" }>;
 /** `?shot=...` art-review pages publish the plate's screen rect (see publishStrikeZone). */
 const SHOT_MODE = typeof location !== "undefined" && location.search.includes("shot=");
+/** Art review only (`&hold=0.5`): freeze an action shot at that fraction of its run so early/mid/late can be captured deterministically. */
+/** The sim has no pitcher throwing hand, so presentation defaults to right-handed; the capture harness can force `?throws=L`. */
+const SHOT_THROWS: Hand = SHOT_MODE && /[?&]throws=L/.test(location.search) ? "L" : "R";
+const SHOT_HOLD = SHOT_MODE ? (() => { const m = /[?&]hold=([\d.]+)/.exec(location.search); return m ? Math.min(1, Math.max(0, Number(m[1]))) : null; })() : null;
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const FT = 0.3048;
 const BASES = [V(0, 0, 0), V(19.4, 0, -19.4), V(0, 0, -38.8), V(-19.4, 0, -19.4)]; // home, 1B, 2B, 3B
@@ -544,7 +548,7 @@ class Director {
     if (p.camera === "slide" && !this.slideSub) return null;
     const e = this.shotEvent;
     const bats = e?.type === "play" ? this.player(this.battingSide(e), e.batterId)?.bats : undefined;
-    return { kind: p.camera, dur: p.durMs / 1000 / this.speed, scale: 1, still: p.still, base: p.camera === "slide" ? this.slideSub!.base : 1, side: bats === "L" ? -1 : 1 };
+    return { kind: p.camera, dur: p.durMs / 1000 / this.speed, scale: 1, still: p.still, base: p.camera === "slide" ? this.slideSub!.base : 1, side: p.camera === "release" ? (SHOT_THROWS === "L" ? 1 : -1) : bats === "L" ? -1 : 1 };
   }
 
   private flight(from: THREE.Vector3, to: THREE.Vector3, peak: number, dur: number, delay = 0, hold = false) {
@@ -804,10 +808,10 @@ class Director {
     this.rec.record({ event: this.eventIndex, t: this.recT, actors, ball: this.ball.visible ? [b.x, b.y, b.z] : null });
   }
 
-  private figure(side: Side, id: number | null, bat: boolean, position: string | null = null): THREE.Group {
+  private figure(side: Side, id: number | null, bat: boolean, position: string | null = null, glove: 0 | 1 | null = 0): THREE.Group {
     const team = this.teams[side];
     const player = id === null ? (position ? team.lineup.find((p) => p.position === position) ?? null : null) : this.player(side, id);
-    const g = makeShotFigure(this.colors[side], SKIN[(player?.id ?? id ?? 0) % SKIN.length], bat);
+    const g = makeShotFigure(this.colors[side], SKIN[(player?.id ?? id ?? 0) % SKIN.length], bat, false, glove);
     dress(g, team, player);
     return g;
   }
@@ -829,13 +833,13 @@ class Director {
     } else if (kind === "release") {
       const pid = this.lastPitch && "pitcherId" in this.lastPitch ? this.lastPitch.pitcherId : null;
       hide(this.fielders[0]);
-      add("pitcher", this.figure(def, pid, false, "P"));
+      add("pitcher", this.figure(def, pid, false, "P", throwIndex(SHOT_THROWS) === 0 ? 1 : 0));
     } else if (kind === "slide" && this.slideSub) {
       const sub = this.slideSub;
       const sc = slideScene(this.rec, this.eventIndex, sub);
       hide(this.fielders[sc.slot]);
       const wrap = new THREE.Group();
-      const body = this.figure(bat, sub.runnerId, false);
+      const body = this.figure(bat, sub.runnerId, false, null, null);
       wrap.add(body); this.scene.add(wrap); st.actors.push(wrap); st.figs.runner = body; st.figs.runnerWrap = wrap;
       add("fielder", this.figure(def, null, false, SLOT_POS[sc.slot]));
     }
@@ -894,9 +898,8 @@ class Director {
     const sc = contactScene(this.rec, this.eventIndex, this.player(this.battingSide(e), e.batterId)?.bats, e.shot);
     const t = q - CONTACT_Q;
     if (t < 0) { this.ball.position.set(st.hit.x, st.hit.y + 0.4 * -t, st.hit.z + 6 * t); return; } // arriving from the pitcher
-    const sh = e.shot, str = sh?.strength ?? 1;
-    const v = 14 + 8 * str, tt = t * 0.7; // seconds of flight shown
-    this.ball.position.set(st.hit.x + sc.dir[0] * v * tt, Math.max(BALL_RADIUS, st.hit.y + sc.dir[1] * v * tt - 4.9 * tt * tt), st.hit.z + sc.dir[2] * v * tt);
+    const [bx, by, bz] = contactBall(q, [st.hit.x, st.hit.y, st.hit.z], sc.dir);
+    this.ball.position.set(bx, by, bz);
   }
 
   private poseRelease(q: number) {
@@ -904,21 +907,23 @@ class Director {
     if (!st || !g) return;
     const sc = releaseScene(this.rec, this.lastPitchIndex, this.lastPitch?.shot);
     const ry = Math.abs(sc.pitcher.ry) < 0.8 ? sc.pitcher.ry : 0;
+    const ti = throwIndex(SHOT_THROWS);
     const stride = (k: number) => 0.6 * clamp01(k / 0.35) ** 2;
     g.position.set(sc.pitcher.x, 0, sc.pitcher.z + stride(q)); g.rotation.y = ry;
-    applyPose(g, releasePose(q));
-    if (q < RELEASE_Q) { handWorld(g, 1, this.ball.position); return; } // held until the release frame
+    applyPose(g, releasePose(q, SHOT_THROWS));
+    if (q < RELEASE_Q) { handWorld(g, ti, this.ball.position); return; } // held until the release frame
     // The release point is the hand at RELEASE_Q; the ball then flies to the plate crossing.
     const f = clamp01((q - RELEASE_Q) / (1 - RELEASE_Q));
     const [tx, ty, tz] = sc.target;
     const sh = this.lastPitch?.shot;
     g.position.z = sc.pitcher.z + stride(RELEASE_Q);
-    applyPose(g, releasePose(RELEASE_Q)); handWorld(g, 1, st.rel);
-    g.position.z = sc.pitcher.z + stride(q); applyPose(g, releasePose(q));
+    applyPose(g, releasePose(RELEASE_Q, SHOT_THROWS)); handWorld(g, ti, st.rel);
+    g.position.z = sc.pitcher.z + stride(q); applyPose(g, releasePose(q, SHOT_THROWS));
     const e = f * f * 0.9 + f * 0.1;
     this.ball.position.set(st.rel.x + (tx - st.rel.x) * e, st.rel.y + (ty - st.rel.y) * e - 0.5 * f * (1 - f) * (sh && sh.type === "curve" ? 1.6 : 1), st.rel.z + (tz - st.rel.z) * e);
   }
 
+  private tagTarget = new THREE.Vector3();
   private poseSlide(q: number) {
     const st = this.staged, sub = this.slideSub;
     if (!st || !sub || !st.figs.runner) return;
@@ -931,10 +936,13 @@ class Director {
     body.position.set(0, SLIDER_HIP, 0);
     const run = 1.7 - 1.35 * q; // feet this far short of the bag: still sliding in, arriving as the shot ends
     wrap.position.set(a.bx - a.dx * run, 0, a.bz - a.dz * run);
-    const fx = sc.fielder ? sc.fielder.x : a.bx - a.nx * 0.6 + a.dx * 0.1, fz = sc.fielder ? sc.fielder.z : a.bz - a.nz * 0.6 + a.dz * 0.1;
+    const fx = sc.fielder ? sc.fielder.x : a.bx - a.nx * FIELDER_BACK, fz = sc.fielder ? sc.fielder.z : a.bz - a.nz * FIELDER_BACK;
     fld.position.set(fx, 0, fz);
     fld.rotation.y = Math.atan2(a.nx - a.dx, a.nz - a.dz);
     applyPose(fld, fielderPose(q));
+    // The glove reaches for the tag point on the runner's lead foot, as far as the arm goes; the ball is in the glove.
+    const tag = tagPoint(a, run);
+    reachTo(fld, 0, this.tagTarget.set(tag[0], tag[1], tag[2]));
     handWorld(fld, 0, this.ball.position);
   }
 
@@ -1006,11 +1014,12 @@ class Director {
     let scale = this.speed;
     const shot = this.shots[0];
     if (shot) {
-      this.shotT += real;
+      const held = SHOT_HOLD !== null && (shot.kind === "contact" || shot.kind === "release" || shot.kind === "slide");
+      this.shotT = held ? SHOT_HOLD! * shot.dur : this.shotT + real;
       const s = shot.scale ?? 1;
       scale *= typeof s === "function" ? s(this.shotT) : s;
       const landed = shot.kind === "ride" && this.shotT > 0.3 && !this.ballFlying;
-      if (this.shotT >= shot.dur || landed) { this.shots.shift(); this.shotT = 0; this.cut = true; }
+      if (!held && (this.shotT >= shot.dur || landed)) { this.shots.shift(); this.shotT = 0; this.cut = true; }
     }
     const dt = real * scale;
     this.tweens = this.tweens.filter((w) => {
