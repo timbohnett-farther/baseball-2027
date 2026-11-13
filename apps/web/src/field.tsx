@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
+import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
@@ -246,11 +247,11 @@ class Dust {
   readonly points: THREE.Points;
   private pos: Float32Array; private col: Float32Array; private vel: Float32Array; private life: Float32Array;
   private next = 0;
-  constructor(private n: number, private ambient: boolean, size: number, tex: THREE.Texture) {
+  constructor(private n: number, private ambient: boolean, size: number, tex: THREE.Texture, private rand: () => number) {
     this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3);
     this.vel = new Float32Array(n * 3); this.life = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      if (ambient) { this.pos.set([(Math.random() - 0.5) * 50, Math.random() * 9, -Math.random() * 45], i * 3); this.vel.set([0.5 + Math.random() * 0.6, 0.05, 0], i * 3); this.life[i] = 1; }
+      if (ambient) { this.pos.set([(rand() - 0.5) * 50, rand() * 9, -rand() * 45], i * 3); this.vel.set([0.5 + rand() * 0.6, 0.05, 0], i * 3); this.life[i] = 1; }
       else this.pos[i * 3 + 1] = -100;
     }
     const geo = new THREE.BufferGeometry();
@@ -264,10 +265,11 @@ class Dust {
   burst(origin: THREE.Vector3, count: number, speed: number) {
     for (let k = 0; k < count; k++) {
       const i = this.next; this.next = (this.next + 1) % this.n;
-      this.pos.set([origin.x + (Math.random() - 0.5) * 0.4, origin.y, origin.z + (Math.random() - 0.5) * 0.4], i * 3);
-      const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random());
-      this.vel.set([Math.cos(a) * s, Math.random() * speed * 0.8, Math.sin(a) * s - speed * 0.2], i * 3);
-      this.life[i] = 0.6 + Math.random() * 0.4;
+      const rand = this.rand;
+      this.pos.set([origin.x + (rand() - 0.5) * 0.4, origin.y, origin.z + (rand() - 0.5) * 0.4], i * 3);
+      const a = rand() * Math.PI * 2, s = speed * (0.3 + rand());
+      this.vel.set([Math.cos(a) * s, rand() * speed * 0.8, Math.sin(a) * s - speed * 0.2], i * 3);
+      this.life[i] = 0.6 + rand() * 0.4;
     }
   }
   update(dt: number) {
@@ -320,12 +322,14 @@ class Director {
   private burstDust: Dust; private drift: Dust;
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
   private shake = 0;
+  private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
   private raf = 0; private last = performance.now();
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
   constructor(private canvas: HTMLCanvasElement, game: PlayedGame, private reduced: boolean) {
     this.colors = { away: new THREE.Color(game.teams.away.color), home: new THREE.Color(game.teams.home.color) };
     this.teams = game.teams;
+    this.rand = cosmeticRng(SHOT_MODE ? SHOT_SEED : game.result.seed);
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -371,8 +375,8 @@ class Director {
     this.onDeck.position.set(5.4, 0, 4.2); this.onDeck.rotation.y = -0.6; this.onDeck.visible = false;
     this.scene.add(this.onDeck);
     const dust = softSprite("rgba(255,255,255,1)");
-    this.burstDust = new Dust(400, false, 0.9, dust);
-    this.drift = new Dust(90, true, 0.55, dust);
+    this.burstDust = new Dust(400, false, 0.9, dust, this.rand);
+    this.drift = new Dust(90, true, 0.55, dust, this.rand);
     this.scene.add(this.burstDust.points, this.drift.points);
 
     this.cam.position.copy(this.homePos());
@@ -450,24 +454,25 @@ class Director {
     }
     const flash = softSprite("rgba(230,240,255,1)");
     for (let i = 0; i < 40; i++) { // camera flashes in the decks
-      const a = (Math.random() - 0.5) * 2.6, r = WALL_R + 6 + Math.random() * 38;
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flash, transparent: true, opacity: 0.15 + Math.random() * 0.35, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      s.position.set(Math.sin(a) * r, 5 + Math.random() * 26, -Math.cos(a) * r);
-      s.scale.setScalar(2 + Math.random() * 4);
+      const rand = this.rand;
+      const a = (rand() - 0.5) * 2.6, r = WALL_R + 6 + rand() * 38;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flash, transparent: true, opacity: 0.15 + rand() * 0.35, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      s.position.set(Math.sin(a) * r, 5 + rand() * 26, -Math.cos(a) * r);
+      s.scale.setScalar(2 + rand() * 4);
       this.scene.add(s);
     }
   }
 
   /** A deck full of people as coloured points along the seating slope. */
   private crowd(rIn: number, rOut: number, yIn: number, yOut: number, n: number) {
-    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color(), rand = this.rand;
     for (let i = 0; i < n; i++) {
-      const a = (Math.random() - 0.5) * 2.75, t = Math.random(), r = rIn + (rOut - rIn) * t;
+      const a = (rand() - 0.5) * 2.75, t = rand(), r = rIn + (rOut - rIn) * t;
       pos.set([Math.sin(a) * r, yIn + (yOut - yIn) * t + 0.5, -Math.cos(a) * r], i * 3);
-      const p = Math.random();
-      if (p < 0.35) c.copy(this.colors.home).offsetHSL(0, -0.1, (Math.random() - 0.5) * 0.2);
-      else if (p < 0.5) c.set("#f4f1ea").multiplyScalar(0.6 + Math.random() * 0.4);
-      else c.setHSL(Math.random(), 0.45, 0.25 + Math.random() * 0.35);
+      const p = rand();
+      if (p < 0.35) c.copy(this.colors.home).offsetHSL(0, -0.1, (rand() - 0.5) * 0.2);
+      else if (p < 0.5) c.set("#f4f1ea").multiplyScalar(0.6 + rand() * 0.4);
+      else c.setHSL(rand(), 0.45, 0.25 + rand() * 0.35);
       col.set([c.r, c.g, c.b], i * 3);
     }
     const geo = new THREE.BufferGeometry();
@@ -883,7 +888,7 @@ class Director {
     this.cam.updateProjectionMatrix();
     const jitter = this.shake > 0.001 ? this.shake : hand;
     if (jitter) {
-      this.cam.position.x += (Math.random() - 0.5) * jitter; this.cam.position.y += (Math.random() - 0.5) * jitter;
+      this.cam.position.x += (this.rand() - 0.5) * jitter; this.cam.position.y += (this.rand() - 0.5) * jitter;
       this.shake *= Math.exp(-dt * 6);
     }
     this.cam.lookAt(this.look);
