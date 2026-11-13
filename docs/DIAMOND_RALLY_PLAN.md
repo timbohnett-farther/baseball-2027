@@ -55,3 +55,27 @@ version 1), and the old behavior must keep producing identical results. Add a go
 
 Each wave: verify `npm run typecheck && npm test && npm run build --workspace @bb/web`, commit, push
 (`env -u GITHUB_TOKEN -u GH_TOKEN git push origin main`), then `scripts/deploy-check.sh`. Tick the wave here with its SHA.
+
+## W30+ Graphics (Kimi docs added 2026-11-13)
+
+Source: `ai-cinematic-graphics-roadmap.md` ("ROAD", wins on conflict) and `graphics-production-plan.md` ("GFX") in the
+same Kimi folder, plus `reference-images/action-01..08.png` (mood only: lighting, framing, materials; never copy an
+athlete or photo). Gameplay rules, touch controls, determinism and accessibility do not change. Visuals never decide
+outcomes; cosmetic changes must not change replay hashes (GFX 17.2).
+
+Two layers (ROAD 2-3): (A) live renderer with PBR materials/lighting and the same stable readable camera, no live
+DOF/blur/cuts; (B) post-dead-ball action shots replaying the recorded play, 0.75-1.2s, skippable after 250ms,
+1-3 per 3-inning match, hard cap 4, never adding RNG or breaking pace budgets.
+
+Working defaults (Tim to confirm or change): oldest device iPhone 12, 60fps with labeled 30fps fallback; slightly
+stylized realism, not full photoreal; stay on web Three.js; action shots default REDUCED with FULL/OFF settings;
+free/royalty-free rigs and motion libraries, no paid mocap.
+
+- [ ] W30 ROAD Work Order 0: audit of the current renderer, asset pipeline, presentation events and measured frame
+      cost. Report only, no feature code.
+- [ ] W31 ROAD WO1-2: quality harness (frame-time capture in the shot harness) + fidelity profiles/LOD tiers.
+- [ ] W32 ROAD WO6-7: action-shot catalog, scorer and director on the existing event log; replay cameras. Extends
+      W28's celebration budgets.
+- [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
+- [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
+- [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
