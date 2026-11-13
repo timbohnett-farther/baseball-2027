@@ -79,3 +79,20 @@ free/royalty-free rigs and motion libraries, no paid mocap.
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
+
+### Vertical-slice plan (Kimi, found 2026-11-13 13:57)
+
+`vertical-slice-integration-plan.md` ("SLICE") + a Kimi-written `CLAUDE.md` in the Kimi folder. SLICE is one
+three-inning CPU match with Comet/Vortex/Wall Reaper, realistic athletes and three action shots (Contact, Mound
+Release, Slide/Tag), 15 work orders with a gate each. Our build is already past most of it:
+SLICE WO0-8 = W18-W25, W28; WO11 = W27; WO12 = W26 (we shipped the full season, not a placeholder).
+Still new: WO9 athlete/stadium fidelity (= W33/W34), WO10 three action shots (= W32), WO13 device/accessibility
+hardening (= W35), WO14 external playtest (Tim + Micah on a real phone).
+
+Where the Kimi CLAUDE.md conflicts with Tim's direct instructions, Tim's stand until he says otherwise:
+continuous waves instead of stop-at-every-gate; commit and push to main; parallel wave agents in worktrees;
+MLB draft rosters instead of two original teams; full season and all 11 abilities stay shipped.
+Adopted from it: completion-report format, no invented evidence (device results stay "missing" until measured on
+a phone), render rate/quality tier must not change replay hashes, no dead UI for deferred content.
+W32 scope is the three SLICE shot families first; Wall Reaper is a flagship there, so its open scope question
+gets settled in W29.
