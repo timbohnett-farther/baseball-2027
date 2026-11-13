@@ -189,3 +189,22 @@ The roadmap's degradation order (crowd, particles, shadows, background LOD, dyna
 ## What was not measured
 
 iPhone or any real GPU frame times; memory and texture residency; shader compile time; cold-load time; whether `renderer.info` counted the shadow pass; the effect of the tier levers beyond pixel ratio 1 and shadows off; what `invariance.test.ts` covers; installed Three.js version.
+
+## W31 results
+
+All numbers: desktop headless Chromium (SwiftShader), phone viewport, not device evidence. Device frame rate stays EVIDENCE_MISSING. Measure with `node apps/web/scripts/shot.mjs --phone --perf [--quality=high|standard|battery]`.
+
+Draw calls (`renderer.info.render.calls`, 60 frames, mid-shot so camera culling varies):
+
+| Moment | Before | After (high) | Standard | Battery |
+|---|---|---|---|---|
+| pitch | 321 | 174 | 172 | 172 |
+| single | 296 | 161 | 158 | 162 |
+| hr | 173 | 106 | 113 | 105 |
+| bigplay | 170 | 107 | 107 | 106 |
+
+Cause of the cut: each figure (about 22 meshes) and the static park are merged by material and shadow flags (`mergeByMaterial`); sprites are untouched. Triangles are unchanged within culling noise. Points: 10890 (high), 5445 (standard), 2723 (battery). Median frame time fell from 33-50 ms to 17-33 ms on this software renderer, but it is noisy and says nothing about a phone GPU. Draw calls do not drop on the battery tier, so `renderer.info` does not appear to count the shadow pass.
+
+Cosmetic randomness now comes from `cosmetic.ts` (seeded; fixed seed in `?shot=`), so two runs of a moment report identical calls, triangles and points. Pixels still vary where the camera is mid-move, because motion follows frame timing. Phone shots with merged meshes match the pre-merge shots for static moments (pitch, swing, k under 0.4% of pixels changed above a small threshold).
+
+Tiers (`quality.ts`, stored as `bb.quality`, picked in the top bar, applied to the next game view): high = pixel ratio 2, 2048 shadows, full crowd and dust; standard = 1.5, 1024, half; battery = 1, no shadows, quarter, 30 fps cap. `quality.test.ts` replays the same game under every tier and checks the hash and saved recipe never see it. The tier values are starting points, not tuned against device evidence.
