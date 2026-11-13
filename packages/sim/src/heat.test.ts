@@ -155,7 +155,7 @@ test("v3: the user's glove earns the credited fielder Heat on contested plays", 
     let g = go();
     for (let guard = 0; guard < 3000 && !g.result; guard++) {
       const a = g.awaiting!;
-      inputs.push(a.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0, y: 0 } } : a.role === "field" ? { kind: "field", timing: 0 } : { kind: "swing", swing: "contact", timing: 0 });
+      inputs.push(a.role === "pitch" ? { kind: "pitch", type: "fastball", aim: { x: 0, y: 0 } } : a.role === "field" ? { kind: "field", timing: 0 } : a.role === "run" ? { kind: "run", action: "advance", send: [] } : { kind: "swing", swing: "contact", timing: 0 });
       g = go();
     }
     const final = g.events[g.events.length - 1].state.heat;

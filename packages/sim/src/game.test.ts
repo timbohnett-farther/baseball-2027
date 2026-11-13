@@ -119,7 +119,7 @@ import { playInteractive } from "./game.ts";
 import type { UserInput } from "./types.ts";
 
 /** Keep answering whatever the game asks until it ends. */
-function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch" | "swing" | "field") => UserInput, autoField = false) {
+function playOut(seed: number, userSide: "home" | "away", answer: (role: "pitch" | "swing" | "field" | "run") => UserInput, autoField = false) {
   const inputs: UserInput[] = [];
   for (let guard = 0; guard < 2000; guard++) {
     const g = playInteractive({ away: avg, home: avg2, seed, userSide, inputs, autoField });
@@ -132,7 +132,8 @@ const pitchIn: UserInput = { kind: "pitch", type: "fastball", aim: { x: 0, y: 0 
 const swingAt = (swing: "contact" | "power" | "take", timing = 0): UserInput => ({ kind: "swing", swing, timing });
 const glove = (timing = 0): UserInput => ({ kind: "field", timing });
 /** Pitch strikes, swing contact, and field with the given tap timing. */
-const everyRole = (fieldTiming: number) => (role: "pitch" | "swing" | "field") => role === "pitch" ? pitchIn : role === "field" ? glove(fieldTiming) : swingAt("contact");
+const everyRole = (fieldTiming: number) => (role: "pitch" | "swing" | "field" | "run") => role === "pitch" ? pitchIn : role === "field" ? glove(fieldTiming) : role === "run" ? holdAll : swingAt("contact");
+const holdAll: UserInput = { kind: "run", action: "advance", send: [] };
 
 test("interactive: asks for a pitch when the user fields, a swing when the user bats", () => {
   const pitching = playInteractive({ away: avg, home: avg2, seed: 7, userSide: "away", inputs: [] });
@@ -208,7 +209,7 @@ test("fielding: a log recorded before fielding existed still replays with autoFi
 test("interactive: perfect timing beats terrible timing", () => {
   const runs = (timing: number) => {
     let hits = 0;
-    for (let seed = 0; seed < 60; seed++) hits += playOut(seed, "away", (role) => (role === "pitch" ? pitchIn : role === "field" ? glove() : swingAt("contact", timing))).g.result!.box.hits.away;
+    for (let seed = 0; seed < 60; seed++) hits += playOut(seed, "away", (role) => (role === "pitch" ? pitchIn : role === "field" ? glove() : role === "run" ? holdAll : swingAt("contact", timing))).g.result!.box.hits.away;
     return hits;
   };
   assert.ok(runs(0) > runs(0.9) * 2, "good timing should produce far more hits");

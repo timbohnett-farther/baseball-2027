@@ -32,7 +32,7 @@ export interface SuperBatGear { id: string; name: string; charges: number; conta
 export type Side = "away" | "home";
 
 /** Which rules a game is played under; stored with each saved game so old ones replay identically. */
-export type RulesVersion = 1 | 2 | 3 | 4 | 5;
+export type RulesVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 export type PitchResult = "ball" | "called_strike" | "swinging_strike" | "foul" | "in_play";
 
@@ -79,6 +79,8 @@ export type GameEvent =
     }
   | { type: "pitching_change"; state: GameState; side: Side; pitcherId: number; text: string }
   | { type: "final"; state: GameState; text: string }
+  /** Rules v6: a baserunning decision played out (steal, pickoff, send or hold on contact, tag-up). `runnerId` is the runner it was about. */
+  | { type: "run"; state: GameState; action: "steal" | "caught" | "pickoff" | "advance" | "hold" | "thrown_out"; side: Side; runnerId: number; text: string }
   /** Rules v4: an ability request was committed, took effect, fizzled, or was refused (and cost nothing). */
   | {
       type: "ability"; state: GameState; phase: "committed" | "triggered" | "expired" | "rejected";
@@ -144,7 +146,7 @@ export type PitchType = "fastball" | "slider" | "change" | "curve";
 /** Position over the plate: x, y in -1..1 is inside the strike zone, beyond that is a ball. */
 export interface Aim { x: number; y: number }
 
-export type AbilityId = "BAT_COMET" | "BAT_LASER" | "BAT_GAP_MASTER" | "BAT_SECOND_SWING" | "PITCH_MIRAGE" | "PITCH_VORTEX" | "FIELD_WALL_REAPER" | "FIELD_ACROBAT" | "FIELD_CANNON_ARM";
+export type AbilityId = "BAT_COMET" | "BAT_LASER" | "BAT_GAP_MASTER" | "BAT_SECOND_SWING" | "PITCH_MIRAGE" | "PITCH_VORTEX" | "FIELD_WALL_REAPER" | "FIELD_ACROBAT" | "FIELD_CANNON_ARM" | "RUN_AFTERBURNER";
 export type AbilityDirection = "left" | "right";
 /** What the user committed with a pitch or swing (arming and cancelling happen client-side and are never logged). Rules v4 only. */
 export interface AbilityRequest { id: AbilityId; direction?: AbilityDirection }
@@ -164,13 +166,20 @@ export type UserInput =
    * A close ball in play on the user's defense: the glove tap, timed the same way.
    * Rules v5: `throwTo` is the base chosen when a force play is on (absent = the recommended throw), and `ability` rides on the play like a swing's.
    */
-  | { kind: "field"; timing: number; throwTo?: Base; ability?: AbilityRequest };
+  | { kind: "field"; timing: number; throwTo?: Base; ability?: AbilityRequest }
+  /**
+   * Rules v6 baserunning. `steal` and `pickoff` are optional extras logged just before the pitch they happen on;
+   * `advance` answers the awaiting "run" role (which runners to send on a hit or tag up on a fly out; the rest hold).
+   */
+  | { kind: "run"; action: "steal"; from: "first" | "second"; ability?: AbilityRequest }
+  | { kind: "run"; action: "pickoff"; at: "first" | "second" | "third" }
+  | { kind: "run"; action: "advance"; send: ("first" | "second" | "third")[]; ability?: AbilityRequest };
 
 export type Base = "first" | "second" | "third" | "home";
 
 /** What the game needs from the user next. */
 export interface Awaiting {
-  role: "pitch" | "swing" | "field";
+  role: "pitch" | "swing" | "field" | "run";
   batterId: number;
   pitcherId: number;
   state: GameState;
@@ -182,6 +191,23 @@ export interface Awaiting {
   super: { bat: string; charges: number; clutch: boolean } | null;
   /** Rules v4: the user's abilities for this role (batter's when swinging, pitcher's when pitching, the fielder's on a close ball in v5). Empty otherwise. */
   abilities: AbilityStatus[];
+  /** Rules v6: the baserunning options at this moment. Absent before v6. */
+  run?: RunOptions;
+}
+
+/** A runner the user can act on, with the Afterburner chip as it stands for that runner (null when the runner has no Heat to spend or v6 is off). */
+/** `chance` is the base success odds; `boost` the odds with Afterburner (same when it does not apply). */
+export interface RunnerOption { base: "first" | "second" | "third"; runnerId: number; chance: number; boost: number; afterburner: AbilityStatus | null }
+
+/**
+ * Rules v6. While batting: `steal` lists runners who can go on the next pitch. While pitching: `pickoff`
+ * lists bases to throw to (`pickoffsLeft` more this batter). On the "run" role: `advance` is the send/hold choice.
+ */
+export interface RunOptions {
+  steal: RunnerOption[];
+  pickoff: RunnerOption[];
+  pickoffsLeft: number;
+  advance: { kind: "hit" | "fly"; outcome: Outcome; runners: RunnerOption[] } | null;
 }
 
 export interface InteractiveGame {

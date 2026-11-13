@@ -100,7 +100,7 @@ test("rules 4: an interactive input log replays to the same game", () => {
 
 test("rules 4: an interactive log that spends abilities replays to the same game", () => {
   const { inputs, result } = scriptedLog(3, 4, true, 100);
-  assert.ok(inputs.some((i) => i.kind !== "field" && i.ability));
+  assert.ok(inputs.some((i) => "ability" in i && i.ability));
   assert.equal(hash(result), "76368dd13ed556b4");
 });
 
@@ -118,7 +118,7 @@ test("rules 5: an interactive input log replays to the same game", () => {
 
 test("rules 5: an interactive log that spends abilities replays to the same game", () => {
   const { inputs, result } = scriptedLog(3, 5, true, 100);
-  assert.ok(inputs.some((i) => i.kind !== "field" && i.ability));
+  assert.ok(inputs.some((i) => "ability" in i && i.ability));
   assert.equal(inputs.length, 65);
   assert.equal(hash(result), "76368dd13ed556b4");
 });

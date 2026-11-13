@@ -9,7 +9,7 @@ import type { AbilityDirection, AbilityId, AbilityRequest, AbilityStatus, Disabl
  *    ability plays out exactly as it did under rules v3.
  */
 
-export type AbilityRole = "bat" | "pitch" | "field";
+export type AbilityRole = "bat" | "pitch" | "field" | "run";
 export type SwingKind = "contact" | "power";
 
 /**
@@ -25,12 +25,14 @@ export interface Effects {
   dHr: number; dHit: number; dGround: number; dDouble: number; dFly: number; popupBelowQ: number;
   /** fielding (rules v5): reach shifts a contested ball toward the out, in fractions of the contest band; fieldWindow widens the glove timing window; dDp / wildThrow change the double-play throw. */
   reach: number; fieldWindow: number; dDp: number; wildThrow: number;
+  /** baserunning (rules v6): added to the runner's own chance to steal or to beat the throw, before the final cap in game.ts. */
+  run: number;
 }
 
 export const NEUTRAL: Effects = {
   missScale: 1, locShift: 0, whiffAdd: 0, windowScale: 1, rescueQ: 0,
   dHr: 0, dHit: 0, dGround: 0, dDouble: 0, dFly: 0, popupBelowQ: 0,
-  reach: 0, fieldWindow: 1, dDp: 0, wildThrow: 0,
+  reach: 0, fieldWindow: 1, dDp: 0, wildThrow: 0, run: 0,
 };
 
 /** PUP 5.1 step 7, global caps: however abilities stack, no field leaves its range. */
@@ -38,7 +40,7 @@ export const BOUNDS: Record<keyof Effects, [number, number]> = {
   missScale: [1, 1.5], locShift: [-0.2, 0.2], whiffAdd: [0, 0.06],
   windowScale: [0.8, 1], rescueQ: [0, 0.3],
   dHr: [-0.03, 0.05], dHit: [-0.08, 0.08], dGround: [-0.1, 0.05], dDouble: [0, 0.1], dFly: [-0.12, 0.05], popupBelowQ: [0, 0.5],
-  reach: [0, 0.6], fieldWindow: [1, 1.4], dDp: [0, 0.2], wildThrow: [0, 0.1],
+  reach: [0, 0.6], fieldWindow: [1, 1.4], dDp: [0, 0.2], wildThrow: [0, 0.1], run: [0, 0.1],
 };
 
 export interface AbilityDef {
@@ -118,6 +120,14 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     // PRD: throw speed x1.30 and accuracy window x0.65. The speed is +15% on the double-play chance; the tighter window is an 8% chance the throw is wild and the double play is lost.
     effects: () => ({ dDp: 0.15, wildThrow: 0.08 }),
   },
+  RUN_AFTERBURNER: {
+    id: "RUN_AFTERBURNER", name: "Afterburner", role: "run", cost: 40, swings: [], needsDirection: false, cooldownPitches: 0,
+    summary: "A burst of speed on a steal or a send: a better chance to beat the throw. Never a sure thing.",
+    // PRD: 1.10 s burst, accel x1.60, top speed x1.12, movement only, never assigns a safe result, no force/tag ignored, no pickoff prevented.
+    // A runner who is 12% faster for a second gets to the bag about a step sooner, which is +10 points on the runner's own odds (BOUNDS.run);
+    // game.ts caps the final chance at 92%, so a throw can always still win.
+    effects: () => ({ run: 0.1 }),
+  },
 };
 
 /**
@@ -167,7 +177,7 @@ const heatLeft = (ledger: Ledger, actor: Actor) => actor.heat - (ledger.armed &&
 export function check(catalog: Record<string, AbilityDef>, ledger: Ledger, actor: Actor, req: AbilityRequest, swing?: SwingKind | "take"): Verdict {
   const def = catalog[req.id];
   if (!def) return no("WRONG_CONTEXT", "That ability isn't available.");
-  if (def.role !== actor.role) return no("INELIGIBLE_ACTOR", def.role === "bat" ? "Only the batter can use this." : "Only the pitcher can use this.");
+  if (def.role !== actor.role) return no("INELIGIBLE_ACTOR", def.role === "bat" ? "Only the batter can use this." : def.role === "pitch" ? "Only the pitcher can use this." : def.role === "run" ? "Only a runner can use this." : "Only the fielder can use this.");
   if (ledger.armed && ledger.armed.request.id !== req.id) return no("ALREADY_USED", "Another ability is already armed.");
   const until = ledger.cooldownUntil[`${actor.id}:${req.id}`] ?? 0;
   if (ledger.pitch < until) return no("COOLDOWN", `Recharging for ${until - ledger.pitch} more pitch${until - ledger.pitch === 1 ? "" : "es"}.`);

@@ -7,10 +7,10 @@
 
 import { createRng, type Rng } from "./rng.ts";
 import { call, describe } from "./text.ts";
-import { ABILITIES, arm as armAbility, cancel, combine, commit, expire, fieldContextOk, newLedger, statuses, type AbilityDef, type Effects, type FieldContext, type Ledger } from "./ability.ts";
+import { ABILITIES, BOUNDS, arm as armAbility, cancel, combine, commit, expire, fieldContextOk, newLedger, statuses, type AbilityDef, type Effects, type FieldContext, type Ledger } from "./ability.ts";
 import type {
   AbilityRequest, Aim, Awaiting, Base, Bases, BattingLine, BoxScore, DisabledReason, GameEvent, GameResult, GameState, InteractiveGame, Outcome,
-  PitchingLine, PitchResult, PitchType, RulesVersion, Side, SimPlayer, SimTeam, Tier, UserInput,
+  PitchingLine, PitchResult, PitchType, RulesVersion, RunnerOption, RunOptions, Side, SimPlayer, SimTeam, Tier, UserInput,
 } from "./types.ts";
 
 export const DEFAULT_INNINGS = 3;
@@ -26,8 +26,11 @@ const MAX_INNINGS = 9;
  *  4 = PUP abilities: the user can spend Heat on a bat or pitch ability (see ability.ts). A game that never uses one plays exactly as v3.
  *  5 = ARC 7 fielding: a force-play throw choice on close grounders, and the fielding abilities (Wall Reaper, Acrobat, Cannon Arm).
  *      A v5 game whose fielding inputs carry neither a throw nor an ability plays exactly as v4.
+ *  6 = ARC 8 baserunning: the user's runners can steal (batting) and the user's pitcher can throw over (pitching), and the user
+ *      chooses who to send on a hit or tag up on a fly out. Afterburner rides on a steal or a send. Every extra choice is optional in
+ *      a replay (autoField), so a v6 log with no run inputs plays exactly as v5. The computer never steals.
  */
-export const CURRENT_RULES: RulesVersion = 5;
+export const CURRENT_RULES: RulesVersion = 6;
 /** Quick Match lengths; season and playoff games are always DEFAULT_INNINGS. */
 export const INNINGS_OPTIONS = [1, 3, 5] as const;
 const RUN_AHEAD = 10;
@@ -74,6 +77,8 @@ interface Ctx {
   assist: Side | null;
   /** Rules v4: the user's Heat reservation and cooldowns, and the ability committed on the pitch in progress. */
   ledger: Ledger;
+  /** Rules v6: pickoff throws made to the current batter. */
+  pickoffs: number;
   active?: { def: AbilityDef; request: AbilityRequest; playerId: number; side: Side; fx: Effects; triggered: boolean };
 }
 
@@ -209,7 +214,7 @@ function superInfo(c: Ctx, role: Awaiting["role"]): Awaiting["super"] {
   return { bat: bat.name, charges: c.superLeft, clutch: isClutch(c.state, c.innings) };
 }
 
-function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null): UserInput {
+function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: SimPlayer, incoming: Awaiting["incoming"], ball: Awaiting["ball"] = null, choice: AdvanceChoice | null = null): UserInput {
   const u = c.user!;
   const next = u.inputs[u.cursor];
   if (!next) {
@@ -220,7 +225,7 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
       const ctx: FieldContext = { kind: ball.kind, doublePlay: !!ball.throws };
       abilities = abilities.map((a) => fieldContextOk(a.id, ctx) ? a : { ...a, available: false, reason: "WRONG_CONTEXT", message: "Not on this play." });
     }
-    throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities });
+    throw new NeedInput({ role, batterId: batter.id, pitcherId: pitcher.id, state: snapshot(c.state), incoming, ball, super: superInfo(c, role), abilities, ...(c.rules >= 6 ? { run: runOptions(c, role, pitcher, choice) } : {}) });
   }
   if (next.kind !== role) throw new Error(`input ${u.cursor}: expected ${role}, got ${next.kind}`);
   u.cursor++;
@@ -232,7 +237,7 @@ function takeInput(c: Ctx, role: Awaiting["role"], batter: SimPlayer, pitcher: S
  * (wrong swing, not enough Heat, ...) costs nothing and just logs why; the pitch carries on without it.
  * Returns the bounded effects to apply, or null.
  */
-function useAbility(c: Ctx, role: "bat" | "pitch" | "field", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take", field?: FieldContext): Effects | null {
+function useAbility(c: Ctx, role: "bat" | "pitch" | "field" | "run", who: SimPlayer, side: Side, req: AbilityRequest | undefined, swing?: "contact" | "power" | "take", field?: FieldContext): Effects | null {
   if (c.rules < 4 || !req) return null;
   const actor = { id: who.id, role, heat: heatOf(c, who.id) };
   const name = ABILITIES[req.id]?.name ?? "Ability";
@@ -250,7 +255,7 @@ function useAbility(c: Ctx, role: "bat" | "pitch" | "field", who: SimPlayer, sid
   const dir = req.direction ? ` ${req.direction}` : "";
   c.state.heat[who.id] = done.heat;
   const fx = combine([done.def.effects(req.direction)]);
-  c.active = { def: done.def, request: req, playerId: who.id, side, fx, triggered: role === "pitch" };
+  c.active = { def: done.def, request: req, playerId: who.id, side, fx, triggered: role === "pitch" || role === "run" };
   note("committed", `${who.name} uses ${name}${dir}! ${done.def.cost} Heat spent.`);
   return fx;
 }
@@ -259,7 +264,7 @@ function useAbility(c: Ctx, role: "bat" | "pitch" | "field", who: SimPlayer, sid
 function settleAbility(c: Ctx, inPlay: boolean) {
   const a = c.active;
   c.active = undefined;
-  if (a?.def.role === "field") cancel(c.ledger); else expire(c.ledger); // a fielding play isn't a pitch: cooldowns don't tick
+  if (a?.def.role === "field" || a?.def.role === "run") cancel(c.ledger); else expire(c.ledger); // a fielding or running play isn't a pitch: cooldowns don't tick
   if (!a) return;
   const hit = a.triggered || (inPlay && a.def.role === "bat" && a.def.id !== "BAT_SECOND_SWING");
   const name = a.def.name;
@@ -447,6 +452,169 @@ function takeFieldInput(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, ball: Non
   return { q: quality(window * (fx?.fieldWindow ?? 1)), q0: quality(window), ...(c.rules >= 5 && inp.throwTo ? { throwTo: inp.throwTo } : {}), fx };
 }
 
+// --- Baserunning (rules v6) ------------------------------------------------------------
+
+/** However the odds stack, a throw can always win: no baserunning chance goes above this. */
+const RUN_CAP = 0.92;
+const BOUND_RUN = BOUNDS.run[1];
+const PICKOFF_LIMIT = 2;
+type RunBase = "first" | "second" | "third";
+type AdvanceChoice = { kind: "hit" | "fly"; outcome: Outcome; bases: RunBase[] };
+
+const speedOf = (c: Ctx, id: number) => z(findPlayer(c, id).batting?.speed);
+
+/** A steal of second or third: the runner's legs against the catcher's arm and the pitcher's delivery. */
+function stealChance(c: Ctx, id: number, from: "first" | "second", pitcher: SimPlayer, fSide: Side): number {
+  const catcher = c.teams[fSide].lineup.find((p) => p.position === "C");
+  return clamp(0.7 + 0.12 * speedOf(c, id) - 0.1 * z(catcher?.batting?.fielding) - 0.03 * z(pitcher.pitching?.control) - (from === "second" ? 0.06 : 0), 0.3, 0.9);
+}
+
+const pickoffChance = (c: Ctx, id: number, pitcher: SimPlayer) => clamp(0.06 - 0.03 * speedOf(c, id) + 0.02 * z(pitcher.pitching?.control), 0.01, 0.15);
+
+/** Chance a sent runner beats the throw. Fixed per situation so the UI can show it; sending is a gamble a hold never takes. */
+function sendChance(c: Ctx, id: number, kind: "hit" | "fly", outcome: Outcome, from: RunBase): number {
+  const s = speedOf(c, id);
+  if (kind === "fly") return from === "third" ? clamp(0.78 + 0.1 * s, 0.5, 0.9) : clamp(0.72 + 0.1 * s, 0.45, 0.9);
+  if (outcome === "double") return clamp(0.5 + 0.1 * s, 0.25, 0.85);
+  return from === "second" ? clamp(0.6 + 0.1 * s, 0.35, 0.9) : clamp(0.4 + 0.08 * s, 0.2, 0.8);
+}
+
+/** Which runners the user has a say over on this play, or null. Runners not listed move as the engine rolls them. */
+function advanceChoice(s: GameState, outcome: Outcome): AdvanceChoice | null {
+  const b = s.bases;
+  const bases = ((): RunBase[] => {
+    if (outcome === "single") return (["second", "first"] as const).filter((k) => b[k] !== null);
+    if (outcome === "double") return b.first !== null ? ["first"] : [];
+    if (outcome === "flyout" && s.outs < 3) return (["third", "second"] as const).filter((k) => b[k] !== null);
+    return [];
+  })();
+  return bases.length ? { kind: outcome === "flyout" ? "fly" : "hit", outcome, bases } : null;
+}
+
+const afterburnerFor = (c: Ctx, id: number) =>
+  statuses(ABILITIES, c.ledger, { id, role: "run", heat: heatOf(c, id) })[0] ?? null;
+
+/** What the user can do right now, for the awaiting. Pure: no rng, no events. */
+function runOptions(c: Ctx, role: Awaiting["role"], pitcher: SimPlayer, choice: AdvanceChoice | null): RunOptions {
+  const b = c.state.bases, bSide = battingSide(c), fSide = fieldingSide(c);
+  const opt = (base: RunBase, chance: number, boosted = true): RunnerOption => {
+    const id = b[base]!;
+    return { base, runnerId: id, chance, boost: boosted ? Math.min(RUN_CAP, chance + BOUND_RUN) : chance, afterburner: boosted ? afterburnerFor(c, id) : null };
+  };
+  const batting = c.user!.side === bSide;
+  const steal: RunnerOption[] = [];
+  if (role !== "run" && batting) {
+    if (b.first !== null && b.second === null) steal.push(opt("first", stealChance(c, b.first, "first", pitcher, fSide)));
+    if (b.second !== null && b.third === null) steal.push(opt("second", stealChance(c, b.second, "second", pitcher, fSide)));
+  }
+  const left = Math.max(0, PICKOFF_LIMIT - c.pickoffs);
+  const pickoff: RunnerOption[] = [];
+  if (role !== "run" && !batting && left > 0) for (const k of ["first", "second", "third"] as const) if (b[k] !== null) pickoff.push(opt(k, pickoffChance(c, b[k]!, pitcher), false));
+  const advance = choice ? { kind: choice.kind, outcome: choice.outcome, runners: choice.bases.map((k) => opt(k, sendChance(c, b[k]!, choice.kind, choice.outcome, k))) } : null;
+  return { steal, pickoff, pickoffsLeft: batting ? 0 : left, advance };
+}
+
+/**
+ * Steals and pickoff throws the user logged just before a pitch. They are optional: with none in the log
+ * nothing is drawn, so the pitch plays exactly as it did without them. A request that can't happen is skipped.
+ */
+function runExtras(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine: PitchingLine) {
+  const u = c.user!;
+  for (;;) {
+    const inp = u.inputs[u.cursor];
+    if (inp?.kind !== "run" || inp.action === "advance") return;
+    u.cursor++;
+    if (c.state.outs >= 3) continue; // the half is over: late requests are dropped
+    const b = c.state.bases;
+    if (inp.action === "steal") {
+      const to = inp.from === "first" ? "second" : "third", id = b[inp.from];
+      if (u.side !== bSide || id === null || b[to] !== null) continue;
+      const runner = findPlayer(c, id);
+      const fx = useAbility(c, "run", runner, bSide, inp.ability);
+      const safe = c.rng.next() < Math.min(RUN_CAP, stealChance(c, id, inp.from, pitcher, fSide) + (fx?.run ?? 0));
+      if (c.active) settleAbility(c, false);
+      b[inp.from] = null;
+      if (safe) b[to] = id; else { c.state.outs++; pLine.outs++; }
+      award(c, bSide, id, safe ? 15 : -12);
+      c.events.push({ type: "run", state: snapshot(c.state), action: safe ? "steal" : "caught", side: bSide, runnerId: id,
+        text: safe ? `${runner.name} steals ${to}!` : `${runner.name} is caught stealing ${to}.` });
+    } else {
+      const id = b[inp.at];
+      if (u.side !== fSide || id === null || c.pickoffs >= PICKOFF_LIMIT) continue;
+      c.pickoffs++;
+      const runner = findPlayer(c, id);
+      const out = c.rng.next() < pickoffChance(c, id, pitcher);
+      if (out) { b[inp.at] = null; c.state.outs++; pLine.outs++; award(c, bSide, id, -12); }
+      c.events.push({ type: "run", state: snapshot(c.state), action: out ? "pickoff" : "hold", side: bSide, runnerId: id,
+        text: out ? `${pitcher.name} picks ${runner.name} off ${inp.at}!` : `${pitcher.name} throws over to ${inp.at}. ${runner.name} is back in time.` });
+    }
+  }
+}
+
+/** The user's send/hold answer for this play, and the Afterburner that rode on it. */
+interface RunPlan { send: Set<RunBase>; lead: RunBase | null; fx: Effects | null; out: number; notes: string[] }
+
+/** Ask for the send/hold choice. Null when the user has no say, or a replay carries no answer (the play is rolled as before). */
+function takeRunPlan(c: Ctx, bSide: Side, batter: SimPlayer, pitcher: SimPlayer, outcome: Outcome): RunPlan | null {
+  const choice = c.rules >= 6 && c.user!.side === bSide ? advanceChoice(c.state, outcome) : null;
+  if (!choice) return null;
+  const u = c.user!;
+  if (u.autoField && u.inputs[u.cursor]?.kind !== "run") return null;
+  const inp = takeInput(c, "run", batter, pitcher, null, null, choice) as Extract<UserInput, { kind: "run" }>;
+  if (inp.action !== "advance") throw new Error(`input ${u.cursor - 1}: expected advance, got ${inp.action}`);
+  const send = new Set(inp.send.filter((k) => choice.bases.includes(k)));
+  // The most advanced runner sent carries the Afterburner; a request with nobody sent costs nothing.
+  const lead = (["third", "second", "first"] as const).find((k) => send.has(k));
+  const fx = lead ? useAbility(c, "run", findPlayer(c, c.state.bases[lead]!), bSide, inp.ability) : null;
+  return { send, lead: lead ?? null, fx, out: 0, notes: [] };
+}
+
+/** One sent runner against the throw. */
+function sendRoll(c: Ctx, plan: RunPlan, kind: "hit" | "fly", outcome: Outcome, from: RunBase): boolean {
+  const id = c.state.bases[from]!;
+  const safe = c.rng.next() < Math.min(RUN_CAP, sendChance(c, id, kind, outcome, from) + (from === plan.lead ? plan.fx?.run ?? 0 : 0));
+  if (!safe) { plan.out++; plan.notes.push(`${findPlayer(c, id).name} is thrown out.`); }
+  return safe;
+}
+
+/** A single or double with the user's send/hold calls. The runner on third and the batter move as they always do. */
+function advanceSent(c: Ctx, plan: RunPlan, outcome: Outcome, batterId: number): number[] {
+  const b = c.state.bases, scored: number[] = [];
+  const next: Bases = { first: null, second: null, third: null };
+  if (outcome === "single") {
+    if (b.third !== null) scored.push(b.third);
+    if (b.second !== null) {
+      if (!plan.send.has("second")) next.third = b.second;
+      else if (sendRoll(c, plan, "hit", outcome, "second")) scored.push(b.second);
+    }
+    if (b.first !== null) {
+      if (plan.send.has("first") && next.third === null) { if (sendRoll(c, plan, "hit", outcome, "first")) next.third = b.first; }
+      else next.second = b.first;
+    }
+    next.first = batterId;
+  } else {
+    if (b.third !== null) scored.push(b.third);
+    if (b.second !== null) scored.push(b.second);
+    if (b.first !== null) {
+      if (!plan.send.has("first")) next.third = b.first;
+      else if (sendRoll(c, plan, "hit", outcome, "first")) scored.push(b.first);
+    }
+    next.second = batterId;
+  }
+  c.state.bases = next;
+  return scored;
+}
+
+/** A fly out with the user's tag-up call: runners sent go on the catch, the rest hold. Returns who scored. */
+function tagUp(c: Ctx, plan: RunPlan): number[] {
+  const b = c.state.bases, scored: number[] = [];
+  const next: Bases = { ...b };
+  if (b.third !== null && plan.send.has("third")) { next.third = null; if (sendRoll(c, plan, "fly", "flyout", "third")) scored.push(b.third); }
+  if (b.second !== null && plan.send.has("second") && next.third === null) { next.second = null; if (sendRoll(c, plan, "fly", "flyout", "second")) next.third = b.second; }
+  c.state.bases = next;
+  return scored;
+}
+
 // --- Running the bases -----------------------------------------------------------------
 
 /** Move runners for an outcome. Returns the ids of players who scored. */
@@ -537,6 +705,10 @@ function plateAppearance(c: Ctx) {
   let outcome: Outcome | null = null;
   let lastMph = 0, contactQ: number | undefined;
   while (!outcome) {
+    if (c.user && c.rules >= 6) {
+      runExtras(c, bSide, fSide, pitcher, pLine);
+      if (state.outs >= 3) { c.lineupIdx[bSide]--; return; } // caught stealing for the last out: the batter leads off next time
+    }
     c.assist = c.rules >= 3 ? rallyAssist(state) : null;
     const pitch = c.user ? throwUserPitch(c, batter, pitcher) : throwPitch(c, batter, pitcher);
     c.pitchCount.set(pitcher.id, (c.pitchCount.get(pitcher.id) ?? 0) + 1);
@@ -563,10 +735,22 @@ function plateAppearance(c: Ctx) {
   // Outs first (so runner logic knows how many are left), then sac-fly check, then runners.
   if (["strikeout", "groundout", "flyout", "lineout"].includes(outcome)) state.outs++;
   if (outcome === "double_play") state.outs = Math.min(3, state.outs + 2);
-  if (outcome === "flyout" && state.outs < 3 && state.bases.third !== null && rng.next() < clamp(0.7 + 0.1 * z(findPlayer(c, state.bases.third).batting?.speed), 0.4, 0.9)) {
-    outcome = "sac_fly";
+  const plan = c.user && c.rules >= 6 ? takeRunPlan(c, bSide, batter, pitcher, outcome) : null;
+  let scored: number[];
+  if (plan && outcome === "flyout") {
+    scored = tagUp(c, plan);
+    if (scored.length) outcome = "sac_fly";
+  } else if (plan) scored = advanceSent(c, plan, outcome, batter.id);
+  else {
+    if (outcome === "flyout" && state.outs < 3 && state.bases.third !== null && rng.next() < clamp(0.7 + 0.1 * z(findPlayer(c, state.bases.third).batting?.speed), 0.4, 0.9)) {
+      outcome = "sac_fly";
+    }
+    scored = advance(c, outcome, batter.id);
   }
-  const scored = advance(c, outcome, batter.id);
+  if (plan) {
+    if (c.active) settleAbility(c, true);
+    state.outs = Math.min(3, state.outs + plan.out);
+  }
   const runs = scored.length;
   state.score[bSide] += runs;
 
@@ -582,7 +766,7 @@ function plateAppearance(c: Ctx) {
   for (const id of scored) bat(c, bSide, findPlayer(c, id)).r++;
   pLine.r += runs;
   const outsMade = ["strikeout", "groundout", "flyout", "lineout", "sac_fly"].includes(outcome) ? 1 : outcome === "double_play" ? 2 : 0;
-  pLine.outs += outsMade;
+  pLine.outs += outsMade + (plan?.out ?? 0);
 
   // Heat and Rally. Rules v3 is resources only; before that, once a team is On Fire its meter stops draining until the half ends.
   let caughtFire = false;
@@ -627,6 +811,7 @@ function plateAppearance(c: Ctx) {
 
   // The user's glove decided it: a stolen hit is a highlight, a booted one gets a note.
   let text = describe(rng, outcome, batter.name, count, runs);
+  if (plan?.notes.length) text += ` ${plan.notes.join(" ")}`;
   const fielded = c.lastField; c.lastField = undefined;
   if (fielded?.robbed && tier !== 1) { tier = 2; card = "ROBBED"; stat = findPlayer(c, fielded.fielderId).name; line = call(rng, "webGem"); }
   else if (fielded?.booted) text += ` ${call(rng, "booted")}`;
@@ -703,6 +888,7 @@ function run(input: GameInput, user?: Ctx["user"]): { events: GameEvent[]; await
     superUsed: false,
     assist: null,
     ledger: newLedger(),
+    pickoffs: 0,
   };
   const s = c.state;
 
