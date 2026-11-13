@@ -1139,7 +1139,7 @@ export function FieldView({ game, index, speed, plan = null, director, children 
     const d = dirRef.current;
     if (!d) return;
     // The director owns each shot's lifecycle: finish the last one, begin this one (once; a skipped or finished shot never replays).
-    if (director && begunRef.current >= 0 && begunRef.current !== index && director.active(begunRef.current)) director.finish(begunRef.current);
+    if (director && begunRef.current >= 0 && begunRef.current !== index && director.active(begunRef.current)) director.finish(begunRef.current, performance.now());
     let p = plan;
     if (director && plan) {
       if (begunRef.current === index) p = plan; // effect re-run (strict mode) for the shot already begun

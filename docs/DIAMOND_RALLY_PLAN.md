@@ -86,7 +86,7 @@ free/royalty-free rigs and motion libraries, no paid mocap.
   Open: the ball still reads head-sized in close shots (live BALL_RADIUS 0.15 m, kept unscaled by rule) — owner decision;
   fielder and runner overlap in the late slide frame; an extra figure stands behind the batter at contact (cause unknown);
   the sim has no pitcher throwing hand (R is a presentation default).
-- [ ] W32e shot telemetry (Kimi phase 03): record shot triggers/skips/durations, no frequency or pacing retune.
+- [x] W32e shot telemetry (Kimi phase 03): record shot triggers/skips/durations, no frequency or pacing retune.
 - [ ] W33 ROAD WO5, 8: live PBR materials/lighting; cinematic lighting, VFX and post for action shots only.
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.

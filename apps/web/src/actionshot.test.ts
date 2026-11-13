@@ -264,13 +264,101 @@ test("shots per simulated 3-inning match stay within the cap", () => {
   const setup = tutorialSetup();
   for (const [mode, cap] of [["full", SHOT_CAP], ["reduced", 3]] as const) {
     const counts: number[] = [];
+    const reasons: Record<string, number> = {};
     for (let seed = 1; seed <= 30; seed++) {
       const r = simulateGame({ ...setup.teams, seed, innings: 3, rules: setup.rules, difficulty: setup.difficulty, facts: true });
       const d = director(mode);
       r.events.forEach((_, i) => d.consider(r.events, i));
       counts.push(d.shots);
+      const t = d.telemetry();
+      assert.equal(t.totals.planned, d.shots);
+      for (const [k, v] of Object.entries(t.totals.byReason)) reasons[k] = (reasons[k] ?? 0) + v;
+      reasons.routine = (reasons.routine ?? 0) + t.routine;
     }
     assert.ok(Math.max(...counts) <= cap, `${mode} max ${Math.max(...counts)}`);
+    if (process.env.SHOT_STATS) console.log(mode, "seeds 1-30 suppression totals", JSON.stringify(reasons));
     if (process.env.SHOT_STATS) console.log(mode, "shots/match", counts.join(","), "mean", (counts.reduce((a, b) => a + b, 0) / counts.length).toFixed(2));
   }
+});
+
+// W32e telemetry: measurement only, so every test also checks the decisions are the ones the director always made.
+test("telemetry: a shown shot records family, planned and shown ms; routine plays are counted, not listed", () => {
+  const ev = [half(), pitch(), play("single"), pitch(), homer()];
+  const d = director();
+  ev.forEach((_, i) => d.consider(ev, i));
+  d.consider(ev, 4); // idempotent: asking again does not count again
+  let t = d.telemetry();
+  assert.equal(t.routine, 1);
+  assert.deepEqual(t.totals, { candidates: 1, planned: 1, shown: 0, suppressed: 0, skipped: 0, finished: 0, byReason: {} });
+  assert.equal(t.shots[0].index, 4);
+  assert.equal(t.shots[0].family, "CONTACT");
+  assert.equal(t.shots[0].plannedMs, 1200);
+  d.begin(4, 1000);
+  d.begin(4, 1100); // a second begin does not restart or recount
+  d.finish(4, 2200);
+  t = d.telemetry();
+  assert.equal(t.totals.shown, 1);
+  assert.equal(t.totals.finished, 1);
+  assert.deepEqual([t.shots[0].status, t.shots[0].end, t.shots[0].shownMs], ["shown", "finished", 1200]);
+});
+
+test("telemetry: a skip records the ms at which the player skipped; an early tap is not a skip", () => {
+  const ev = [half(), pitch(), homer()];
+  const d = director();
+  d.consider(ev, 2); d.begin(2, 500);
+  assert.equal(d.skip(2, 500 + SHOT_SKIP_MS - 1), false);
+  assert.equal(d.telemetry().totals.skipped, 0);
+  assert.equal(d.skip(2, 500 + 400), true);
+  d.finish(2, 5000); // a finish after a skip changes nothing
+  const t = d.telemetry();
+  assert.deepEqual([t.totals.skipped, t.totals.finished, t.shots[0].skippedAtMs, t.shots[0].shownMs], [1, 0, 400, 400]);
+});
+
+test("telemetry: suppression reasons (off, cap, cooldown, no pitch facts, cannot frame, same sequence, in motion)", () => {
+  const ev = [half(), pitch(), homer()];
+  const off = director("off"); off.consider(ev, 2);
+  assert.equal(off.telemetry().shots[0].reason, "off");
+  assert.equal(off.telemetry().totals.planned, 0);
+
+  const cf = director("full", false, { canFrame: () => false }); cf.consider(ev, 2);
+  assert.deepEqual(cf.telemetry().totals.byReason, { cannot_frame: 1 });
+
+  const noPitch = [half(), { ...pitch(), shot: undefined } as GameEvent, play("strikeout", { tier: 3 }, { outs: 3, inning: 3, half: "bottom", score: { away: 2, home: 0 } })];
+  const np = director(); np.consider(noPitch, 2);
+  assert.deepEqual(np.telemetry().totals.byReason, { no_pitch_facts: 1 });
+
+  const cool = [half(), pitch(), homer({ tier: 2 }), pitch(), homer({ tier: 2 })];
+  const c = director(); c.consider(cool, 4);
+  assert.deepEqual(c.telemetry().totals.byReason, { cooldown: 1 });
+  assert.equal(c.telemetry().totals.planned, 1);
+
+  const seq = [half(), pitch(), run("steal", { play: "steal", base: "second", safe: false, close: 0.95 }), run("caught", { play: "steal", base: "third", safe: false, close: 0.95 })];
+  const s = director(); s.consider(seq, 3);
+  assert.deepEqual(s.telemetry().totals.byReason, { same_sequence: 1 });
+
+  const moving = [half(), pitch(), homer(), run("advance")];
+  const m = director(); m.consider(moving, 2);
+  assert.deepEqual(m.telemetry().totals.byReason, { in_motion: 1 });
+});
+
+test("telemetry: the cap suppresses with reason cap and every candidate is accounted exactly once", () => {
+  const ev: GameEvent[] = [half()];
+  for (let n = 0; n < 8; n++) ev.push(pitch(), play("home_run", { tier: 1, rbi: 3, runs: 3 }, { inning: 3, half: "bottom", score: { away: 0, home: n + 1 } }), pitch(), play("single"));
+  const d = director("reduced");
+  ev.forEach((_, i) => d.consider(ev, i));
+  const t = d.telemetry();
+  assert.ok(t.totals.byReason.cap, "a capped shot is recorded with the cap reason");
+  assert.equal(t.totals.planned, d.shots);
+  assert.equal(t.totals.candidates, t.totals.planned + t.totals.suppressed);
+  assert.equal(new Set(t.shots.map((r) => r.index)).size, t.shots.length);
+});
+
+test("telemetry never changes a decision: the plans match a director that nobody reads telemetry from", () => {
+  const ev = [half(), pitch(), homer(), pitch(), play("single"), pitch(), homer({ tier: 2 })];
+  const a = director(), b = director();
+  const pa = ev.map((_, i) => a.consider(ev, i)?.family ?? null);
+  b.telemetry();
+  const pb = ev.map((_, i) => b.consider(ev, i)?.family ?? null);
+  a.telemetry();
+  assert.deepEqual(pa, pb);
 });

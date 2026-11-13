@@ -55,5 +55,7 @@ export function useShotPlans(events: GameEvent[], innings: number, key: unknown)
       return checks.length > 0 && checks.every(canFrame);
     },
   }), [mode, reduced, innings, key, events]);
+  // Dev/shot readout: `__actionShotTelemetry()` in the console. Nothing in the app reads it back.
+  if (import.meta.env.DEV) (window as unknown as { __actionShotTelemetry: unknown }).__actionShotTelemetry = () => director.telemetry();
   return useMemo(() => Object.assign((i: number) => (events[i] ? director.consider(events, i) : null), { director }), [director, events]);
 }

@@ -153,11 +153,42 @@ export function effectiveMode(mode: ActionShotMode, reducedMotion: boolean): Act
 
 type Phase = "pending" | "playing" | "skipped" | "done";
 
+// W32e telemetry: what the director did with every eligible result event. Measurement only: nothing here is read back by
+// the scorer, the director or the stage, and it holds no names, ids of real players or locations. Times are the
+// caller's `nowMs` (performance.now in the app), never read here.
+export type SuppressReason = "off" | "in_motion" | "cap" | "same_sequence" | "no_pitch_facts" | "cooldown" | "cannot_frame";
+export interface ShotRecord {
+  /** The trigger event's index in the match log. */
+  index: number;
+  event: "play" | "run";
+  family: ShotFamily;
+  score: number;
+  /** planned: chosen but not started; shown: the camera ran; suppressed: kept the broadcast camera. */
+  status: "planned" | "shown" | "suppressed";
+  reason?: SuppressReason;
+  plannedMs?: number;
+  /** How a shown shot ended: finished, or skipped by the player. */
+  end?: "finished" | "skipped";
+  /** ms after the shot began that the player skipped it. */
+  skippedAtMs?: number;
+  /** ms the shot was on screen (to the skip or to finish). */
+  shownMs?: number;
+}
+export interface ShotTelemetry {
+  mode: ActionShotMode;
+  /** Result events that scored under the mode's threshold: routine play, never a candidate. */
+  routine: number;
+  totals: { candidates: number; planned: number; shown: number; suppressed: number; skipped: number; finished: number; byReason: Partial<Record<SuppressReason, number>> };
+  shots: ShotRecord[];
+}
+
 /** Decides which events get a shot. Idempotent per event index; remembers the match so far. */
 export class ActionShotDirector {
   private plans = new Map<number, ShotPlan | null>();
   private phase = new Map<number, Phase>();
   private startedAt = new Map<number, number>();
+  private log = new Map<number, ShotRecord>();
+  private routine = 0;
   private count = 0;
   private lastPa = -10;
   private lastSeq = -1;
@@ -191,29 +222,32 @@ export class ActionShotDirector {
   private evaluate(events: GameEvent[], i: number): ShotPlan | null {
     const e = events[i];
     const mode = this.mode;
-    if (mode === "off" || !e) return null;
+    if (!e) return null;
     // Only a result event can start a shot: a ball still in play is live, and a result with runners still moving is not dead.
     if (e.type !== "play" && e.type !== "run") return null;
-    const next = events[i + 1];
-    if (next && next.type === "run" && (next.action === "advance" || next.action === "thrown_out")) return null;
-    if (this.count >= (mode === "full" ? SHOT_CAP : REDUCED_CAP)) return null;
     const sc = scoreEvent(events, i, { innings: this.opts.innings });
-    if (!sc || sc.score < THRESHOLD[mode]) return null;
-    if (this.seqOf(events, i) === this.lastSeq) return null; // one per dead-ball sequence
+    if (!sc || sc.score < THRESHOLD[mode === "off" ? "full" : mode]) { this.routine++; return null; }
+    const no = (reason: SuppressReason): null => { this.log.set(i, { index: i, event: e.type as "play" | "run", family: sc.family, score: sc.score, status: "suppressed", reason }); return null; };
+    if (mode === "off") return no("off");
+    const next = events[i + 1];
+    if (next && next.type === "run" && (next.action === "advance" || next.action === "thrown_out")) return no("in_motion");
+    if (this.count >= (mode === "full" ? SHOT_CAP : REDUCED_CAP)) return no("cap");
+    if (this.seqOf(events, i) === this.lastSeq) return no("same_sequence"); // one per dead-ball sequence
     const def = CATALOG[sc.family];
-    if (def.needs === "pitch" && !this.lastPitchShot(events, i)) return null; // nothing recorded to replay
+    if (def.needs === "pitch" && !this.lastPitchShot(events, i)) return no("no_pitch_facts"); // nothing recorded to replay
     const pa = this.paOf(events, i);
     if (pa - this.lastPa === 1 && e.type === "play") {
       const ending = matchEnding(events, i, { innings: this.opts.innings });
       const firstTime = !this.seen.has(sc.reasons[0] + sc.family) && sc.score >= 90;
-      if (!ending && !firstTime) return null;
+      if (!ending && !firstTime) return no("cooldown");
     }
     const short = mode === "reduced" || this.lastFamily === sc.family;
     const plan: ShotPlan = {
       index: i, family: sc.family, camera: def.camera, durMs: short ? def.shortMs : def.fullMs,
       score: sc.score, reasons: sc.reasons, still: mode === "reduced",
     };
-    if (this.opts.canFrame && !this.opts.canFrame(plan, e)) return null;
+    if (this.opts.canFrame && !this.opts.canFrame(plan, e)) return no("cannot_frame");
+    this.log.set(i, { index: i, event: e.type, family: plan.family, score: plan.score, status: "planned", plannedMs: plan.durMs });
     return plan;
   }
 
@@ -234,6 +268,7 @@ export class ActionShotDirector {
     if (!plan || this.phase.get(i) !== "pending") return null;
     this.phase.set(i, "playing");
     this.startedAt.set(i, nowMs);
+    const rec = this.log.get(i); if (rec) rec.status = "shown";
     return plan;
   }
 
@@ -242,10 +277,33 @@ export class ActionShotDirector {
     if (this.phase.get(i) !== "playing") return false;
     if (nowMs - (this.startedAt.get(i) ?? nowMs) < SHOT_SKIP_MS) return false;
     this.phase.set(i, "skipped");
+    const rec = this.log.get(i), at = nowMs - (this.startedAt.get(i) ?? nowMs);
+    if (rec) { rec.end = "skipped"; rec.skippedAtMs = at; rec.shownMs = at; }
     return true;
   }
 
-  finish(i: number) { if (this.phase.get(i) === "playing") this.phase.set(i, "done"); }
+  finish(i: number, nowMs?: number) {
+    if (this.phase.get(i) !== "playing") return;
+    this.phase.set(i, "done");
+    const rec = this.log.get(i);
+    if (rec) { rec.end = "finished"; if (nowMs !== undefined) rec.shownMs = nowMs - (this.startedAt.get(i) ?? nowMs); }
+  }
+
+  /** A snapshot of what the director has decided so far, for the dev readout and the capture harness. */
+  telemetry(): ShotTelemetry {
+    const shots = [...this.log.values()].sort((a, b) => a.index - b.index).map((r) => ({ ...r }));
+    const byReason: Partial<Record<SuppressReason, number>> = {};
+    for (const r of shots) if (r.reason) byReason[r.reason] = (byReason[r.reason] ?? 0) + 1;
+    const n = (f: (r: ShotRecord) => boolean) => shots.filter(f).length;
+    return {
+      mode: this.mode, routine: this.routine,
+      totals: {
+        candidates: shots.length, planned: n((r) => r.status !== "suppressed"), shown: n((r) => r.status === "shown"), suppressed: n((r) => r.status === "suppressed"),
+        skipped: n((r) => r.end === "skipped"), finished: n((r) => r.end === "finished"), byReason,
+      },
+      shots,
+    };
+  }
 
   /** Skipped and finished shots no longer hold the camera. */
   active(i: number): boolean { return this.phase.get(i) === "playing"; }
