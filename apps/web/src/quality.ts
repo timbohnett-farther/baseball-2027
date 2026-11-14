@@ -13,12 +13,23 @@ export interface QualityProfile {
   crowd: number; // share of crowd points kept
   dust: number; // share of dust particles kept
   minFrameMs: number; // 0 = render every display frame; 29 = about 30 fps
+  surface: 0 | 1 | 2; // W33 material detail: 0 flat colours, 1 procedural speckle maps, 2 adds bump and soft shadows
+}
+
+/** What the live stadium materials and shadows do at a tier (pure, so the tier -> look mapping is testable). */
+export interface SurfaceLook {
+  speckle: number; // 0..1 strength of the procedural grass/dirt maps; 0 = untextured flat colour
+  bump: number; // bump-map scale on grass and dirt; 0 = no bump map
+  softShadows: boolean; // PCF soft shadow filtering (only meaningful when shadowMap > 0)
+}
+export function surfaceLook(p: QualityProfile): SurfaceLook {
+  return { speckle: p.surface === 0 ? 0 : p.surface === 1 ? 0.6 : 1, bump: p.surface >= 2 ? 0.5 : 0, softShadows: p.surface >= 2 && p.shadowMap > 0 };
 }
 
 export const QUALITY_PROFILE: Record<Quality, QualityProfile> = {
-  high: { pixelRatio: 2, shadowMap: 2048, crowd: 1, dust: 1, minFrameMs: 0 },
-  standard: { pixelRatio: 1.5, shadowMap: 1024, crowd: 0.5, dust: 0.5, minFrameMs: 0 },
-  battery: { pixelRatio: 1, shadowMap: 0, crowd: 0.25, dust: 0.25, minFrameMs: 29 },
+  high: { pixelRatio: 2, shadowMap: 2048, crowd: 1, dust: 1, minFrameMs: 0, surface: 2 },
+  standard: { pixelRatio: 1.5, shadowMap: 1024, crowd: 0.5, dust: 0.5, minFrameMs: 0, surface: 1 },
+  battery: { pixelRatio: 1, shadowMap: 0, crowd: 0.25, dust: 0.25, minFrameMs: 29, surface: 0 },
 };
 
 const KEY = "bb.quality";

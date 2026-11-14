@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { playInteractive, tutorialSetup, type UserInput } from "@bb/sim";
-import { QUALITIES, QUALITY_PROFILE, getQuality, setQuality } from "./quality.ts";
+import { QUALITIES, QUALITY_PROFILE, getQuality, setQuality, surfaceLook } from "./quality.ts";
 import { SNAPSHOT_SCHEMA, type Snapshot } from "./resume.ts";
 
 // W31: a graphics tier trims drawing only. The replay hash, the saved recipe and the inputs never see it.
@@ -41,4 +41,14 @@ test("every quality tier and frame cap leaves the replay hash unchanged and out 
   for (const k of ["pixelRatio", "shadowMap", "crowd", "dust"] as const)
     assert.ok(QUALITY_PROFILE.standard[k] <= QUALITY_PROFILE.high[k] && QUALITY_PROFILE.battery[k] <= QUALITY_PROFILE.standard[k], k);
   assert.equal(hash(result), before);
+});
+
+test("W33 surface detail only ever sheds with the tier, and battery stays flat and shadowless", () => {
+  const [h, s, b] = QUALITIES.map((q) => surfaceLook(QUALITY_PROFILE[q]));
+  assert.ok(h.speckle > s.speckle && s.speckle > b.speckle);
+  assert.ok(h.bump > s.bump && s.bump === b.bump);
+  assert.deepEqual(b, { speckle: 0, bump: 0, softShadows: false });
+  assert.equal(s.softShadows, false);
+  assert.equal(h.softShadows, true);
+  assert.equal(surfaceLook({ ...QUALITY_PROFILE.high, shadowMap: 0 }).softShadows, false); // no shadow map, nothing to soften
 });

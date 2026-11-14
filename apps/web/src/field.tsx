@@ -3,7 +3,7 @@ import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
-import { getQuality, QUALITY_PROFILE } from "./quality.ts";
+import { getQuality, QUALITY_PROFILE, surfaceLook, type SurfaceLook } from "./quality.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 import { holdWithShot, shotPose, type ActionShotDirector, type ShotPlan } from "./actionshot.ts";
 import {
@@ -67,14 +67,58 @@ function softSprite(color: string): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
+/** Seeded speckle over a square canvas: tiny low-alpha dabs in the given colours (strength 0 draws nothing). */
+function speckle(g: CanvasRenderingContext2D, size: number, strength: number, rand: () => number, n: number, colors: string[]) {
+  if (strength <= 0) return;
+  g.globalAlpha = 0.25 * strength;
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = colors[Math.floor(rand() * colors.length)];
+    const w = 1 + rand() * 3;
+    g.fillRect(rand() * size, rand() * size, w, w * (1 + rand() * 2));
+  }
+  g.globalAlpha = 1;
+}
+
+/** Infield clay: the flat dirt colour with grit and a faint drag-mat grain. Untextured (null) at strength 0. */
+function dirtTexture(color: string, look: SurfaceLook, rand: () => number): THREE.CanvasTexture | null {
+  if (look.speckle <= 0) return null;
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d")!;
+  g.fillStyle = color; g.fillRect(0, 0, 256, 256);
+  g.globalAlpha = 0.07 * look.speckle; g.fillStyle = "#3a2614";
+  for (let y = 0; y < 256; y += 6) g.fillRect(0, y + rand() * 3, 256, 1 + rand() * 2);
+  g.globalAlpha = 1;
+  speckle(g, 256, look.speckle, rand, 900, ["#5e4128", "#b08a62", "#6f4e30"]);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(6, 6);
+  return t;
+}
+
+/** Shared greyscale grit for bump on turf and clay (only built when the tier asks for bump). */
+function bumpTexture(repeat: number, rand: () => number): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#808080"; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 1200; i++) { const v = Math.floor(rand() * 256); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(rand() * 128, rand() * 128, 1 + rand() * 2, 1 + rand() * 2); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat, repeat);
+  return t;
+}
+
 /** Checker-mown outfield: straight stripes with a faint cross pass. */
-function grassTexture(repeat: number): THREE.CanvasTexture {
+function grassTexture(repeat: number, look: SurfaceLook, rand: () => number): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   const g = c.getContext("2d")!;
   for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? "#2f6b3c" : "#397c47"; g.fillRect(i * 64, 0, 64, 512); }
   g.fillStyle = "rgba(0,0,0,0.07)";
   for (let i = 0; i < 8; i += 2) g.fillRect(0, i * 64, 512, 64);
+  speckle(g, 512, look.speckle, rand, 1400, ["#1f4e2b", "#4f9159", "#2a5d35"]); // blade-scale variation breaks the flat stripes
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -164,13 +208,13 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
   const g = new THREE.Group();
   const rig = new THREE.Group();
   rig.name = "rig";
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
-  const sleeveMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+  const sleeveMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
   const capMat = new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.55 });
   const pants = std(ump ? "#7d8089" : "#ecebe4"), skin = std(SKIN[seed % SKIN.length], 0.65), dark = std("#1a1a1e", 0.6);
   // Cosmetic slots (W14): cleats, batting helmet and batting gloves get their own materials so a bought colourway can be painted on.
   const cleatMat = std("#1a1a1e", 0.6);
-  const helmetMat = bat ? new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.4 }) : capMat;
+  const helmetMat = bat ? new THREE.MeshStandardMaterial({ color: color.clone().multiplyScalar(0.8), roughness: 0.3, metalness: 0.1 }) : capMat;
   const gloveMat = bat ? std(SKIN[seed % SKIN.length], 0.65) : skin;
 
   for (const s of [-1, 1]) {
@@ -340,6 +384,7 @@ class Director {
   private staged: { kind: ShotKind; hidden: [THREE.Object3D, boolean][]; actors: THREE.Group[]; figs: Record<string, THREE.Group>; hit: THREE.Vector3; rel: THREE.Vector3 } | null = null;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
   private prof = QUALITY_PROFILE[getQuality()]; // graphics tier, read once per renderer
+  private surf = surfaceLook(this.prof); // W33 material detail for that tier
   private raf = 0; private last = performance.now();
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
@@ -353,6 +398,7 @@ class Director {
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.shadowMap.enabled = this.prof.shadowMap > 0;
+    r.shadowMap.type = this.surf.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene.background = new THREE.Color("#0B0D12");
     this.scene.fog = new THREE.FogExp2("#0B0D12", 0.0028);
 
@@ -363,6 +409,7 @@ class Director {
     key.castShadow = this.prof.shadowMap > 0;
     key.shadow.mapSize.set(this.prof.shadowMap || 1, this.prof.shadowMap || 1);
     Object.assign(key.shadow.camera, { left: -55, right: 55, top: 70, bottom: -70, near: 1, far: 220 });
+    key.shadow.bias = -0.0004; key.shadow.normalBias = 0.04; // no acne on the flat turf at grazing key angles
     key.target.position.set(0, 0, -30);
     const fill = new THREE.DirectionalLight("#dfe6ff", 0.9);
     fill.position.set(45, 40, 20);
@@ -410,11 +457,16 @@ class Director {
     const arc = (geo: THREE.BufferGeometry, m: THREE.Material, y: number) => {
       const mesh = new THREE.Mesh(geo, m); mesh.position.y = y; (mesh.material as THREE.Material).side = THREE.DoubleSide; this.scene.add(mesh); return mesh;
     };
-    const dirt = mat("#86613f"), clay = mat("#9a7250");
-    flat(new THREE.CircleGeometry(WALL_R, 96, Math.PI / 2 - 1.25, 2.5), new THREE.MeshStandardMaterial({ map: grassTexture(14), roughness: 1 }), 0, 0, 0);
+    const look = this.surf;
+    const grit = look.bump > 0 ? bumpTexture(10, this.rand) : null;
+    const gritMat = (color: string, map: THREE.Texture | null, rough: number) => new THREE.MeshStandardMaterial({
+      color: map ? "#ffffff" : color, map, roughness: rough, bumpMap: grit, bumpScale: look.bump,
+    });
+    const dirt = gritMat("#86613f", dirtTexture("#86613f", look, this.rand), 0.97), clay = gritMat("#9a7250", dirtTexture("#9a7250", look, this.rand), 0.92);
+    flat(new THREE.CircleGeometry(WALL_R, 96, Math.PI / 2 - 1.25, 2.5), new THREE.MeshStandardMaterial({ map: grassTexture(14, look, this.rand), roughness: 0.95, bumpMap: grit, bumpScale: look.bump }), 0, 0, 0);
     flat(new THREE.RingGeometry(WALL_R - 5, WALL_R, 96, 1, Math.PI / 2 - 1.25, 2.5), dirt, 0, 0, 0.012); // warning track
     flat(new THREE.CircleGeometry(24, 64), dirt, 0, -18.4, 0.01);
-    const inner = flat(new THREE.PlaneGeometry(27, 27), new THREE.MeshStandardMaterial({ map: grassTexture(2), roughness: 1 }), 0, -19.4, 0.02); inner.rotation.z = Math.PI / 4;
+    const inner = flat(new THREE.PlaneGeometry(27, 27), new THREE.MeshStandardMaterial({ map: grassTexture(2, look, this.rand), roughness: 0.95, bumpMap: grit, bumpScale: look.bump }), 0, -19.4, 0.02); inner.rotation.z = Math.PI / 4;
     flat(new THREE.CircleGeometry(7, 40), dirt, 0, 0.5, 0.03);
     const mound = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 0.3, 32), clay); mound.position.set(0, 0.15, -18.4); mound.receiveShadow = true; this.scene.add(mound);
     const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.03, 0.15), mat("#f0ece2", 0.6)); rubber.position.set(0, 0.31, -18.4); this.scene.add(rubber);
@@ -427,17 +479,20 @@ class Director {
         edge.rotation.x = -Math.PI / 2; edge.position.set(s * 0.95 + dx, 0.045, 0.3 + dz); this.scene.add(edge);
       }
     }
+    // Bases: canvas-white rubber with a little self-light so they stay the brightest thing on the clay.
+    const baseMat = new THREE.MeshStandardMaterial({ color: "#f4f1e8", roughness: 0.55, emissive: "#8a857a", emissiveIntensity: 0.5 });
     BASES.forEach((b, i) => {
-      const m = i === 0 ? new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.05, 5), chalk)
-        : new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.6), chalk);
+      const m = i === 0 ? new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.05, 5), baseMat)
+        : new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.6), baseMat);
+      m.castShadow = true; m.receiveShadow = true;
       m.position.set(b.x, 0.07, b.z); if (i) m.rotation.y = Math.PI / 4; this.scene.add(m);
     });
 
     // Padded outfield wall with a yellow line, foul poles, fictional-maker signage.
-    const wall = arc(new THREE.CylinderGeometry(WALL_R, WALL_R, 3.2, 96, 1, true, Math.PI - 1.25, 2.5), mat("#1c4a35", 0.9), 1.6);
+    const wall = arc(new THREE.CylinderGeometry(WALL_R, WALL_R, 3.2, 96, 1, true, Math.PI - 1.25, 2.5), mat("#1c4a35", 0.85), 1.6);
     wall.receiveShadow = true;
     arc(new THREE.CylinderGeometry(WALL_R + 0.05, WALL_R + 0.05, 0.16, 96, 1, true, Math.PI - 1.25, 2.5), new THREE.MeshBasicMaterial({ color: "#f3c724" }), 3.2);
-    const yellow = mat("#f3c724", 0.5);
+    const yellow = new THREE.MeshStandardMaterial({ color: "#f3c724", roughness: 0.35, metalness: 0.3 });
     for (const s of [-1, 1]) {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 16, 10), yellow);
       pole.position.set(s * WALL_R * Math.sin(1.25), 8, -WALL_R * Math.cos(1.25)); this.scene.add(pole);
@@ -450,7 +505,7 @@ class Director {
     });
 
     // Two decks of seating with a crowd, a facade between, a scoreboard in centre, six light towers.
-    const seats = mat("#2a3140", 0.95), concrete = mat("#1a1e28", 0.95);
+    const seats = mat("#2a3140", 0.8), concrete = mat("#1a1e28", 0.9);
     arc(new THREE.CylinderGeometry(WALL_R + 26, WALL_R + 4, 11, 96, 1, true, Math.PI - 1.4, 2.8), seats, 9);
     arc(new THREE.CylinderGeometry(WALL_R + 27, WALL_R + 27, 3.5, 96, 1, true, Math.PI - 1.4, 2.8), concrete, 16.2);
     arc(new THREE.CylinderGeometry(WALL_R + 46, WALL_R + 28, 13, 96, 1, true, Math.PI - 1.4, 2.8), seats, 24.5);
