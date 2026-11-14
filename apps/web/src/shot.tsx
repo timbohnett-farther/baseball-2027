@@ -32,9 +32,9 @@ const team = (name: string, abbr: string, color: string, first: string[]): SimTe
 const AWAY = ["Rowan", "Idris", "Mateo", "Kenji", "Dario", "Elias", "Theo", "Luca", "Nico"];
 const HOME = ["Jonah", "Silas", "Amari", "Cole", "Bram", "Ezra", "Hugo", "Otis", "Reid"];
 
-function fixture(seed: number): PlayedGame {
+function fixture(seed: number, awayAbbr = "HAR"): PlayedGame {
   nextId = 1;
-  const away = team("Harbor City", "HAR", "#1d4e89", AWAY);
+  const away = team("Harbor City", awayAbbr, "#1d4e89", AWAY);
   const home = team("Ridgeback", "RDG", "#b3302a", HOME);
   const result = simulateGame({ away, home, seed, facts: true });
   return { id: 0, createdAt: "", opponent: { id: 0, name: away.name, abbr: away.abbr }, userSide: "home", teams: { away, home }, result };
@@ -167,9 +167,47 @@ function HubShot({ moment }: { moment: string }) {
   return <div className="page"><ArcadeHub season={arcadeFixture(moment === "season-bracket" ? "bracket" : "hub")} busy={false} error={null} onPlay={noop} /></div>;
 }
 
+/**
+ * W35a `/?shot=perf-soak`: mounts the real ballpark for a fixture match, plays one forced action shot of each family
+ * (contact, release, slide) plus plain pitches, unmounts it (menu return), and starts the next match against a different
+ * club, forever. `window.__soak` counts rounds so scripts/perf.mjs can sample `__perfTelemetry()` while it runs. Dev only.
+ */
+const SOAK_CLUBS = ["HAR", "BAY", "CRK", "DLT", "EMB", "FOR", "GLN", "HVN"];
+function SoakView() {
+  const [round, setRound] = useState(0);
+  const [phase, setPhase] = useState(0); // 0..2 shots, 3 = unmounted gap
+  const g = useMemo(() => {
+    for (let s = round * 7 + 1; s < round * 7 + 60; s++) {
+      const game = fixture(s, SOAK_CLUBS[round % SOAK_CLUBS.length]);
+      const at = (["home_run", "strikeout", "single"] as const).map((o) => game.result.events.findIndex((e) => e.type === "play" && e.outcome === o));
+      if (at.every((i) => i > 0)) return { game, at };
+    }
+    return { game: fixture(1), at: [1, 1, 1] };
+  }, [round]);
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    (window as any).__soak = { round, phase };
+    if (phase === 3) { const t = setTimeout(() => { setRound((r) => r + 1); setPhase(0); setIndex(0); }, 300); return () => clearTimeout(t); }
+    // Phase 0 first walks the first innings quickly (a new batter and runners every few events: the churn a real match has), then the shot.
+    const walk = phase === 0 ? Math.min(g.at[0]! - 2, 60) : 0, step = 60, lead = phase === 0 ? 1200 + walk * step : 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    if (phase === 0) for (let i = 1; i <= walk; i++) timers.push(setTimeout(() => setIndex(i), 1000 + i * step));
+    timers.push(setTimeout(() => setIndex(Math.max(0, g.at[phase]! - 1)), lead + 150));
+    timers.push(setTimeout(() => setIndex(g.at[phase]!), lead + 300));
+    timers.push(setTimeout(() => setPhase((p) => p + 1), lead + 300 + 1800));
+    return () => timers.forEach(clearTimeout);
+  }, [round, phase, g]);
+  if (phase === 3) return <div className="shot" />;
+  const fam = (["CONTACT", "MOUND_RELEASE", "SLIDE_TAG"] as const)[phase]!;
+  const d = CATALOG[fam];
+  const plan: ShotPlan | null = index === g.at[phase] ? { index, family: fam, camera: d.camera, durMs: d.fullMs, score: 100, reasons: ["soak"], still: false } : null;
+  return <div className="shot"><FieldView key={round} game={g.game} index={index} speed={1} plan={plan} /></div>;
+}
+
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
+  if (duel === "perf-soak") return <SoakView />;
   if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }

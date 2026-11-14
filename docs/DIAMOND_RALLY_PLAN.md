@@ -90,6 +90,7 @@ free/royalty-free rigs and motion libraries, no paid mocap.
 - [x] W33 live PBR materials/lighting: tiered procedural grass/clay speckle + bump (`surface` in quality.ts), soft shadows on High, roughness/metalness pass on bases, poles, seats, uniforms. Draw calls unchanged within noise.
 - [x] W33b cinematic lighting, VFX and post for action shots only. (9f75fdf + 3bdf905, live.) Review: typecheck/tests/build re-run clean (24/91/39/164); contact spark reads well; slide dust reads as glowing dots, not dirt (open); release chalk puff unconfirmed; Standard look and any real device unverified; `shot.mjs --check` `bigplay` fails before and after this wave (open).
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
+- [x] W35a preload/memory hitches (Kimi phase 09): shot-resource prewarm with fallback, dev `__perfTelemetry`, dispose leak fixes, 15-min desktop soak; results in GRAPHICS_AUDIT "W35a results". Device rows EVIDENCE_MISSING.
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
 
 ### Vertical-slice plan (Kimi, found 2026-11-13 13:57)

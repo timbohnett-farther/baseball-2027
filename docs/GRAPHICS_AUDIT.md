@@ -227,3 +227,40 @@ Draw calls before to after (high / standard / battery): contact 87/92/85 to 90/9
 Verdict: contact burst and the fog/vignette depth read clearly and subjects stay legible. Rim separation is subtle. Slide dust reads weakly (small warm sparks, not convincing dirt). Release chalk puff was not visible at the capture time. Dirt shadows look weaker on High.
 
 Not verified: phone GPU performance or look, Standard-tier visual, release chalk visibility, real-GPU colour. `shot.mjs --phone --check` has one failure, `bigplay` (flat centre), which also fails on the pre-W33b tree.
+## W35a results (preload and memory hitches)
+
+All numbers are desktop headless Chrome 157 on SwiftShader (software GL), 1280x720, Apple M5 Max host, macOS arm64. They are not device evidence. Physical iPhone rows (first-use hitch, memory pressure, thermal) are EVIDENCE_MISSING. A desktop soak is not a thermal test. Raw JSON is kept outside the repo; the commands below regenerate it.
+
+Audit (resident / lazy / duplicated):
+- Ability cues are DOM (CSS) plus oscillator audio on a lazily created AudioContext (needs a user gesture). No GPU resources, so nothing to prewarm; only timed.
+- Shot figures are built fresh in `stageIn()` and freed in `unstage()`. Their shader programs are shared with the live materials, so program count stays 11 before and after prewarm.
+- The shot-effect dust pool is allocated once per Director and hidden when idle (reused, not rebuilt per shot).
+- Each Director owns its renderer and canvas; nothing GPU-side is shared across matches.
+
+Leaks found and fixed (counters, `?w35a=off` is the pre-W35a behaviour):
+- Module-level jersey `CanvasTexture` map (1024x512) was never cleared: 19 to 90 textures over 10 matches against 8 clubs. Now cleared on dispose (0 after unmount).
+- `Director.dispose()` freed only the renderer, not scene geometries, materials or textures. After unmount (off): geometries 185-439, textures 31-33 residual. After (on): 0 and 0.
+- Retired batter/runner figures were removed from the scene without dispose (within-match leak). Now disposed when removed.
+
+Prewarm (`renderer.compile` of a hidden scene holding the five shot figures plus the shot-effect points, `initTexture` on jersey maps, run on `setTimeout(0)` after mount). Failure is caught, the match starts normally, and the failure is recorded in `__perfTelemetry().prewarm`. Cold-reload first use, 5 fresh contexts per variant, median / worst:
+
+| first use | sync ms off | sync ms on | frame after ms off | frame after ms on |
+|---|---|---|---|---|
+| pitch | 4.7 / 5 | 2.6 / 4.1 | 266.6 / 266.6 | 283.3 / 283.3 |
+| contact | 1.6 / 1.7 | 1.1 / 1.3 | 49.9 / 50.1 | 50 / 50 |
+| release | 1.2 / 1.3 | 1 / 1.2 | 50 / 50.1 | 33.4 / 66.7 |
+| slide | 1.9 / 2 | 1.1 / 1.2 | 50 / 66.6 | 50 / 66.7 |
+
+Reading: first-use shot cost was already small (about 1-2 ms synchronous, next frame about one steady-state frame at ~50 ms). Prewarm trims about 0.5-1 ms and removes no visible hitch; it is a safety net, not a measured win. Prewarm ran ok in all 5 runs (median 5-8 ms; one cold run 282 ms). The first rendered frame has a 1.4-1.7 s interval (initial compile of ~11 programs at mount, before gameplay); this predates W35a and is not moved by it. Steady-state frame interval here is ~50 ms (SwiftShader), so it says nothing about phone fps.
+
+Rematch (10 matches, event walk, residual counts after unmount; `rematch-off/on`): off geometries 185-439, textures 31-33, jersey textures 19 to 90; on geometries 0, textures 0, programs 1, jersey textures 0, created/disposed 10/10. JS heap fluctuated 20-33 MB in both (Chromium precise memory info); no trend claimed.
+
+15-minute soak (variant on, `?shot=perf-soak`: 90 rounds, each a match with batter/runner churn, forced contact/release/slide shots, then unmount): actual 901 s, 60 samples, 14,704 frame intervals: median 50 ms, p95 66.7 ms, worst 1733 ms (the mount compiles). Directors created 91, disposed 90 (one live at the end). Live-sample counts by quarter (mean/max): geometries 165/227, 143/207, 162/201, 155/233; textures 29.5/33, 25.1/33, 28.7/32, 26.6/33; programs 11 throughout; heap MB 28.6/37.9, 30.1/40.9, 29.9/43.2, 29.8/49.6. Plateau, no ramp. The script's own verdict printed "growing" because it compares live counts mid-match, which vary with what is staged; the quarterly means above are the evidence used. Jersey textures at end 12 (bounded by clubs in play), 1740 disposed. Long tasks 102 (119 s total, worst 1554 ms; SwiftShader compile and software rendering).
+
+Commands (from repo root, `SHOT_PORT` overrides 5199; `--variant=off` adds `?w35a=off`):
+`node apps/web/scripts/perf.mjs cold --runs=5 --variant=on|off --json=FILE`
+`node apps/web/scripts/perf.mjs rematch --rounds=10 --variant=on|off --json=FILE`
+`node apps/web/scripts/perf.mjs soak --minutes=15 --sample=15 --variant=on --json=FILE`
+In dev, `window.__perfTelemetry()` returns marks, first-use timings by family, repeats, frame stats, renderer counts, long tasks, heap (or unsupported), prewarm result and lifecycle counters. Nothing is sent anywhere; the sim, RNG and input are untouched.
+
+Not measured: any real device, iOS Safari heap or memory warnings, thermal behaviour, audio first-use cost, GPU time.

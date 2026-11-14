@@ -13,6 +13,8 @@ import {
 } from "./shotscene.ts";
 import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
 import { limb, mergeByMaterial } from "./rigutil.ts";
+import { perfLog } from "./perftelemetry.ts";
+import { ABILITY_FX } from "./abilityfx.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -27,6 +29,10 @@ const SHOT_MODE = typeof location !== "undefined" && location.search.includes("s
 const SHOT_THROWS: Hand = SHOT_MODE && /[?&]throws=L/.test(location.search) ? "L" : "R";
 const SHOT_HOLD = SHOT_MODE ? (() => { const m = /[?&]hold=([\d.]+)/.exec(location.search); return m ? Math.min(1, Math.max(0, Number(m[1]))) : null; })() : null;
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+/** W35a: dev builds feed perftelemetry.ts (timestamps and renderer counts only; never sim state, input or the cosmetic RNG). */
+const PERF = import.meta.env.DEV;
+/** Dev A/B switch for the W35a evidence runs (`?w35a=off`): no prewarm and the pre-W35a dispose, so before/after can be measured on one build. */
+const LEGACY = PERF && new URLSearchParams(location.search).get("w35a") === "off";
 /** W33b shot-VFX particle tints: warm spark at contact, chalk at the mound, tan dirt on the slide. */
 const FX_TINT: Record<"contact" | "release" | "slide", [number, number, number]> = { contact: [1, 0.86, 0.6], release: [0.9, 0.9, 0.85], slide: [1, 0.78, 0.5] };
 const FT = 0.3048;
@@ -156,6 +162,12 @@ const SLOT_POS = ["P", "C", "1B", "2B", "SS", "3B", "LF", "CF", "RF"];
 const jerseyNumber = (p: SimPlayer) => 2 + ((p.id * 37) % 97);
 
 const jerseys = new Map<string, THREE.CanvasTexture>();
+/** Release every cached jersey texture (1024x512 each): they belong to the park that dressed with them and would otherwise grow with every match and opponent. */
+function disposeJerseys() {
+  perfLog.jerseysDisposed += jerseys.size;
+  jerseys.forEach((t) => t.dispose());
+  jerseys.clear();
+}
 /**
  * Jersey texture for the torso capsule: team colour, pinstripes for every other club, a name arc over a big
  * number on the back (drawn mirrored, since the capsule's u axis runs toward the player's left) and a small
@@ -359,6 +371,29 @@ class Dust {
   }
 }
 
+/** Dispose every geometry, material and the textures those materials hold, under `root`. Disposing twice is harmless. */
+function disposeTree(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
+    for (const x of mats) {
+      for (const v of Object.values(x)) if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+      x.dispose();
+    }
+  });
+}
+
+/** Release a retired figure's own geometry and materials (every player builds its own; jersey textures are shared through `jerseys`, so they stay). */
+function disposeFigure(root: THREE.Object3D) {
+  if (LEGACY) return;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    for (const x of m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : []) x.dispose();
+  });
+}
+
 class Director {
   speed = 1;
   private renderer: THREE.WebGLRenderer;
@@ -403,6 +438,7 @@ class Director {
   private prof = QUALITY_PROFILE[this.tier]; // graphics tier, read once per renderer
   private surf = surfaceLook(this.prof); // W33 material detail for that tier
   private raf = 0; private last = performance.now();
+  private disposed = false; private warmTimer = 0; private warm: THREE.Scene | null = null; private sawFrame = false; // W35a
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
   constructor(private canvas: HTMLCanvasElement, game: PlayedGame, private reduced: boolean) {
@@ -468,6 +504,51 @@ class Director {
 
     this.cam.position.copy(this.homePos());
     this.raf = requestAnimationFrame(this.frame);
+    if (PERF) {
+      perfLog.created++;
+      perfLog.setJerseyCounter(() => jerseys.size);
+      perfLog.setRendererSource(() => { const i = this.renderer.info; return { geometries: i.memory.geometries, textures: i.memory.textures, programs: i.programs?.length ?? 0 }; });
+    }
+    if (LEGACY) perfLog.prewarm = { skipped: "w35a=off" }; else this.warmTimer = window.setTimeout(() => this.prewarm(), 0); // after this frame is queued: still the non-interactive match-load moment
+  }
+
+  /**
+   * W35a: build and compile what only the three action shots use (their figures' materials, jersey textures and the shot
+   * particle pool) in a hidden scene at match load, so the first contact, release and slide shot do not compile shaders or
+   * upload textures mid-play. The figures stay resident (hidden, never rendered): disposing them would release their programs
+   * the moment the last user went away, and every shot would compile again. If anything throws, the match carries on and the
+   * shots stage lazily exactly as before; the failure is recorded for the dev readout.
+   */
+  private prewarm() {
+    this.warmTimer = 0;
+    if (this.disposed) return;
+    const info = () => this.renderer.info.programs?.length ?? 0;
+    const t0 = performance.now(), before = info();
+    const ws = new THREE.Scene();
+    ws.fog = this.scene.fog; ws.background = this.scene.background;
+    try {
+      const away = this.teams.away.lineup[0]?.id ?? null, home = this.teams.home.lineup[0]?.id ?? null;
+      const figs = [
+        this.figure("away", away, true), this.figure("home", home, false, "P", 1), this.figure("home", home, false, "P", 0),
+        this.figure("away", away, false, null, null), this.figure("home", null, false, SLOT_POS[4]),
+      ];
+      this.warm = ws;
+      ws.add(...figs);
+      let fxShown = false;
+      if (this.shotFx && !this.shotFx.points.visible) { this.shotFx.points.visible = true; fxShown = true; }
+      try { this.renderer.compile(ws, this.cam, this.scene); } finally { if (fxShown && this.shotFx) this.shotFx.points.visible = false; }
+      for (const f of figs) { const m = (f.userData as { bodyMat: THREE.MeshStandardMaterial }).bodyMat.map; if (m) this.renderer.initTexture(m); }
+      perfLog.prewarm = { ok: true, ms: Math.round((performance.now() - t0) * 100) / 100, programsBefore: before, programsAfter: info() };
+    } catch (err) {
+      this.freeWarm();
+      perfLog.prewarm = { ok: false, ms: Math.round((performance.now() - t0) * 100) / 100, programsBefore: before, programsAfter: info(), error: String(err instanceof Error ? err.message : err) };
+    }
+  }
+
+  private freeWarm() {
+    if (!this.warm) return;
+    disposeTree(this.warm);
+    this.warm = null;
   }
 
   private buildPark() {
@@ -587,10 +668,20 @@ class Director {
   }
 
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.warmTimer);
     this.unstage();
+    this.freeWarm();
     if (this.shotFx) { this.scene.remove(this.shotFx.points); this.shotFx.dispose(); this.shotFx = null; }
+    // The whole park: every geometry, material and texture it owns, then the context's own caches.
+    if (!LEGACY) {
+      this.scene.traverse((o) => { (o as THREE.Light).dispose?.(); });
+      disposeTree(this.scene);
+      disposeJerseys();
+    }
     this.renderer.dispose();
+    if (PERF) perfLog.disposed++;
   }
 
   // --- animation plumbing ------------------------------------------------------------------
@@ -656,12 +747,19 @@ class Director {
 
   private fadeOut(g: THREE.Object3D, delay: number, then?: () => void) {
     const s = g.scale.x;
-    this.tween(0.4, (p) => g.scale.setScalar(s * (1 - p)), delay, () => { this.scene.remove(g); then?.(); });
+    this.tween(0.4, (p) => g.scale.setScalar(s * (1 - p)), delay, () => { this.scene.remove(g); disposeFigure(g); then?.(); });
   }
 
   // --- event handling ----------------------------------------------------------------------
 
   handle(e: GameEvent, jumped: boolean, plan: ShotPlan | null = null, index = 0) {
+    if (!PERF) return this.handleEvent(e, jumped, plan, index);
+    if (e.type === "pitch") perfLog.mark("first-pitch");
+    const key = e.type === "pitch" ? "pitch" : e.type === "ability" && ABILITY_FX[e.ability] ? `ability:${ABILITY_FX[e.ability].domain}` : null;
+    if (key) perfLog.timed(key, () => this.handleEvent(e, jumped, plan, index)); else this.handleEvent(e, jumped, plan, index);
+  }
+
+  private handleEvent(e: GameEvent, jumped: boolean, plan: ShotPlan | null, index: number) {
     this.flush();
     this.eventIndex = index;
     this.view = cameraViewFor(e);
@@ -693,7 +791,7 @@ class Director {
     this.fielders.forEach((f, i) => { if (i > 0) dress(f, team, team.lineup.find((p) => p.position === SLOT_POS[i]) ?? null); });
     this.pitcherDressed = null;
     this.runners.forEach((r, id) => dress(r, this.teams[bat], this.player(bat, id)));
-    if (this.batter) { this.scene.remove(this.batter); this.batter = null; this.batterId = null; }
+    if (this.batter) { this.scene.remove(this.batter); disposeFigure(this.batter); this.batter = null; this.batterId = null; }
     this.onDeck.visible = false; this.onDeckId = null;
   }
 
@@ -716,7 +814,7 @@ class Director {
   private ensureBatter(e: GameEvent, id: number) {
     const side = this.battingSide(e), team = this.teams[side];
     if (this.batterId !== id || !this.batter) {
-      if (this.batter) this.scene.remove(this.batter);
+      if (this.batter) { this.scene.remove(this.batter); disposeFigure(this.batter); }
       this.batter = makePlayer(this.battingColor(e), true, id);
       dress(this.batter, team, this.player(side, id));
       this.batter.position.set(-0.95, 0, 0.3);
@@ -729,7 +827,7 @@ class Director {
     this.onDeck.visible = !!next;
   }
 
-  private clearRunners() { this.runners.forEach((r) => this.scene.remove(r)); this.runners.clear(); }
+  private clearRunners() { this.runners.forEach((r) => { this.scene.remove(r); disposeFigure(r); }); this.runners.clear(); }
 
   private resync(e: GameEvent) {
     this.clearRunners();
@@ -740,7 +838,7 @@ class Director {
       dress(r, this.teams[this.battingSide(e)], this.player(this.battingSide(e), id));
       r.base = i + 1; r.position.copy(BASES[i + 1]); this.scene.add(r); this.runners.set(id, r);
     });
-    if (this.batter) { this.scene.remove(this.batter); this.batter = null; this.batterId = null; }
+    if (this.batter) { this.scene.remove(this.batter); disposeFigure(this.batter); this.batter = null; this.batterId = null; }
   }
 
   private swing(delay: number, miss: boolean) {
@@ -951,7 +1049,7 @@ class Director {
     const kind = s && (s.kind === "contact" || s.kind === "release" || s.kind === "slide") ? s.kind : null;
     if (this.staged && this.staged.kind !== kind) this.unstage();
     if (!kind || !s) return;
-    if (!this.staged) this.stageIn(kind);
+    if (!this.staged) { if (PERF) perfLog.timed(`shot:${kind}`, () => this.stageIn(kind)); else this.stageIn(kind); }
     if (!this.staged) return;
     const q = s.still ? 0.5 : clamp01(this.shotT / s.dur);
     if (kind === "contact") this.poseContact(q);
@@ -1105,7 +1203,7 @@ class Director {
       const runner = b as THREE.Group & { base?: number };
       runner.rotation.y = 0;
       const rig = b.getObjectByName("rig"); if (rig) rig.rotation.y = -Math.PI / 4; // face up the line
-      const bat = b.getObjectByName("bat"); if (bat) b.remove(bat);
+      const bat = b.getObjectByName("bat"); if (bat) { b.remove(bat); disposeFigure(bat); }
       this.moveTo(runner, BASES[0], 0.01);
       if (batterScored) this.runPath(runner, 0, 4, delay, true, trot);
       else { runner.base = batterBase; this.runners.set(e.batterId, runner); this.runPath(runner, 0, batterBase!, delay, false); }
@@ -1140,6 +1238,7 @@ class Director {
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
     if (now - this.last < this.prof.minFrameMs) return; // battery tier: about 30 fps, animation stays wall-clock
+    if (PERF) { if (this.sawFrame) perfLog.frame(now - this.last); else { this.sawFrame = true; perfLog.mark("field-first-frame"); } }
     const real = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     let scale = this.speed;
