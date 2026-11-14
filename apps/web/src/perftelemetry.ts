@@ -43,6 +43,41 @@ export function assessGrowth(samples: readonly ResourceSample[], opts: { warmup?
   return { verdict: growing ? "growing" : "flat", samples: body.length, metrics };
 }
 
+export interface PhasedSample { phase: string | number; geometries: number; textures: number; programs: number }
+export interface SoakGroup { phase: string; samples: number; metrics: Record<ResourceKey, { early: number; late: number; delta: number }> }
+export interface SoakReport { verdict: "flat" | "growing" | "insufficient"; groups: SoakGroup[] }
+
+/**
+ * W35b: growth judged like for like. A live match holds more objects mid-play than between matches, so comparing the first and
+ * last samples of a mixed run (assessGrowth) calls normal churn "growing". Samples here are grouped by `phase` (the point of the
+ * play cycle they were taken at), the first `warmup` of each group are dropped, and the mean of the first third is compared with
+ * the mean of the last third. A group grows when a count's late mean exceeds its early mean by more than max(absTol, relTol x early).
+ * Fewer than `minSamples` after warm-up in every group is "insufficient", not "flat".
+ */
+export function assessSoak(samples: readonly PhasedSample[], opts: { warmup?: number; minSamples?: number; absTol?: number; relTol?: number } = {}): SoakReport {
+  const warmup = opts.warmup ?? 2, minSamples = opts.minSamples ?? 6, absTol = opts.absTol ?? 2, relTol = opts.relTol ?? 0.02;
+  const keys: ResourceKey[] = ["geometries", "textures", "programs"];
+  const by = new Map<string, PhasedSample[]>();
+  for (const x of samples) { const k = String(x.phase); (by.get(k) ?? by.set(k, []).get(k)!).push(x); }
+  const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
+  const groups: SoakGroup[] = [];
+  let judged = 0, growing = false;
+  for (const [phase, all] of by) {
+    const body = all.slice(warmup);
+    if (body.length < minSamples) continue;
+    judged++;
+    const third = Math.max(1, Math.floor(body.length / 3));
+    const metrics = {} as SoakGroup["metrics"];
+    for (const k of keys) {
+      const v = body.map((x) => x[k]), early = mean(v.slice(0, third)), late = mean(v.slice(-third));
+      metrics[k] = { early: round(early), late: round(late), delta: round(late - early) };
+      if (late - early > Math.max(absTol, relTol * early)) growing = true;
+    }
+    groups.push({ phase, samples: body.length, metrics });
+  }
+  return { verdict: judged === 0 ? "insufficient" : growing ? "growing" : "flat", groups };
+}
+
 export interface FirstUse { at: number; syncMs: number; frameMs: number | null }
 interface Prewarm { ok: boolean; ms: number; programsBefore: number; programsAfter: number; error?: string }
 

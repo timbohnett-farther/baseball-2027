@@ -3,6 +3,7 @@ import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
+import { FrameClock } from "./cadence.ts";
 import { getQuality, QUALITY_PROFILE, surfaceLook, type SurfaceLook } from "./quality.ts";
 import { BASE_FOG, dueEvents, poolSize, rigPositions, shotTreatment, type ShotTreatment } from "./shotfx.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
@@ -437,7 +438,7 @@ class Director {
   private tier = getQuality();
   private prof = QUALITY_PROFILE[this.tier]; // graphics tier, read once per renderer
   private surf = surfaceLook(this.prof); // W33 material detail for that tier
-  private raf = 0; private last = performance.now();
+  private raf = 0; private clock = new FrameClock(this.prof.minFrameMs, performance.now());
   private disposed = false; private warmTimer = 0; private warm: THREE.Scene | null = null; private sawFrame = false; // W35a
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
 
@@ -1237,10 +1238,10 @@ class Director {
 
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
-    if (now - this.last < this.prof.minFrameMs) return; // battery tier: about 30 fps, animation stays wall-clock
-    if (PERF) { if (this.sawFrame) perfLog.frame(now - this.last); else { this.sawFrame = true; perfLog.mark("field-first-frame"); } }
-    const real = Math.min(0.05, (now - this.last) / 1000);
-    this.last = now;
+    const step = this.clock.tick(now); // battery tier: about 30 fps, animation stays wall-clock; a long frame advances animation by at most 50 ms
+    if (!step) return;
+    if (PERF) { if (this.sawFrame) perfLog.frame(step.intervalMs); else { this.sawFrame = true; perfLog.mark("field-first-frame"); } }
+    const real = step.real;
     let scale = this.speed;
     const shot = this.shots[0];
     if (shot) {

@@ -5,7 +5,7 @@ import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
 import { CATALOG, type ShotPlan } from "./actionshot.ts";
 import { DuelView } from "./duel.tsx";
-import { AbilityCue, PlayCard } from "./game.tsx";
+import { AbilityCue, GameView, PlayCard } from "./game.tsx";
 
 // Dev-only art review: `/?shot=hr` renders the ballpark full-screen at a named moment of a fixture game
 // (no server, no sign-in) so `scripts/shot.mjs` can screenshot it. Moments: pitch, swing, hr, k, single,
@@ -204,10 +204,27 @@ function SoakView() {
   return <div className="shot"><FieldView key={round} game={g.game} index={index} speed={1} plan={plan} /></div>;
 }
 
+
+/**
+ * W35b `/?shot=cadence-match&seed=N`: the real GameView (real FieldView, shot director, hold timers) over a fixture match, for
+ * scripts/cadence.mjs. It exposes `window.__cadence` = authoritative hash of the replayed result at mount and again after the
+ * presentation finished (the sim re-run from the same seed), so a renderer cadence that changed an outcome would show as a mismatch.
+ */
+const fnv = (s: string) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, "0"); };
+const resultHash = (seed: number) => { const g = fixture(seed); return fnv(JSON.stringify(g.result)); };
+function CadenceView({ seed }: { seed: number }) {
+  const game = useMemo(() => fixture(seed), [seed]);
+  const [done, setDone] = useState(false);
+  useEffect(() => { (window as any).__cadence = { seed, hashStart: fnv(JSON.stringify(game.result)), hashEnd: null, events: game.result.events.length, done: false }; }, [game, seed]);
+  useEffect(() => { if (done) (window as any).__cadence = { ...(window as any).__cadence, hashEnd: resultHash(seed), done: true }; }, [done, seed]);
+  return <GameView game={game} onDone={() => setDone(true)} />;
+}
+
 export function ShotView() {
   const q = new URLSearchParams(location.search);
   const duel = q.get("shot");
   if (duel === "perf-soak") return <SoakView />;
+  if (duel === "cadence-match") return <CadenceView seed={Number(q.get("seed") ?? 11)} />;
   if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }

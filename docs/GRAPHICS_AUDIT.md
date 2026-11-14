@@ -264,3 +264,28 @@ Commands (from repo root, `SHOT_PORT` overrides 5199; `--variant=off` adds `?w35
 In dev, `window.__perfTelemetry()` returns marks, first-use timings by family, repeats, frame stats, renderer counts, long tasks, heap (or unsupported), prewarm result and lifecycle counters. Nothing is sent anywhere; the sim, RNG and input are untouched.
 
 Not measured: any real device, iOS Safari heap or memory warnings, thermal behaviour, audio first-use cost, GPU time.
+
+## W35b results (render-rate invariance and soak)
+
+All numbers are desktop headless Chromium (SwiftShader software GL), 2026-11-13. None of this is phone evidence: physical-device frame rate, memory, thermal and human-playtest rows stay EVIDENCE_MISSING.
+
+**Invariance.** `apps/web/src/cadence.test.ts` drives the real frame gate (`FrameClock`, now used by `field.tsx`), the shot director and the cosmetic stream over 540 cells: seeds 11/22/33 x cadences hz30/hz60/hz144/uneven/stall x High/Standard/Battery x shot mode full/reduced/off x reduced motion x 1x/2x playback. The replay hash is identical in every cell; which shots run depends only on events, shot mode and reduced motion. The cosmetic stream does differ by cadence and tier, so the comparison is not vacuous. Static checks: sim sources read no wall clock, `Math.random` or DOM; the three RNG streams are separate.
+
+**Browser matrix.** `node apps/web/scripts/cadence.mjs` plays the whole fixture match through the real GameView under a scripted `requestAnimationFrame` (`raf-scheduler.mjs`): 15 runs, seed 11, one hash (b0f50b25) across all five cadences, three tiers, shot modes and reduced motion. Limit: the fixture result is computed before presentation and the end hash is a sim re-run, so this shows the renderer cannot reach the sim, not that live tap timing is cadence-independent (tap timing is covered by the sim's tap-contract tests, not here). One seed only.
+
+**Soaks** (`perf.mjs soak`, rematch loop, resources sampled in the unmounted gap between matches):
+
+| Run | Time | Rounds | Frame ms median / p95 / worst | Leftover geo / tex / programs | Heap MB first / last / max |
+|---|---|---|---|---|---|
+| High, native rAF, 15 min | 900 s | 89 | 50 / 66.7 / 1833 | 0 / 0 / 1 flat | 23.5 / 23.5 / 49.1 |
+| High hz30, 3 min | 180 s | 15 | 34.8 / 38.1 / 1613 | 0 / 0 / 1 flat | 25.2 / 23.2 / 50.3 |
+| High hz60 | 180 s | 15 | 17.8 / 193.4 / 2175 | 0 / 0 / 1 flat | 27.3 / 42.5 / 54.7 |
+| High hz144 | 181 s | 15 | 10.7 / 232.9 / 2443 | 0 / 0 / 1 flat | 33.0 / 38.8 / 51.4 |
+| High uneven | 181 s | 16 | 15.6 / 192.4 / 1805 | 0 / 0 / 1 flat | 25.3 / 30.3 / 49.7 |
+| High stall | 181 s | 16 | 17.8 / 140.7 / 2150 | 0 / 0 / 1 flat | 24.6 / 33.8 / 48.1 |
+| Standard hz60 | 180 s | 15 | 17.8 / 131.7 / 1836 | 0 / 0 / 1 flat | 22.7 / 23.2 / 42.3 |
+| Battery hz60 | 180 s | 16 | 34.4 / 38.4 / 1176 | 0 / 0 / 0 flat | 26.8 / 29.0 / 47.6 |
+
+Reading: no resource growth between matches at any cadence or tier; the heap stays in an 18-55 MB sawtooth. The soak verdict now judges the unmounted-gap samples (`assessSoak`), which fixes W35a's over-sensitive "growing" verdict; mid-match samples vary with match phase and are informational only. The scripted cadences set the frame feed, so their medians are the schedule, not a speed measurement; p95 of 130-230 ms and long tasks are software-GL render cost. The 1.2-2.4 s worst frame is the mount-time first frame noted in W35a, still open.
+
+**Not done.** No profiling or optimisation pass. Draw-call and triangle counts were not re-measured (W35b changes no scene content; see W33b). The app has no reduced-flash setting, so that axis is untested. `invariance.test.ts` (pre-existing) covers settings only.

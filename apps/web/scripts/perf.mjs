@@ -3,6 +3,8 @@
 //   node --experimental-strip-types apps/web/scripts/perf.mjs cold   [--runs=5] [--variant=on|off] [--json=FILE]
 //   node --experimental-strip-types apps/web/scripts/perf.mjs rematch [--rounds=12] [--variant=on|off] [--json=FILE]
 //   node --experimental-strip-types apps/web/scripts/perf.mjs soak   [--minutes=15] [--sample=15] [--variant=on|off] [--json=FILE]
+// W35b: --cadence=hz30|hz60|hz144|uneven|stall replaces requestAnimationFrame with that cadence (scripts/raf-scheduler.mjs). The soak verdict
+// comes from post-unmount samples (same state every round); mid-match samples are reported by phase as information only.
 // --phone (844x390 touch viewport), --quality=high|standard|battery, SHOT_PORT (default 5199) as in shot.mjs.
 // variant=off adds `?w35a=off` (no prewarm, pre-W35a dispose) so before/after run on one build.
 // Everything is desktop headless Chromium on a software renderer. It is not device evidence and a soak here is not a thermal test.
@@ -12,13 +14,15 @@ import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { frameStats, assessGrowth } from "../src/perftelemetry.ts";
+import { frameStats, assessGrowth, assessSoak } from "../src/perftelemetry.ts";
+import { schedule } from "../src/cadence.ts";
+import { installScheduler } from "./raf-scheduler.mjs";
 
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const mode = args.find((a) => !a.startsWith("--")) ?? "cold";
 const opt = (k, d) => args.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? d;
-const phone = args.includes("--phone"), quality = opt("quality"), jsonOut = opt("json"), variant = opt("variant", "on");
+const phone = args.includes("--phone"), quality = opt("quality"), jsonOut = opt("json"), variant = opt("variant", "on"), cadence = opt("cadence");
 const suffix = variant === "off" ? "&w35a=off" : "";
 const port = Number(process.env.SHOT_PORT) || 5199;
 const base = `http://localhost:${port}/`;
@@ -37,12 +41,13 @@ const ctxOpts = phone ? { viewport: { width: 844, height: 390 }, deviceScaleFact
 async function newPage() {
   const ctx = await browser.newContext(ctxOpts);
   if (quality) await ctx.addInitScript((q) => { try { localStorage.setItem("bb.quality", q); } catch { /* run without storage */ } }, quality);
+  if (cadence) await ctx.addInitScript(installScheduler, schedule(cadence, 20 * 60000, 1)); // --cadence=hz30|hz60|hz144|uneven|stall replaces rAF with that cadence
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.error("page error:", e.message));
   return { ctx, page };
 }
 const env = async (page) => ({
-  mode, variant, viewport: phone ? "844x390 touch" : "1280x720", quality: quality ?? "stored (default)",
+  mode, variant, viewport: phone ? "844x390 touch" : "1280x720", quality: quality ?? "stored (default)", cadence: cadence ?? "native rAF",
   browser: `Chrome ${browser.version()} headless, --use-angle=swiftshader`, host: `${os.type()} ${os.release()} ${os.arch()}, ${os.cpus().length} cpus (${os.cpus()[0]?.model})`, node: process.version,
   renderer: await page.evaluate(() => { const c = document.createElement("canvas"), g = c.getContext("webgl2"); const e = g?.getExtension("WEBGL_debug_renderer_info"); return e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : "unknown"; }),
   note: "desktop headless software rendering; not device evidence; not a thermal test",
@@ -122,25 +127,34 @@ async function soak() {
   const drain = async () => { const f = await page.evaluate(() => window.__perfFrames()); frames.push(...f); minuteFrames.push(...f); };
   let nextSample = t0 + every;
   console.log(`soak start ${new Date(t0).toISOString()} for ${minutes} min, sample every ${every / 1000}s, variant=${variant}`);
+  let gapRound = -1, nextDrain = t0;
+  const snap = async (kind, now) => { const t = await tele(page), s = await page.evaluate(() => window.__soak); samples.push({ t: now - t0, kind, round: s.round, phase: s.phase, geometries: t.renderer.geometries, textures: t.renderer.textures, programs: t.renderer.programs, heapMB: await heapMB(page), jerseyTextures: t.lifecycle.jerseyTextures, longTasks: t.longTasks.count }); };
   while (Date.now() < end) {
-    await sleep(2000);
+    await sleep(100);
+    let now = Date.now();
+    // Like-for-like sample: the unmounted gap between matches (phase 3), once per round, so every sample has the same scene content.
+    const s0 = await page.evaluate(() => window.__soak);
+    if (s0.phase === 3 && s0.round !== gapRound) { gapRound = s0.round; await snap("gap", now); }
+    if (now < nextDrain) continue;
+    nextDrain = now + 2000;
     await drain();
-    const now = Date.now();
+    now = Date.now();
     if (now >= nextMinute) { perMinute.push({ minute: perMinute.length + 1, ...frameStats(minuteFrames) }); minuteFrames = []; nextMinute += 60000; }
-    if (now >= nextSample) {
-      nextSample += every;
-      const t = await tele(page), s = await page.evaluate(() => window.__soak);
-      samples.push({ t: now - t0, round: s.round, geometries: t.renderer.geometries, textures: t.renderer.textures, programs: t.renderer.programs, heapMB: await heapMB(page), jerseyTextures: t.lifecycle.jerseyTextures, longTasks: t.longTasks.count });
-    }
+    if (now >= nextSample) { nextSample += every; await snap("live", now); } // mid-match sample, informational: content differs per round
   }
   await drain();
   const final = await tele(page), actualMs = Date.now() - t0;
-  const growth = assessGrowth(samples, { warmup: 2, tolerance: 0 });
+  // like for like: samples grouped by play-cycle phase (live mid-match counts are not compared with the unmounted gap)
+  // Verdict from the gap samples (post-unmount, same state every round). Live samples are summarised by phase, informational only:
+  // what is staged mid-match differs per round (club, shot family), so their drift is not leak evidence on its own.
+  const growth = assessSoak(samples.filter((x) => x.kind === "gap"), { warmup: 3, minSamples: 8 });
+  const liveByPhase = assessSoak(samples.filter((x) => x.kind === "live"), { warmup: 2 });
   const heap = samples.map((s) => s.heapMB).filter((x) => x !== null);
-  const out = { env: e, requestedMinutes: minutes, actualSeconds: Math.round(actualMs / 1000), started: new Date(t0).toISOString(), frames: frameStats(frames), perMinute, samples, growth, heap: heap.length ? { first: heap[0], last: heap[heap.length - 1], min: Math.min(...heap), max: Math.max(...heap), supported: true } : { supported: false }, final };
+  const out = { env: e, requestedMinutes: minutes, liveByPhase, actualSeconds: Math.round(actualMs / 1000), started: new Date(t0).toISOString(), frames: frameStats(frames), perMinute, samples, growth, heap: heap.length ? { first: heap[0], last: heap[heap.length - 1], min: Math.min(...heap), max: Math.max(...heap), supported: true } : { supported: false }, final };
   console.log(`soak done: ${out.actualSeconds}s actual (requested ${minutes} min); ${samples.length} samples; rounds completed ${samples.at(-1)?.round}`);
   console.log("frame intervals (all, ms):", JSON.stringify(out.frames));
-  console.log("growth:", growth.verdict, JSON.stringify(growth.metrics));
+  console.log("growth verdict (post-unmount gap samples, early vs late third):", growth.verdict, JSON.stringify(growth.groups));
+  console.log("live mid-match samples by phase (informational):", liveByPhase.verdict, JSON.stringify(liveByPhase.groups));
   console.log("heap MB:", JSON.stringify(out.heap));
   console.log("lifecycle:", JSON.stringify(final.lifecycle), "longTasks:", JSON.stringify(final.longTasks));
   return out;
