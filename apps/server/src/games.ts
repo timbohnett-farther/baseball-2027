@@ -156,7 +156,6 @@ async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: 
   if (bonus > 0) { reward.coins.season = bonus; reward.total += bonus; }
 }
 
-/** Settle a season game under whichever format the season uses and fold what it paid into the game's reward. */
 /** One upload per (user, game id) at a time, in this process. The unique index still backstops a second row. */
 const turns = new Map<string, Promise<void>>();
 async function takeTurn(key: string): Promise<() => void> {
@@ -169,6 +168,7 @@ async function takeTurn(key: string): Promise<() => void> {
   return () => { release(); if (turns.get(key) === tail) turns.delete(key); };
 }
 
+/** Settle a season game under whichever format the season uses and fold what it paid into the game's reward. */
 async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, reward: NonNullable<PlayedGame["reward"]>, side: "home" | "away" = "home") {
   if (season.format !== ARCADE_FORMAT) return addSeasonBonus(reward, await settleSeason(db, season, gameId, outcome));
   const s = await settleArcade(db, season, gameId, outcome, result, side);
