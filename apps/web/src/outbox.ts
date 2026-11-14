@@ -19,12 +19,13 @@ export function readOutbox(store: Store | null = defaultStore()): Pending[] {
   } catch { return []; }
 }
 
-function write(items: Pending[], store: Store | null) {
-  try { if (items.length) store?.setItem(KEY, JSON.stringify(items)); else store?.removeItem(KEY); } catch { /* ignore */ }
+function write(items: Pending[], store: Store | null): boolean {
+  try { if (items.length) store?.setItem(KEY, JSON.stringify(items)); else store?.removeItem(KEY); return !!store; } catch { return false; }
 }
 
-export function enqueue(p: Pending, store: Store | null = defaultStore()): void {
-  write([...readOutbox(store).filter((q) => q.gameId !== p.gameId), p], store);
+/** True only if the game is really stored; the caller keeps its resume save when it isn't. */
+export function enqueue(p: Pending, store: Store | null = defaultStore()): boolean {
+  return write([...readOutbox(store).filter((q) => q.gameId !== p.gameId), p], store);
 }
 
 export function dequeue(gameId: string, store: Store | null = defaultStore()): void {
@@ -38,7 +39,17 @@ export const isFinal = (status: number | undefined): boolean => status === 400 |
  * Try to upload every queued game once. `send` resolves on success and rejects with an error carrying an optional
  * `status`. Success and final refusals leave the queue; network errors, 5xx and 401 (signed out) stay for next time.
  */
-export async function flush(send: (body: Pending["body"]) => Promise<unknown>, store: Store | null = defaultStore()): Promise<{ sent: number; dropped: number; left: number }> {
+export function flush(send: (body: Pending["body"]) => Promise<unknown>, store: Store | null = defaultStore()): Promise<{ sent: number; dropped: number; left: number }> {
+  // Sign-in, the `online` event and a remount can all ask at once; share one pass instead of sending a body twice.
+  const running = inFlight.get(store);
+  if (running) return running;
+  const p = run(send, store).finally(() => inFlight.delete(store));
+  inFlight.set(store, p);
+  return p;
+}
+const inFlight = new Map<Store | null, Promise<{ sent: number; dropped: number; left: number }>>();
+
+async function run(send: (body: Pending["body"]) => Promise<unknown>, store: Store | null): Promise<{ sent: number; dropped: number; left: number }> {
   let sent = 0, dropped = 0;
   for (const p of readOutbox(store)) {
     try { await send(p.body); dequeue(p.gameId, store); sent++; }

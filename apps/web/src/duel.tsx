@@ -7,11 +7,12 @@ import type { TutorialCompleteResponse } from "@bb/shared";
 import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { dequeue, enqueue, isFinal } from "./outbox.ts";
-import { clearSnapshot, newGameId, saveSnapshot, SNAPSHOT_SCHEMA } from "./resume.ts";
+import { clearSnapshot, clearSnapshotFor, newGameId, saveSnapshot, SNAPSHOT_SCHEMA } from "./resume.ts";
 import { crowdBed, playEvent } from "./audio.ts";
 import { hapticFor, vibrate } from "./haptics.ts";
 import { PaceTracker } from "./pace.ts";
 import { useShotPlans } from "./actionshots.ts";
+import { planAfterResume } from "./actionshot.ts";
 import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
@@ -80,6 +81,8 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
 
   const events = g.events;
   const planFor = useShotPlans(events, setup.innings, shell);
+  // Plays already on screen before the app was closed have had their moment; a resume must not replay their action shot.
+  const settled = useRef(resume ? events.length : 0);
   const players = useMemo(() => {
     const m = new Map<number, SimPlayer>();
     for (const side of ["away", "home"] as Side[]) for (const p of [...setup.teams[side].lineup, ...setup.teams[side].pitchers]) m.set(p.id, p);
@@ -143,11 +146,11 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     }
     // Queue first, so a dead connection at the last out (or closing the tab right now) can't lose the game.
     const body = { opponentTeamId: setup.opponent.id, seasonId, seed: setup.seed, inputs, innings: setup.innings, rules: setup.rules, difficulty: setup.difficulty, final: g.result.final, pace: pace.current!.report(Date.now()), clientGameId: gameId };
-    enqueue({ gameId, body });
-    clearSnapshot();
+    // If the device refused to store it, keep the resume save: reopening replays the last pitch and re-sends with the same id.
+    if (enqueue({ gameId, body })) clearSnapshot();
     api<PlayedGame>("/api/games/interactive/finish", { body })
-      .then((p) => { dequeue(gameId); setReward(p.reward); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
-        if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); setSaved(e.message); }
+      .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
+        if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); clearSnapshotFor(gameId); setSaved(e.message); }
         else setSaved("Saved on this device. It will upload when you're back online.");
       });
   }, [g.result, saved, inputs, setup, tutorial, gameId, seasonId]);
@@ -176,7 +179,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
         </div>
       )}
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planFor(fieldIndex)} director={planFor.director}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planAfterResume(planFor(fieldIndex), fieldIndex, settled.current)} director={planFor.director}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 

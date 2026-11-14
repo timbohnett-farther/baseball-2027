@@ -310,6 +310,11 @@ export class ActionShotDirector {
 }
 
 /** The blocking budget for an event with a shot: the shot fits inside the existing budget when it can, else the budget grows to the shot, never past SHOT_MAX_MS. */
+/** After a resume, events that were already shown before the app closed get no action shot. */
+export function planAfterResume<T>(plan: T | null | undefined, index: number, settled: number): T | null {
+  return index < settled ? null : plan ?? null;
+}
+
 export function holdWithShot(baseMs: number, plan: ShotPlan | null | undefined): number {
   if (!plan) return baseMs;
   return Math.max(baseMs, Math.min(plan.durMs, SHOT_MAX_MS));

@@ -157,6 +157,18 @@ async function addSeasonBonus(reward: NonNullable<PlayedGame["reward"]>, bonus: 
 }
 
 /** Settle a season game under whichever format the season uses and fold what it paid into the game's reward. */
+/** One upload per (user, game id) at a time, in this process. The unique index still backstops a second row. */
+const turns = new Map<string, Promise<void>>();
+async function takeTurn(key: string): Promise<() => void> {
+  const before = turns.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const tail = before.then(() => mine);
+  turns.set(key, tail);
+  await before;
+  return () => { release(); if (turns.get(key) === tail) turns.delete(key); };
+}
+
 async function settleSeasonGame(db: Db, season: SeasonRow, gameId: number, outcome: "W" | "L" | "T", result: GameResult, reward: NonNullable<PlayedGame["reward"]>, side: "home" | "away" = "home") {
   if (season.format !== ARCADE_FORMAT) return addSeasonBonus(reward, await settleSeason(db, season, gameId, outcome));
   const s = await settleArcade(db, season, gameId, outcome, result, side);
@@ -249,6 +261,10 @@ export async function gameRoutes(app: FastifyInstance) {
       }
       const clientGameId = req.body?.clientGameId;
       if (clientGameId !== undefined && (typeof clientGameId !== "string" || !/^[\w-]{8,64}$/.test(clientGameId))) return reply.code(400).send({ error: "That game can't be saved." });
+      // Two uploads of one game can be in flight at once (the finishing screen and the offline queue both send it). Take
+      // turns per game, so the second one finds the first one's row instead of paying and settling the season again.
+      const release = clientGameId ? await takeTurn(`${req.user!.id}:${clientGameId}`) : null;
+      try {
       // A retry of an upload that already landed: hand back the saved game, pay nothing again.
       if (clientGameId) {
         const [dup] = await db.select({ g: games, t: mlbTeams }).from(games).innerJoin(mlbTeams, eq(mlbTeams.id, games.opponentTeamId))
@@ -282,6 +298,7 @@ export async function gameRoutes(app: FastifyInstance) {
       reward.levelUps = await awardXp(db, team.id, result, outcome, side);
       const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: side, teams, result, reward, rules: row.rules, difficulty: row.difficulty };
       return reply.code(201).send(body);
+      } finally { release?.(); }
     },
   );
 

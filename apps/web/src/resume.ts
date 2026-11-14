@@ -37,8 +37,17 @@ export function clearSnapshot(store: Store | null = defaultStore()): void {
   try { store?.removeItem(KEY); } catch { /* ignore */ }
 }
 
+/** Clear only if the stored game is `gameId`, so a late upload can't wipe a newer game's save. */
+export function clearSnapshotFor(gameId: string, store: Store | null = defaultStore()): void {
+  try { const raw = store?.getItem(KEY); if (raw && (JSON.parse(raw) as { gameId?: unknown })?.gameId === gameId) store?.removeItem(KEY); } catch { /* ignore */ }
+}
+
+/** null when nothing is saved (or storage is unreadable); the string "corrupt" when something is there but isn't valid JSON, so restore() can say so and the caller can clear it. */
 export function loadSnapshot(store: Store | null = defaultStore()): unknown {
-  try { const raw = store?.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  let raw: string | null | undefined;
+  try { raw = store?.getItem(KEY); } catch { return null; }
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return "corrupt"; }
 }
 
 const KID_MSG = "That game was saved by an older version, so we can't pick it up. Start a fresh one!";
