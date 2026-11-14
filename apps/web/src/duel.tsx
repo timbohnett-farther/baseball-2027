@@ -8,8 +8,7 @@ import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, typ
 import { api, ApiError } from "./api.ts";
 import { dequeue, enqueue, isFinal } from "./outbox.ts";
 import { clearSnapshot, clearSnapshotFor, newGameId, saveSnapshot, SNAPSHOT_SCHEMA } from "./resume.ts";
-import { crowdBed, playEvent } from "./audio.ts";
-import { hapticFor, vibrate } from "./haptics.ts";
+import { crowdBed, playCue, playEvent, startCues } from "./audio.ts";
 import { PaceTracker } from "./pace.ts";
 import { useShotPlans } from "./actionshots.ts";
 import { planAfterResume } from "./actionshot.ts";
@@ -108,10 +107,10 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   useEffect(() => crowdBed(), []);
   const pace = useRef<PaceTracker | null>(null);
   if (!pace.current) { pace.current = new PaceTracker(); pace.current.begin(Date.now()); }
+  // Cues are keyed by event index, so a regenerated events array never re-fires one, and events settled before a resume stay silent.
+  useEffect(() => { startCues(settled.current); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const mine = (current.state.half === "top" ? "away" : "home") === setup.userSide;
-    playEvent(current, mine);
-    vibrate(hapticFor(current, mine));
+    playEvent(current, setup.userSide, Math.min(shown, events.length - 1));
     if (current.type === "pitch") pace.current!.onPitch(Date.now());
     else if (current.type === "half_start") pace.current!.onHalfStart(Date.now());
   }, [current, setup.userSide]);
@@ -149,7 +148,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     // If the device refused to store it, keep the resume save: reopening replays the last pitch and re-sends with the same id.
     if (enqueue({ gameId, body })) clearSnapshot();
     api<PlayedGame>("/api/games/interactive/finish", { body })
-      .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
+      .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); p.reward?.arcade?.objectives.forEach((o) => { if (o.earned) playCue(`obj:${gameId}:${o.id}`, "objective_done"); }); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
         if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); clearSnapshotFor(gameId); setSaved(e.message); }
         else setSaved("Saved on this device. It will upload when you're back online.");
       });
@@ -179,7 +178,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
         </div>
       )}
-      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planAfterResume(planFor(fieldIndex), fieldIndex, settled.current)} director={planFor.director}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
+      <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planAfterResume(planFor(fieldIndex), fieldIndex, settled.current)} director={planFor.director} onShot={(i) => playCue(`shot:${gameId}:${i}`, "action_shot")}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
       {highlights.reel && g.result && <ReelCard reel={highlights.reel} game={shell} finalText={(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text} />}
       <PlayCard card={card} players={players} />
 
@@ -268,13 +267,14 @@ function Zone({ children }: { children?: React.ReactNode }) {
 }
 
 /** Arm/disarm state for the ability chips. Panels remount per pitch, so an armed chip never outlives its pitch. */
+let armSeq = 0; // each arming tap is its own once-only cue
 function useArmed() {
   const [armed, setArmed] = useState<AbilityRequest | null>(null);
   const ref = useRef(armed);
   ref.current = armed;
   useEffect(() => () => gameplayTelemetry.cancel(), []);
   // Every client-side arm or release goes through here, so the Heat reservation ledger sees all of them.
-  const set = useCallback((r: AbilityRequest | null) => { if (r) gameplayTelemetry.arm(r.id); else gameplayTelemetry.cancel(); setArmed(r); }, []);
+  const set = useCallback((r: AbilityRequest | null) => { if (r) { gameplayTelemetry.arm(r.id); playCue(`arm:${++armSeq}`, "ability_arm"); } else gameplayTelemetry.cancel(); setArmed(r); }, []);
   return { armed, ref, setArmed: set };
 }
 

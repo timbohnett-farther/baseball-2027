@@ -50,6 +50,13 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 | W36a audio-only cues have text equivalents | INFERRED | ability-cue and call text already render as role=status; not verified with a screen reader |
 | W36a physical-device touch ergonomics | EVIDENCE_MISSING | no physical phone run |
 | W36a screen-reader (VoiceOver/TalkBack) pass | EVIDENCE_MISSING | not run |
+| W37a cues fire once per authoritative event, none for events settled before a resume | PASS (logic only) | cues.test.ts: idempotence incl. regenerated event object, startMatch floor, cooldown, priority, voice cap; React wiring not driven in a browser |
+| W37a cues, captions and haptics do not change outcomes | PASS (desktop) | cues.test.ts: replay hash identical with engine on, muted, calm, haptics/captions off; engine does not mutate events |
+| W37a settings respected (mute, haptics off, calm, captions off) | PASS (logic only) | cues.test.ts with stub sinks; persisted settings and sliders not exercised on a device |
+| W37a caption placement (844x390, lefty, 667x375 with insets) | PARTIAL | shot.mjs `--check` passes on duel/bigplay/ability moments (bigplay lefty/inset failed once on a flat centre, passed on rerun and on the stashed baseline); capture images were not viewed, a visible caption was not confirmed |
+| W37a iPhone audio unlock, haptic feel, device loudness | EVIDENCE_MISSING | no physical phone run |
+| W37a screen-reader (VoiceOver/TalkBack) reading of captions | EVIDENCE_MISSING | not run |
+| W37a human playtest of commentary tone and mix | EVIDENCE_MISSING | no human session |
 | W32 action shots: shots per match | PARTIAL | auto-sim 30 seeds, no retune: full mean 1.40 (max 4), reduced mean 0.80 (max 2), below the 1-3 target. W32b: the server re-sim, immediate-finish and saved-replay all set `facts`, so Watch gets the same shots; tests show outcomes and hashes identical with `shot` removed |
 
 Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows). W29b changed no row status; the 17.3 row stays partial.

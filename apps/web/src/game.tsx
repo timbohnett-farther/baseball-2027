@@ -299,7 +299,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
   const s = current.state;
   const side: Side = s.half === "top" ? "away" : "home";
   useEffect(() => crowdBed(), []);
-  useEffect(() => { playEvent(current, side === game.userSide); }, [current, side, game.userSide]);
+  useEffect(() => { playEvent(current, game.userSide); }, [current, game.userSide]);
   const batterId = current.type === "pitch" || current.type === "play" ? current.batterId : null;
   const pitcherId = current.type === "pitch" || current.type === "play" ? current.pitcherId : null;
   const lastPitch = [...events.slice(0, i + 1)].reverse().find((e) => e.type === "pitch") as Extract<GameEvent, { type: "pitch" }> | undefined;

@@ -1346,7 +1346,7 @@ class Director {
 }
 
 /** The ballpark. `index` is the current event; a jump of more than one event (skip, replay) re-syncs runners. */
-export function FieldView({ game, index, speed, plan = null, director, children }: { game: PlayedGame; index: number; speed: number; plan?: ShotPlan | null; director?: ActionShotDirector; children?: ReactNode }) {
+export function FieldView({ game, index, speed, plan = null, director, onShot, children }: { game: PlayedGame; index: number; speed: number; plan?: ShotPlan | null; director?: ActionShotDirector; onShot?: (index: number) => void; children?: ReactNode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dirRef = useRef<Director | null>(null);
   const lastRef = useRef(-1);
@@ -1376,7 +1376,7 @@ export function FieldView({ game, index, speed, plan = null, director, children 
     let p = plan;
     if (director && plan) {
       if (begunRef.current === index) p = plan; // effect re-run (strict mode) for the shot already begun
-      else { p = director.begin(index, performance.now()); if (p) begunRef.current = index; }
+      else { p = director.begin(index, performance.now()); if (p) { begunRef.current = index; onShot?.(index); } } // onShot only announces; it never changes the plan
     }
     d.handle(game.result.events[index], index !== lastRef.current + 1, p, index);
     lastRef.current = index;

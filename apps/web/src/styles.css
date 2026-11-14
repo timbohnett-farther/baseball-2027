@@ -60,6 +60,8 @@ h1, h2, h3, .display { font-family: var(--display); text-transform: uppercase; l
 .userbar { position: absolute; top: 16px; right: 0; font-size: 14px; color: var(--text-2); }
 .userbar b { color: var(--text); }
 .userbar .vol { width: 64px; vertical-align: middle; margin: 0 6px; accent-color: var(--accent, #3b82f6); }
+.userbar .mix { display: inline-block; vertical-align: middle; }
+.userbar .mix label { display: block; text-align: right; }
 .status { margin-top: 14px; font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); display: inline-block; }
 .dot.ok { background: var(--amber); }
@@ -699,3 +701,10 @@ html[data-calm="1"] .heat-meter-bar i { transition: none; }
   .game:has(.tp, .windup-gate) .coach { flex-wrap: wrap; }
   .game:has(.tp, .windup-gate) .coach p { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
 }
+
+/* Cue subtitles (W37a): a pointer-transparent status line low and centred, clear of the thumb corners and the tp-note. */
+.cue-caption { position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(56px + env(safe-area-inset-bottom)); max-width: min(46vw, 360px); padding: 3px 10px; border-radius: 4px; background: rgba(11, 13, 18, 0.78); color: var(--text); font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; opacity: 0; }
+.cue-caption:empty { padding: 0; }
+.cue-caption[data-on="1"] { opacity: 1; transition: opacity 0.15s; }
+html[data-calm="1"] .cue-caption[data-on="1"] { transition: none; }
+@media (max-width: 700px) and (orientation: portrait) { .cue-caption { max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)); } }

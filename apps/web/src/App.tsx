@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
-import { useSound, useVolume } from "./audio.ts";
+import { useMix, useSound, useVolume } from "./audio.ts";
+import { CueCaption, useCaptions } from "./captions.tsx";
 import { hapticsSupported, useHaptics } from "./haptics.ts";
 import { useComfort } from "./comfort.ts";
 import { QUALITIES, QUALITY_LABEL, useQuality, type Quality } from "./quality.ts";
@@ -32,6 +33,8 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [sound, toggleSound] = useSound();
   const [volume, setVolume] = useVolume();
+  const [mix, setMix] = useMix();
+  const [captions, toggleCaptions] = useCaptions();
   const [haptics, toggleHaptics] = useHaptics();
   const [quality, setQuality] = useQuality();
   const [lefty, toggleLefty] = useComfort("lefty");
@@ -118,12 +121,21 @@ export function App() {
       </div>
     )}
     <div className="page">
+      <CueCaption />
       <header className="hero">
         <div className="userbar">
           <button className="link" onClick={toggleSound} aria-pressed={sound} aria-label={sound ? "Mute ballpark sound" : "Turn ballpark sound on"} title={sound ? "Mute ballpark sound" : "Turn ballpark sound on"}>
             {sound ? "🔊 Sound" : "🔇 Muted"}
           </button>
           <input className="vol" type="range" min={0} max={1} step={0.1} value={volume} onChange={(e) => setVolume(Number(e.target.value))} aria-label="Volume" />
+          <details className="mix"><summary className="link">Mix</summary>
+            {(["crowd", "fx", "ui"] as const).map((b) => (
+              <label key={b}>{b === "crowd" ? "Crowd" : b === "fx" ? "Effects" : "PA and UI"}
+                <input className="vol" type="range" min={0} max={1} step={0.1} value={mix[b]} onChange={(e) => setMix(b, Number(e.target.value))} aria-label={`${b === "crowd" ? "Crowd" : b === "fx" ? "Effects" : "PA and UI"} volume`} />
+              </label>
+            ))}
+          </details>
+          <button className="link" onClick={toggleCaptions} aria-pressed={captions} title="Short text lines for the play-by-play cues (works with sound off)">{captions ? "Captions on" : "Captions off"}</button>
           {hapticsSupported() && <button className="link" onClick={toggleHaptics} aria-pressed={haptics} title="Vibration on hits and abilities">{haptics ? "Haptics on" : "Haptics off"}</button>}
           <select className="link" value={quality} onChange={(e) => setQuality(e.target.value as Quality)} aria-label="Graphics quality" title="Graphics quality (applies to the next game view)">{QUALITIES.map((q) => <option key={q} value={q}>{QUALITY_LABEL[q]}</option>)}</select>
           <select className="link" value={actionShots} onChange={(e) => setActionShots(e.target.value as ActionShotMode)} aria-label="Action shots" title="Action shots: short replay cameras after big plays">{ACTION_SHOT_MODES.map((m) => <option key={m} value={m}>{"Shots: " + ACTION_SHOT_LABEL[m]}</option>)}</select>

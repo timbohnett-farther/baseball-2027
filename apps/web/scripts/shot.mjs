@@ -41,7 +41,7 @@ const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
 const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay", "shot-contact", "shot-release", "shot-slide"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
-const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .coach p, .coach button, .tp button, .tp .zone";
+const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .cue-caption:not(:empty), .coach p, .coach button, .tp button, .tp .zone";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
   // The ballpark is a lazy chunk: wait for its canvas to exist and draw a few frames before sampling.

@@ -47,9 +47,11 @@ export function patternFor(cue: HapticCue | null, on: boolean, reduced = false):
   return reduced ? [p[0]] : p; // reduced motion keeps a single tick
 }
 
-export function vibrate(cue: HapticCue | null) {
+export const hapticsEnabled = () => enabled;
+
+export function vibrate(cue: HapticCue | null, calm = false) {
   try {
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const reduced = calm || (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
     const p = patternFor(cue, enabled, reduced);
     if (p && typeof navigator !== "undefined" && typeof navigator.vibrate === "function") navigator.vibrate(p);
   } catch { /* unsupported or blocked: stay silent */ }
