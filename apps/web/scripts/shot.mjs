@@ -42,11 +42,32 @@ const DUELS = Object.keys(CONTROLS);
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
 const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay", "shot-contact", "shot-release", "shot-slide"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
 const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .cue-caption:not(:empty), .coach p, .coach button, .tp button, .tp .zone, .result-continue";
+// Distinct 12-bit colours in a 120x80 patch at the viewport centre (the big-play card is opaque and can cover the centre in a short landscape viewport: probe the clear band above it instead).
+async function centreSpread(page) {
+  const vp = page.viewportSize();
+  const cx = (vp.width / 2) | 0, cy = (vp.height / 2) | 0;
+  const card = await page.evaluate(() => { const r = document.querySelector(".big-play")?.getBoundingClientRect(); return r && r.width ? r.top : null; });
+  const py = card !== null && card < cy + 40 ? Math.max(0, (card / 2 - 40) | 0) : cy - 40;
+  const png = await page.screenshot({ type: "png", clip: { x: cx - 60, y: py, width: 120, height: 80 } });
+  return await page.evaluate(async (b64) => {
+    const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data, seen = new Set();
+    for (let i = 0; i < d.length; i += 4) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4);
+    return seen.size;
+  }, png.toString("base64"));
+}
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
-  // The ballpark is a lazy chunk: wait for its canvas to exist and draw a few frames before sampling.
+  // The ballpark is a lazy chunk: wait for its canvas to exist, then poll (software GL under CPU load paints late, so a fixed sleep alone flakes) until the centre
+  // probe shows live pixels. The threshold below is unchanged; a ballpark that never paints still hits the deadline and fails the flat-pixel check.
   await page.waitForSelector(".field canvas", { timeout: 15000 });
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1500); // settle for entrance animations, as before; the poll below only adds waiting when the canvas is still blank
+  let spread = null; // last probe from the poll: judged against the same >= 6 threshold below, not re-sampled (the big-play card animates, so a second sample can dip under 6 on a canvas that did paint)
+  if (m !== "duel-resume" && m !== "duel-result") {
+    for (const deadline = Date.now() + 20000; ; await page.waitForTimeout(250)) { spread = await centreSpread(page); if (spread >= 6 || Date.now() >= deadline) break; }
+  }
   const boxes = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => {
     const r = e.getBoundingClientRect(), s = getComputedStyle(e);
     return { n: (e.className && e.className.baseVal === undefined ? e.className : e.tagName).toString().split(" ").slice(0, 2).join(".") + ":" + (e.textContent || "").trim().slice(0, 14), x: r.left, y: r.top, w: r.width, h: r.height, vis: r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0" };
@@ -89,19 +110,7 @@ async function layoutCheck(page, m) {
     if (pr !== null && pr > vp.width / 2) bad.push(`left-handed: primary action centre x=${pr | 0} is on the right half`);
   }
   // Centre of the screen must be live ballpark pixels, not the flat page background.
-  const cx = (vp.width / 2) | 0, cy = (vp.height / 2) | 0;
-  // The big-play card is opaque and can cover the centre in a short landscape viewport: probe the clear band above it instead.
-  const card = await page.evaluate(() => { const r = document.querySelector(".big-play")?.getBoundingClientRect(); return r && r.width ? r.top : null; });
-  const py = card !== null && card < cy + 40 ? Math.max(0, (card / 2 - 40) | 0) : cy - 40;
-  const png = await page.screenshot({ type: "png", clip: { x: cx - 60, y: py, width: 120, height: 80 } });
-  const spread = await page.evaluate(async (b64) => {
-    const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
-    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
-    const g = c.getContext("2d"); g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, c.width, c.height).data, seen = new Set();
-    for (let i = 0; i < d.length; i += 4) seen.add((d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4);
-    return seen.size;
-  }, png.toString("base64"));
+  spread ??= await centreSpread(page);
   // The coach card must never sit on the plate or batter: that is where the player looks to time the swing.
   const plate = await page.evaluate(() => document.querySelector(".field canvas")?.dataset.plate ?? "");
   if (plate && process.env.SHOT_DEBUG) console.log("   plate", plate, vis.filter((b) => /^(P|BUTTON:OK)/.test(b.n)).map((b) => `${b.n}[${b.x | 0},${b.y | 0},${b.w | 0}x${b.h | 0}]`).join(" "));

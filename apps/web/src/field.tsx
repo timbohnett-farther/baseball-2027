@@ -13,6 +13,7 @@ import {
   releasePose, releaseScene, throwIndex, contactBall, tagPoint, FIELDER_BACK, type Hand, slideScene, slideSubject, sliderPose, type Placement, type SlideSubject,
 } from "./shotscene.ts";
 import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
+import { shotModeActive } from "./shotmode.ts";
 import { limb, mergeByMaterial } from "./rigutil.ts";
 import { perfLog } from "./perftelemetry.ts";
 import { ABILITY_FX } from "./abilityfx.ts";
@@ -25,7 +26,7 @@ import { reducedFlash } from "./comfort.ts";
 
 type Play = Extract<GameEvent, { type: "play" }>;
 /** `?shot=...` art-review pages publish the plate's screen rect (see publishStrikeZone). */
-const SHOT_MODE = typeof location !== "undefined" && location.search.includes("shot=");
+const SHOT_MODE = typeof location !== "undefined" && shotModeActive(import.meta.env.DEV, location.search);
 /** Art review only (`&hold=0.5`): freeze an action shot at that fraction of its run so early/mid/late can be captured deterministically. */
 /** The sim has no pitcher throwing hand, so presentation defaults to right-handed; the capture harness can force `?throws=L`. */
 const SHOT_THROWS: Hand = SHOT_MODE && /[?&]throws=L/.test(location.search) ? "L" : "R";

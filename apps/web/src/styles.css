@@ -719,6 +719,11 @@ html[data-calm="1"] .heat-meter-bar i { transition: none; }
   .game:has(.tp, .windup-gate) .coach { flex-wrap: wrap; }
   .game:has(.tp, .windup-gate) .coach p { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
 }
+/* Short and narrow (iPhone SE class 667x375): the low-right spot is only ~60px wide before the pitch grid, so on the pitch-grid lesson the coach moves up into the free band above the grid (right of the chips, below the speed buttons) with the OK button beside the text. 844x390 keeps the rule above. */
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) and (max-width: 760px) {
+  html:not([data-lefty="1"]) .game:has(.tp .target-cell):not(:has(.run-strip, .run-adv)) .coach { left: 54vw; bottom: auto; top: calc(82px + env(safe-area-inset-top)); width: calc(46vw - 16px - env(safe-area-inset-right)); flex-wrap: nowrap; }
+  html:not([data-lefty="1"]) .game:has(.tp .target-cell):not(:has(.run-strip, .run-adv)) .coach p { flex: 1 1 0; }
+}
 
 /* Cue subtitles (W37a): a pointer-transparent status line low and centred, clear of the thumb corners and the tp-note. */
 .cue-caption { position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(56px + env(safe-area-inset-bottom)); max-width: min(46vw, 360px); padding: 3px 10px; border-radius: 4px; background: rgba(11, 13, 18, 0.78); color: var(--text); font-size: 13px; line-height: 1.3; text-align: center; pointer-events: none; opacity: 0; }

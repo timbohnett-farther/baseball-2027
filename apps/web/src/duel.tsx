@@ -11,6 +11,7 @@ import { clearSnapshot, clearSnapshotFor, newGameId, saveSnapshot, SNAPSHOT_SCHE
 import { crowdBed, playCue, playEvent, startCues } from "./audio.ts";
 import { PaceTracker } from "./pace.ts";
 import { useShotPlans } from "./actionshots.ts";
+import { shotModeActive } from "./shotmode.ts";
 import { planAfterResume } from "./actionshot.ts";
 import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { Coach } from "./coach.tsx";
@@ -41,7 +42,7 @@ const GRID = 1.8; // zone drawing spans -GRID..GRID
 const toPct = (v: number) => ((v + GRID) / (2 * GRID)) * 100;
 
 /** Art-review mode (`?shot=...`): the swing and glove panels hold still instead of auto-taking on a timer. */
-const SHOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("shot");
+const SHOT = typeof location !== "undefined" && shotModeActive(import.meta.env.DEV, location.search);
 
 /** `shotInputs` (dev screenshots only) starts the game already this far in, with every event shown. */
 /**
