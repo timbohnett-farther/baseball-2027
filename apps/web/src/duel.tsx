@@ -17,6 +17,7 @@ import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
 import { AdvancePanel, RunStrip } from "./run.tsx";
 import { useComfort } from "./comfort.ts";
+import { gameplayTelemetry } from "./gameplaytelemetry.ts";
 import { ABILITY_ICON, APPROACH_TEXT, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, swingTap, WAIT_HINT, type Approach, type ChipCtx } from "./touch.ts";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
@@ -95,7 +96,11 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
 
   // Each render's taps carry that render's phase token (the input count), so a late or repeated tap is dropped.
   const at = inputs.length;
-  const submit = (input: UserInput) => setInputs((prev) => appendInput(prev, input, at));
+  // Telemetry only watches: it classifies the tap against the same token the commit uses, and never changes the commit.
+  const logLen = useRef(at); logLen.current = at;
+  const submit = (input: UserInput) => { gameplayTelemetry.submit(input, g.awaiting, at, logLen.current); setInputs((prev) => appendInput(prev, input, at)); };
+  useEffect(() => { gameplayTelemetry.startMatch(setup.userSide, !!start?.length); if (tutorial) gameplayTelemetry.flow("tutorial"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { gameplayTelemetry.observeEvents(events); }, [events]);
   const current = events[Math.min(shown, events.length - 1)];
   useEffect(() => crowdBed(), []);
   const pace = useRef<PaceTracker | null>(null);
@@ -141,7 +146,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     enqueue({ gameId, body });
     clearSnapshot();
     api<PlayedGame>("/api/games/interactive/finish", { body })
-      .then((p) => { dequeue(gameId); setReward(p.reward); setSaved("saved"); }, (e: Error) => {
+      .then((p) => { dequeue(gameId); setReward(p.reward); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
         if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); setSaved(e.message); }
         else setSaved("Saved on this device. It will upload when you're back online.");
       });
@@ -264,7 +269,10 @@ function useArmed() {
   const [armed, setArmed] = useState<AbilityRequest | null>(null);
   const ref = useRef(armed);
   ref.current = armed;
-  return { armed, ref, setArmed };
+  useEffect(() => () => gameplayTelemetry.cancel(), []);
+  // Every client-side arm or release goes through here, so the Heat reservation ledger sees all of them.
+  const set = useCallback((r: AbilityRequest | null) => { if (r) gameplayTelemetry.arm(r.id); else gameplayTelemetry.cancel(); setArmed(r); }, []);
+  return { armed, ref, setArmed: set };
 }
 
 function HeatMeter({ heat, reserved }: { heat: number; reserved: number }) {
@@ -291,6 +299,7 @@ function AbilityChips({ abilities, heat, armed, onArm, approach, onApproach }: {
   const ctx: ChipCtx = { armed, heat, approach, choosing };
   const tap = (a: AbilityStatus) => {
     const act = chipTap(a, ctx);
+    if (act.do === "note" && a.reason) gameplayTelemetry.chipRejected(a.reason);
     setNote(null);
     if (act.do !== "choose") setChoosing(null);
     if (act.do === "arm") onArm(act.req);
@@ -409,13 +418,13 @@ function WindupGate() {
   const [lefty] = useComfort("lefty");
   useEffect(() => { if (!hint) return; const t = setTimeout(() => setHint(false), 1600); return () => clearTimeout(t); }, [hint]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.code === "Space" && swingTap(false) === "wait") { e.preventDefault(); setHint(true); } };
+    const onKey = (e: KeyboardEvent) => { if (e.code === "Space" && swingTap(false) === "wait") { e.preventDefault(); gameplayTelemetry.windupTap(); setHint(true); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   return (
     <div className={`windup-gate ${lefty ? "lefty" : ""}`}>
-      <button className="swing-btn" aria-disabled="true" onPointerDown={() => setHint(true)}>SWING<small className="key">WAIT</small></button>
+      <button className="swing-btn" aria-disabled="true" onPointerDown={() => { gameplayTelemetry.windupTap(); setHint(true); }}>SWING<small className="key">WAIT</small></button>
       <p className="windup-hint" role="status">{hint ? WAIT_HINT : ""}</p>
     </div>
   );

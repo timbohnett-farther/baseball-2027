@@ -1,3 +1,4 @@
+import { gameplayTelemetry } from "./gameplaytelemetry.ts";
 import { useEffect, useRef, useState } from "react";
 import type { Awaiting } from "@bb/sim";
 import { HINTS, nextLesson, parsePrefs, pickHint, recordShown, retireHint, setHintsOff, situationOf, stepOf, withSeen, type HintPrefs } from "./coach.ts";
@@ -28,7 +29,7 @@ export function Coach({ mode, awaiting, moveKey }: { mode: "tutorial" | "hints";
   const picked = mode === "hints" && !shot ? pickHint(sit, prefsRef.current) : null;
   useEffect(() => {
     if (shot && shot.at !== moveKey) setShot(null);
-    else if (picked) { prefsRef.current = recordShown(prefsRef.current, picked.id); write(prefsRef.current); setShot({ id: picked.id, at: moveKey }); }
+    else if (picked) { prefsRef.current = recordShown(prefsRef.current, picked.id); write(prefsRef.current); gameplayTelemetry.hint(picked.id); setShot({ id: picked.id, at: moveKey }); }
   }, [picked, shot, moveKey]);
   const hint = mode === "hints" && shot && shot.at === moveKey && !(dismissed?.id === shot.id && dismissed.at === moveKey)
     ? HINTS.find((h) => h.id === shot.id) ?? null : null;
