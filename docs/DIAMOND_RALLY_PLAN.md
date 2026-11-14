@@ -88,7 +88,7 @@ free/royalty-free rigs and motion libraries, no paid mocap.
   the sim has no pitcher throwing hand (R is a presentation default).
 - [x] W32e shot telemetry (Kimi phase 03): record shot triggers/skips/durations, no frequency or pacing retune.
 - [x] W33 live PBR materials/lighting: tiered procedural grass/clay speckle + bump (`surface` in quality.ts), soft shadows on High, roughness/metalness pass on bases, poles, seats, uniforms. Draw calls unchanged within noise.
-- [x] W33b cinematic lighting, VFX and post for action shots only.
+- [x] W33b cinematic lighting, VFX and post for action shots only. (9f75fdf + 3bdf905, live.) Review: typecheck/tests/build re-run clean (24/91/39/164); contact spark reads well; slide dust reads as glowing dots, not dirt (open); release chalk puff unconfirmed; Standard look and any real device unverified; `shot.mjs --check` `bigplay` fails before and after this wave (open).
 - [ ] W34 ROAD WO3-4: athlete rig import validators + animation alignment (needs the art-source decision).
 - [ ] W35 ROAD WO9-12: preload/memory, accessibility variants, team content, optimization, gates G1-G6.
 
