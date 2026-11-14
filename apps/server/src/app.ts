@@ -67,9 +67,9 @@ export async function buildApp(opts: { logger?: boolean; webRoot?: string } = {}
       cacheControl: false,
       // The worker, the shell page and the manifest must revalidate every time or a deploy never reaches installed copies;
       // /assets/* is content-hashed, so it can be cached for good; everything else (icons, shell) revalidates.
-      setHeaders(res, path) {
-        if (/[\\/]assets[\\/]/.test(path)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-        else res.setHeader("Cache-Control", "no-cache");
+      setHeaders(reply, path) {
+        if (/[\\/]assets[\\/]/.test(path)) reply.header("Cache-Control", "public, max-age=31536000, immutable");
+        else reply.header("Cache-Control", "no-cache");
       },
     });
     app.setNotFoundHandler((req, reply) => {
