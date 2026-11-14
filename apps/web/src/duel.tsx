@@ -16,7 +16,8 @@ import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPl
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
 import { AdvancePanel, RunStrip } from "./run.tsx";
-import { ABILITY_ICON, APPROACH_TEXT, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, type Approach, type ChipCtx } from "./touch.ts";
+import { useComfort } from "./comfort.ts";
+import { ABILITY_ICON, APPROACH_TEXT, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, swingTap, WAIT_HINT, type Approach, type ChipCtx } from "./touch.ts";
 
 const FieldView = lazy(() => import("./field.tsx").then((m) => ({ default: m.FieldView })));
 
@@ -45,12 +46,12 @@ const SHOT = typeof location !== "undefined" && new URLSearchParams(location.sea
  * `coach` is Rookie Rally ("tutorial": guided lessons, no auto-take timers, completion goes to /api/tutorial/complete
  * instead of the game record, and `onSkip` replaces Quit) or "hints" (one-time tips in a normal game).
  */
-export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, resume, shotPaused }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[]; coach?: "tutorial" | "hints"; onSkip?: () => void; resume?: { gameId: string; inputs: UserInput[] }; shotPaused?: boolean }) {
+export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, resume, shotPaused, shotWindup }: { setup: InteractiveSetup; seasonId?: number; onDone: () => void; shotInputs?: UserInput[]; coach?: "tutorial" | "hints"; onSkip?: () => void; resume?: { gameId: string; inputs: UserInput[] }; shotPaused?: boolean; shotWindup?: boolean }) {
   const tutorial = coach === "tutorial";
   const [gameId] = useState(() => resume?.gameId ?? newGameId());
   const start = shotInputs ?? resume?.inputs;
   const [inputs, setInputs] = useState<UserInput[]>(start ?? []);
-  const [shown, setShown] = useState(start ? 1e6 : 0);
+  const [shown, setShown] = useState(start && !shotWindup ? 1e6 : 0);
   // A resumed game (or one the app lost sight of) waits for a tap before the next pitch, so nothing happens while you look away.
   const [paused, setPaused] = useState(!!resume || !!shotPaused);
   useEffect(() => {
@@ -87,10 +88,10 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   // Play out newly revealed events, one after another.
   const caughtUp = shown >= events.length - 1;
   useEffect(() => {
-    if (caughtUp || paused) return;
+    if (caughtUp || paused || shotWindup) return;
     const t = setTimeout(() => setShown((n) => n + 1), holdFor(events[shown], planFor(shown)) / speed);
     return () => clearTimeout(t);
-  }, [shown, caughtUp, speed, events, paused, planFor]);
+  }, [shown, caughtUp, speed, events, paused, planFor, shotWindup]);
 
   // Each render's taps carry that render's phase token (the input count), so a late or repeated tap is dropped.
   const at = inputs.length;
@@ -112,7 +113,9 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);
   const youWon = g.result?.winner === setup.userSide;
   const done = !!g.result && caughtUp;
-  const awaiting = caughtUp && !paused ? g.awaiting : null;
+  const awaiting = caughtUp && !paused && !shotWindup ? g.awaiting : null;
+  // Windup: the pitch is decided but its events are still playing. A swing tap here is ignored (see WindupGate).
+  const windup = (shotWindup || !caughtUp) && !paused && !done && g.awaiting?.role === "swing" && !!g.awaiting.incoming;
 
   // Every time the game stops to ask you something, remember how to get back here. Tutorials and dev shots never save.
   useEffect(() => {
@@ -186,6 +189,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           heat={awaiting.state.heat} v3={setup.rules >= 3} type={pitchType} onType={setPitchType} abilities={awaiting.abilities} actorId={awaiting.pitcherId}
           onThrow={(aim, ability) => submit(ability ? { kind: "pitch", type: pitchType, aim, ability } : { kind: "pitch", type: pitchType, aim })} />
       )}
+      {windup && <WindupGate key={`w${inputs.length}`} />}
       {awaiting?.role === "swing" && awaiting.incoming && (
         <SwingPanel still={tutorial} key={inputs.length} pitcher={players.get(awaiting.pitcherId)} batter={players.get(awaiting.batterId)}
           heat={awaiting.state.heat} v3={setup.rules >= 3} incoming={awaiting.incoming} sup={awaiting.super} approach={approach} onApproach={setApproach}
@@ -261,12 +265,6 @@ function useArmed() {
   const ref = useRef(armed);
   ref.current = armed;
   return { armed, ref, setArmed };
-}
-
-/** Left-handed mode mirrors the control clusters only (ARC 4.2); the field never flips. */
-function useLefty(): [boolean, () => void] {
-  const [lefty, setLefty] = useState(() => { try { return localStorage.getItem("bb.lefty") === "1"; } catch { return false; } });
-  return [lefty, () => setLefty((v) => { try { localStorage.setItem("bb.lefty", v ? "0" : "1"); } catch { /* private mode */ } return !v; })];
 }
 
 function HeatMeter({ heat, reserved }: { heat: number; reserved: number }) {
@@ -348,7 +346,7 @@ function PitchPanel({ pitcher, batter, heat, v3, type, onType, onThrow, abilitie
 }) {
   const { armed, ref: armedRef, setArmed } = useArmed();
   const [chase, setChase] = useState(false);
-  const [lefty, toggleLefty] = useLefty();
+  const [lefty, toggleLefty] = useComfort("lefty");
   const throwAt = useCallback((cell: number) => onThrow(cellAim(cell, chase), armedRef.current ?? undefined), [onThrow, chase, armedRef]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -405,6 +403,24 @@ function BreakerChip({ team, onGo }: { team: NonNullable<Awaiting["team"]>; onGo
   );
 }
 
+/** Before the pitch is released there is nothing to swing at: a tap or Space says so, and changes nothing (no input, no whiff, no Heat, nothing queued). */
+function WindupGate() {
+  const [hint, setHint] = useState(false);
+  const [lefty] = useComfort("lefty");
+  useEffect(() => { if (!hint) return; const t = setTimeout(() => setHint(false), 1600); return () => clearTimeout(t); }, [hint]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.code === "Space" && swingTap(false) === "wait") { e.preventDefault(); setHint(true); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return (
+    <div className={`windup-gate ${lefty ? "lefty" : ""}`}>
+      <button className="swing-btn" aria-disabled="true" onPointerDown={() => setHint(true)}>SWING<small className="key">WAIT</small></button>
+      <p className="windup-hint" role="status">{hint ? WAIT_HINT : ""}</p>
+    </div>
+  );
+}
+
 function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onApproach, onSwing, abilities, actorId, still }: {
   /** Rookie Rally: nothing is taken for you. */ still?: boolean;
   pitcher?: SimPlayer; batter?: SimPlayer; heat: Record<number, number>; v3: boolean; incoming: { type: PitchType | null; mph: number; aim: Aim };
@@ -413,7 +429,7 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
   abilities: AbilityStatus[]; actorId: number;
 }) {
   const { armed, ref: armedRef, setArmed } = useArmed();
-  const [lefty, toggleLefty] = useLefty();
+  const [lefty, toggleLefty] = useComfort("lefty");
   const ms = flightMs(incoming.mph);
   const startRef = useRef(performance.now());
   const doneRef = useRef(false);
@@ -512,6 +528,7 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove, s
   const onGloveRef = useRef(onGlove);
   onGloveRef.current = onGlove;
   const { armed, ref: armedRef, setArmed } = useArmed();
+  const [lefty] = useComfort("lefty");
   const [pick, setPick] = useState<Base | null>(throws?.recommended ?? null);
   const pickRef = useRef(pick);
   pickRef.current = pick;
@@ -539,7 +556,7 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove, s
   }, [glove]);
 
   return (
-    <div className="duel-panel tp">
+    <div className={`duel-panel tp ${lefty ? "lefty" : ""}`}>
       <div className="matchup">
         <span><small>{label.toUpperCase()}</small> {batter?.name}</span>
         <span><small>YOUR PLAY</small> {fielder?.name} ({fielder?.position})</span>

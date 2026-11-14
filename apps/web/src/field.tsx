@@ -16,6 +16,7 @@ import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
 import { limb, mergeByMaterial } from "./rigutil.ts";
 import { perfLog } from "./perftelemetry.ts";
 import { ABILITY_FX } from "./abilityfx.ts";
+import { reducedFlash } from "./comfort.ts";
 
 // 3D ballpark that animates the sim's event stream (docs/ARCHITECTURE.md "Graphics and big moments").
 // Everything is procedural low-poly: dark navy-black world, one warm key light, a rim light from
@@ -1063,7 +1064,7 @@ class Director {
 
   private stageFx(kind: ShotKind) {
     if (kind !== "contact" && kind !== "release" && kind !== "slide") return;
-    const calm = this.reduced || !!this.shots[0]?.still;
+    const calm = this.reduced || reducedFlash() || !!this.shots[0]?.still;
     const t = this.tr = shotTreatment(kind, this.tier, calm);
     this.stadium.forEach((s, i) => { s.l.intensity = s.base * (i === 0 ? Math.min(1, t.dim + 0.4) : t.dim); }); // the stadium key keeps its shadows, the surround falls away
     (this.scene.fog as THREE.FogExp2).density = t.fog;

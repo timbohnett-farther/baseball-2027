@@ -94,3 +94,7 @@ export function chipTap(a: AbilityStatus, c: ChipCtx): ChipAction {
 export function survivesApproach(a: AbilityStatus | undefined, approach: Approach): boolean {
   return !a || !misfit(a, approach);
 }
+
+/** A swing tap only counts once the pitch is incoming; in the windup it is ignored, never queued. */
+export const WAIT_HINT = "WAIT FOR THE PITCH";
+export const swingTap = (pitchIncoming: boolean): "swing" | "wait" => (pitchIncoming ? "swing" : "wait");

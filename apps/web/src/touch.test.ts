@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AbilityStatus } from "@bb/sim";
-import { appendInput, cellAim, cellTag, chipState, chipTap, keyCell, reasonText, survivesApproach, type ChipCtx } from "./touch.ts";
+import type { AbilityStatus, UserInput } from "@bb/sim";
+import { WAIT_HINT, swingTap, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, reasonText, survivesApproach, type ChipCtx } from "./touch.ts";
 
 const st = (o: Partial<AbilityStatus>): AbilityStatus => ({ id: "BAT_COMET", name: "Comet", cost: 50, summary: "", needsDirection: false, swings: ["power"], available: true, ...o });
 const ctx = (o: Partial<ChipCtx> = {}): ChipCtx => ({ armed: null, heat: 80, approach: "power", choosing: null, ...o });
@@ -65,4 +65,13 @@ test("tap contract: a stale or repeated tap adds no input, so no Heat is spent a
   assert.equal(appendInput(later, a, 0), later);
   // A tap from a phase that hasn't happened yet is refused too.
   assert.equal(appendInput(later, a, 5), later);
+});
+
+test("a swing tap before the pitch is released is ignored with a readable hint; it never reaches the input log", () => {
+  assert.equal(swingTap(false), "wait"); assert.equal(swingTap(true), "swing");
+  assert.match(WAIT_HINT, /WAIT FOR THE PITCH/);
+  const log: UserInput[] = [{ kind: "swing", timing: 0.5, aim: { x: 0, y: 0 }, approach: "power" } as UserInput];
+  const before = JSON.stringify(log);
+  if (swingTap(false) === "swing") appendInput(log, log[0], 1);
+  assert.equal(JSON.stringify(log), before);
 });

@@ -467,7 +467,7 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .tp-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .pchip { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .pchip > button:first-child { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "i m" "s s"; gap: 2px 8px; align-items: center; text-align: left; min-height: 56px; padding: 6px 10px; background: var(--surface-raised); color: var(--text); border: 1px solid var(--rim); border-radius: 4px; }
-.chip-icon { grid-area: i; font-size: 20px; width: 24px; text-align: center; }
+.chip-icon { grid-area: i; font-size: 20px; width: 24px; text-align: center; white-space: nowrap; overflow: hidden; }
 .chip-main { grid-area: m; display: flex; flex-direction: column; line-height: 1.15; }
 .chip-main b { font-size: 13px; }
 .chip-main small { font-size: 11px; color: var(--text-2); }
@@ -504,48 +504,48 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 /* Landscape phone stage: while a tap panel is up the field fills the screen and the control clusters float over its
    lower corners (thumb zones), so nothing needs scrolling. Chips are a compact row at the top left; the centre and plate stay clear. */
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
-  .game:has(.tp) { min-height: 0; padding: 0; border: 0; background: none; backdrop-filter: none; box-shadow: none; animation: none; margin: 0; overflow: visible; }
-  .game:has(.tp) .field { position: fixed; inset: 0; margin: 0; aspect-ratio: auto; border: 0; border-radius: 0; z-index: 1; }
-  .game:has(.tp) .game-top { position: fixed; z-index: 3; top: env(safe-area-inset-top); left: env(safe-area-inset-left); right: env(safe-area-inset-right); pointer-events: none; }
-  .game:has(.tp) .game-top button { pointer-events: auto; min-height: 44px; min-width: 44px; }
-  .game:has(.tp) .rotate-hint, .game:has(.tp) .play-card { display: none; }
-  .game:has(.tp) .tp { position: fixed; z-index: 3; inset: 0; margin: 0; pointer-events: none; }
-  .game:has(.tp) .tp button, .game:has(.tp) .tp-note { pointer-events: auto; }
+  .game:has(.tp, .windup-gate) { min-height: 0; padding: 0; border: 0; background: none; backdrop-filter: none; box-shadow: none; animation: none; margin: 0; overflow: visible; }
+  .game:has(.tp, .windup-gate) .field { position: fixed; inset: 0; margin: 0; aspect-ratio: auto; border: 0; border-radius: 0; z-index: 1; }
+  .game:has(.tp, .windup-gate) .game-top { position: fixed; z-index: 3; top: env(safe-area-inset-top); left: env(safe-area-inset-left); right: env(safe-area-inset-right); pointer-events: none; }
+  .game:has(.tp, .windup-gate) .game-top button { pointer-events: auto; min-height: 44px; min-width: 44px; }
+  .game:has(.tp, .windup-gate) .rotate-hint, .game:has(.tp, .windup-gate) .play-card { display: none; }
+  .game:has(.tp, .windup-gate) .tp { position: fixed; z-index: 3; inset: 0; margin: 0; pointer-events: none; }
+  .game:has(.tp, .windup-gate) .tp button, .game:has(.tp, .windup-gate) .tp-note { pointer-events: auto; }
   /* Top bar: compact scoreboard left, at-bat/pitching + heat centred, speed/Quit right. Abilities are one row under it. */
-  .game:has(.tp) .game-top { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
-  .game:has(.tp) .scorebug { min-width: 0; max-width: none; width: 212px; }
-  .game:has(.tp) .bug-row { padding: 1px 8px; gap: 6px; }
-  .game:has(.tp) .bug-abbr { font-size: 15px; width: 34px; }
-  .game:has(.tp) .bug-score { font-size: 18px; width: 20px; }
-  .game:has(.tp) .bug-rally { width: 28px; }
-  .game:has(.tp) .bug-assist { display: none; }
-  .game:has(.tp) .bug-state { padding: 1px 8px; gap: 1px 8px; }
-  .game:has(.tp) .bug-inning { font-size: 10px; line-height: 1; padding: 2px 8px 0 11px; }
-  .game:has(.tp) .bug-row { line-height: 1; }
-  .game:has(.tp) .bug-state { grid-template-columns: auto auto auto; }
-  .game:has(.tp) .bug-diamond { grid-column: 3; grid-row: 1 / span 2; width: 26px; height: 18px; }
-  .game:has(.tp) .bug-count { font-size: 13px; }
-  .game:has(.tp) .game-controls { gap: 6px; background: rgba(11, 13, 18, 0.6); border-radius: 4px; padding: 0 4px; }
-  .game:has(.tp) .matchup { position: absolute; left: 50%; transform: translateX(-50%); top: calc(4px + env(safe-area-inset-top)); margin: 0; gap: 12px; flex-wrap: nowrap; white-space: nowrap; font-size: 12px; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
-  .game:has(.tp) .tp-grid-layout { position: absolute; inset: 0; display: block; margin: 0; padding: 0; }
-  .game:has(.tp) .tp-side { position: absolute; left: calc(8px + env(safe-area-inset-left)); bottom: calc(8px + env(safe-area-inset-bottom)); width: min(260px, 31vw); }
-  .game:has(.tp) .tp-action { position: absolute; right: calc(8px + env(safe-area-inset-right)); bottom: calc(8px + env(safe-area-inset-bottom)); }
-  .game:has(.tp) .tp-chips { display: contents; }
-  .game:has(.tp) .tp-chips .heat-meter { position: absolute; left: 50%; transform: translateX(-50%); top: calc(30px + env(safe-area-inset-top)); width: 190px; padding: 2px 8px; background: rgba(11, 13, 18, 0.6); border-radius: 3px; }
-  .game:has(.tp) .tp-chip-row { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); display: flex; flex-wrap: nowrap; gap: 8px; }
-  .game:has(.tp) .tp-note { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom)); max-width: 290px; background: rgba(11, 13, 18, 0.8); padding: 2px 8px; border-radius: 3px; }
-  .game:has(.tp) .pchip > button:first-child { min-height: 56px; padding: 2px 8px; gap: 0 6px; }
-  .game:has(.tp) .chip-main { flex-direction: row; align-items: baseline; gap: 6px; white-space: nowrap; }
-  .game:has(.tp) .chip-main b { font-size: 12px; }
-  .game:has(.tp) .pchip { max-width: 150px; }
-  .game:has(.tp) .chip-state { font-size: 10px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .game:has(.tp) .chip-icon { font-size: 16px; line-height: 1; }
-  .game:has(.tp) .pchip > button:first-child, .game:has(.tp) .duel-type, .game:has(.tp) .approach button, .game:has(.tp) .tp-toggle { background: rgba(26, 31, 42, 0.62); }
+  .game:has(.tp, .windup-gate) .game-top { flex-wrap: nowrap; align-items: flex-start; gap: 8px; }
+  .game:has(.tp, .windup-gate) .scorebug { min-width: 0; max-width: none; width: 212px; }
+  .game:has(.tp, .windup-gate) .bug-row { padding: 1px 8px; gap: 6px; }
+  .game:has(.tp, .windup-gate) .bug-abbr { font-size: 15px; width: 34px; }
+  .game:has(.tp, .windup-gate) .bug-score { font-size: 18px; width: 20px; }
+  .game:has(.tp, .windup-gate) .bug-rally { width: 28px; }
+  .game:has(.tp, .windup-gate) .bug-assist { display: none; }
+  .game:has(.tp, .windup-gate) .bug-state { padding: 1px 8px; gap: 1px 8px; }
+  .game:has(.tp, .windup-gate) .bug-inning { font-size: 10px; line-height: 1; padding: 2px 8px 0 11px; }
+  .game:has(.tp, .windup-gate) .bug-row { line-height: 1; }
+  .game:has(.tp, .windup-gate) .bug-state { grid-template-columns: auto auto auto; }
+  .game:has(.tp, .windup-gate) .bug-diamond { grid-column: 3; grid-row: 1 / span 2; width: 26px; height: 18px; }
+  .game:has(.tp, .windup-gate) .bug-count { font-size: 13px; }
+  .game:has(.tp, .windup-gate) .game-controls { gap: 6px; background: rgba(11, 13, 18, 0.6); border-radius: 4px; padding: 0 4px; }
+  .game:has(.tp, .windup-gate) .matchup { position: absolute; left: 50%; transform: translateX(-50%); top: calc(4px + env(safe-area-inset-top)); margin: 0; gap: 12px; flex-wrap: nowrap; white-space: nowrap; font-size: 12px; background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+  .game:has(.tp, .windup-gate) .tp-grid-layout { position: absolute; inset: 0; display: block; margin: 0; padding: 0; }
+  .game:has(.tp, .windup-gate) .tp-side { position: absolute; left: calc(8px + env(safe-area-inset-left)); bottom: calc(8px + env(safe-area-inset-bottom)); width: min(260px, 31vw); }
+  .game:has(.tp, .windup-gate) .tp-action { position: absolute; right: calc(8px + env(safe-area-inset-right)); bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .game:has(.tp, .windup-gate) .tp-chips { display: contents; }
+  .game:has(.tp, .windup-gate) .tp-chips .heat-meter { position: absolute; left: 50%; transform: translateX(-50%); top: calc(30px + env(safe-area-inset-top)); width: 190px; padding: 2px 8px; background: rgba(11, 13, 18, 0.6); border-radius: 3px; }
+  .game:has(.tp, .windup-gate) .tp-chip-row { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); display: flex; flex-wrap: nowrap; gap: 8px; }
+  .game:has(.tp, .windup-gate) .tp-note { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom)); max-width: 290px; background: rgba(11, 13, 18, 0.8); padding: 2px 8px; border-radius: 3px; }
+  .game:has(.tp, .windup-gate) .pchip > button:first-child { min-height: 56px; padding: 2px 8px; gap: 0 6px; }
+  .game:has(.tp, .windup-gate) .chip-main { flex-direction: row; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .game:has(.tp, .windup-gate) .chip-main b { font-size: 12px; }
+  .game:has(.tp, .windup-gate) .pchip { max-width: 150px; }
+  .game:has(.tp, .windup-gate) .chip-state { font-size: 10px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game:has(.tp, .windup-gate) .chip-icon { font-size: 16px; line-height: 1; }
+  .game:has(.tp, .windup-gate) .pchip > button:first-child, .game:has(.tp, .windup-gate) .duel-type, .game:has(.tp, .windup-gate) .approach button, .game:has(.tp, .windup-gate) .tp-toggle { background: rgba(26, 31, 42, 0.62); }
   .tp.lefty .tp-side { left: auto; right: calc(8px + env(safe-area-inset-right)); }
   .tp.lefty .tp-action { right: auto; left: calc(8px + env(safe-area-inset-left)); align-items: flex-start; }
 }
 .tp .zone { width: 96px; }
-@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) { .game:has(.tp) .tp .zone { display: none; } }
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) { .game:has(.tp, .windup-gate) .tp .zone { display: none; } }
 
 /* Rules v6 baserunning: steal/pickoff strip and the send/hold panel. A column in the right thumb zone on a landscape phone, so the field centre stays clear. */
 .run-box { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: stretch; }
@@ -555,11 +555,11 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .run-burn[aria-disabled="true"] { opacity: 0.6; }
 .run-confirm { min-height: 56px; min-width: 112px; padding: 8px 20px; font-size: 20px; }
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
-  .game:has(.tp) .run-strip .run-box, .game:has(.tp) .run-adv .run-box { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(58px + env(safe-area-inset-top)); flex-direction: column; flex-wrap: nowrap; width: min(180px, 26vw); margin: 0; }
-  .game:has(.tp) .run-adv .run-box { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }
-  .game:has(.tp) .run-go, .game:has(.tp) .run-burn { background: rgba(26, 31, 42, 0.62); }
-  .game:has(.tp) .run-adv .run-confirm { min-height: 88px; }
-  .game:has(.tp) .run-title { background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
+  .game:has(.tp, .windup-gate) .run-strip .run-box, .game:has(.tp, .windup-gate) .run-adv .run-box { position: absolute; right: calc(8px + env(safe-area-inset-right)); top: calc(58px + env(safe-area-inset-top)); flex-direction: column; flex-wrap: nowrap; width: min(180px, 26vw); margin: 0; }
+  .game:has(.tp, .windup-gate) .run-adv .run-box { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .game:has(.tp, .windup-gate) .run-go, .game:has(.tp, .windup-gate) .run-burn { background: rgba(26, 31, 42, 0.62); }
+  .game:has(.tp, .windup-gate) .run-adv .run-confirm { min-height: 88px; }
+  .game:has(.tp, .windup-gate) .run-title { background: rgba(11, 13, 18, 0.7); padding: 2px 8px; border-radius: 3px; }
 }
 
 /* Coach bubble: in flow under the panels on desktop; on a landscape phone it floats low and right of the plate (the plate and batter are where the swing is timed, so they stay clear), left of the pitch grid / swing button. */
@@ -568,7 +568,7 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .coach-step { opacity: 0.6; font-size: 11px; }
 .coach button { pointer-events: auto; min-width: 44px; min-height: 44px; }
 @media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
-  .game:has(.tp) .coach { position: fixed; z-index: 4; left: 54vw; bottom: calc(8px + env(safe-area-inset-bottom)); width: 22vw; margin: 0; padding: 2px 6px; font-size: 11px; }
+  .game:has(.tp, .windup-gate) .coach { position: fixed; z-index: 4; left: 54vw; bottom: calc(8px + env(safe-area-inset-bottom)); width: 22vw; margin: 0; padding: 2px 6px; font-size: 11px; }
 }
 
 /* --- Arcade season hub (W26) ------------------------------------------------------- */
@@ -639,3 +639,63 @@ tr.in td { background: rgba(224, 164, 60, 0.05); }
 }
 /* W33b: action-shot vignette, mounted by the Director only while a contact/release/slide shot is on screen. */
 .shot-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(4, 6, 10, 0.9) 100%); }
+
+/* --- W36a: windup gate, non-colour states, reduced flash ------------------------------------------- */
+.windup-gate { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 10px; }
+.windup-gate .swing-btn { background: var(--surface-raised); color: var(--text-2); border: 2px dashed var(--text-2); filter: none; transform: none; cursor: default; touch-action: manipulation; }
+.windup-gate .swing-btn small { opacity: 1; letter-spacing: 0.1em; }
+.windup-hint { margin: 0; min-height: 1.3em; padding: 2px 8px; border-radius: 3px; font-family: var(--display); letter-spacing: 0.08em; font-size: 13px; color: var(--amber); background: rgba(11, 13, 18, 0.8); }
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .game:has(.windup-gate) .windup-gate { position: fixed; z-index: 3; right: calc(8px + env(safe-area-inset-right)); bottom: calc(8px + env(safe-area-inset-bottom)); margin: 0; }
+  .game:has(.windup-gate) .windup-gate.lefty { right: auto; left: calc(8px + env(safe-area-inset-left)); align-items: flex-start; }
+}
+/* A disabled control keeps full-strength text, a dashed edge and its reason in words: never faded to unreadable. */
+.pchip-disabled > button:first-child { opacity: 1; border-style: dashed; border-color: var(--text-2); color: var(--text-2); }
+.pchip-disabled .chip-state { color: var(--text); }
+.pchip-disabled .chip-icon { opacity: 0.7; }
+.run-burn[aria-disabled="true"] { opacity: 1; border: 1px dashed var(--text-2); color: var(--text-2); }
+.super:disabled { opacity: 1; border: 1px dashed var(--text-2); color: var(--text-2); background: var(--surface-raised); box-shadow: none; }
+/* Shape cues for state that colour alone would carry: armed = solid frame + check, ready = open frame, recommended = double frame. */
+.pchip-armed > button:first-child { border-width: 2px; border-style: solid; }
+.pchip-ready > button:first-child { border: 1px solid var(--amber); }
+.throw-diamond button.rec { outline: 2px double var(--amber); outline-offset: 1px; }
+.throw-diamond button.on { border-width: 3px; border-style: solid; }
+.bug-row.fire .bug-abbr::after { content: " \25B2"; font-size: 0.6em; }
+/* Reduced flash (setting or OS reduced motion): no flashes, glows or pulses. Each cue stays as text or shape. */
+html[data-calm="1"] .bug-score.flash { animation: none; border-bottom: 2px solid var(--amber); }
+html[data-calm="1"] .bug-row.fire .bug-rally i { animation: none; box-shadow: none; }
+html[data-calm="1"] .bug-row.fire .bug-abbr { text-shadow: none; }
+html[data-calm="1"] .super.ready { animation: none; box-shadow: inset 0 0 0 2px #c9a8ff; }
+html[data-calm="1"] .throw-diamond button.rec:not(.on) { animation: none; box-shadow: 0 0 0 2px var(--amber); }
+html[data-calm="1"] .pchip-armed > button:first-child, html[data-calm="1"] .pchip-choosing > button:first-child { animation: none; }
+html[data-calm="1"] .ability-cue { animation: none; opacity: 1; transform: translateX(-50%); }
+html[data-calm="1"] .big-play, html[data-calm="1"] .feed li { animation: none; clip-path: none; filter: none; }
+html[data-calm="1"] .heat-meter-bar i { transition: none; }
+
+/* W36a: narrow landscape phones (667pt) and mirrored clusters. The chip row never runs under the right column; the centre block sits between scorebug and controls. */
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .game:has(.tp, .windup-gate) .tp-chip-row { max-width: calc(100vw - 32px - min(180px, 26vw) - env(safe-area-inset-left) - env(safe-area-inset-right)); }
+  .game:has(.tp, .windup-gate) .pchip { flex: 0 1 150px; min-width: 56px; }
+  .game:has(.tp, .windup-gate) .tp .duel-type { min-width: 0; overflow: hidden; }
+  .game:has(.tp, .windup-gate) .matchup { max-width: calc(100vw - 460px); overflow: hidden; text-overflow: ellipsis; }
+  .game:has(.tp, .windup-gate) .tp-mini { display: flex; gap: 8px; }
+  .game:has(.tp, .windup-gate) .tp-mini .tp-toggle { flex: 1 1 0; min-width: 56px; padding-inline: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .game:has(.tp, .windup-gate) .chip-main, .game:has(.tp, .windup-gate) .chip-main b, .game:has(.tp, .windup-gate) .chip-main small, .game:has(.tp, .windup-gate) .chip-state { min-width: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game:has(.tp, .windup-gate) .tp .duel-type small { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  html[data-lefty="1"] .game:has(.tp, .windup-gate) .tp-chip-row { left: auto; right: calc(8px + env(safe-area-inset-right)); justify-content: flex-end; }
+  html[data-lefty="1"] .game:has(.tp, .windup-gate) .run-strip .run-box, html[data-lefty="1"] .game:has(.tp, .windup-gate) .run-adv .run-box { right: auto; left: calc(8px + env(safe-area-inset-left)); }
+}
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) and (max-width: 760px) {
+  .game:has(.tp, .windup-gate) .matchup { left: calc(236px + env(safe-area-inset-left)); right: calc(190px + env(safe-area-inset-right)); transform: none; flex-direction: column; gap: 0; font-size: 11px; overflow: hidden; }
+  .game:has(.tp, .windup-gate) .tp-chips .heat-meter { left: calc(236px + env(safe-area-inset-left)); right: calc(190px + env(safe-area-inset-right)); transform: none; width: auto; top: calc(44px + env(safe-area-inset-top)); }
+  .game:has(.tp, .windup-gate) .tp-chip-row { top: calc(82px + env(safe-area-inset-top)); }
+  .game:has(.tp, .windup-gate) .run-strip .run-box { top: calc(60px + env(safe-area-inset-top)); }
+  .game:has(.tp, .windup-gate) .tp-mini { display: flex; gap: 8px; }
+  .game:has(.tp, .windup-gate) .tp-mini .tp-toggle { flex: 1 1 0; min-width: 56px; padding-inline: 6px; }
+}
+@media (hover: none) and (pointer: coarse) and (max-height: 520px) and (orientation: landscape) {
+  .game:has(.tp, .windup-gate) .coach { width: min(22vw, calc(46vw - 136px - env(safe-area-inset-right))); }
+  html[data-lefty="1"] .game:has(.tp, .windup-gate) .coach { left: auto; right: 58vw; width: min(22vw, calc(42vw - 166px - env(safe-area-inset-left))); }
+  .game:has(.tp, .windup-gate) .coach { flex-wrap: wrap; }
+  .game:has(.tp, .windup-gate) .coach p { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
+}

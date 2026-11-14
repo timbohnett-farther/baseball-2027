@@ -26,10 +26,15 @@ const seedArg = args.find((a) => a.startsWith("--seed="))?.slice(7);
 const hold = { early: 0.15, mid: 0.5, late: 0.85 }[phase ?? ""];
 const jsonOut = args.find((a) => a.startsWith("--json="))?.slice(7);
 const reduced = args.includes("--reduced"); // prefers-reduced-motion: reduce
+// W36a comfort flags: --lefty / --calm seed the stored settings, --gray applies a grayscale filter, --pseudo expands every string ~40%,
+// --inset=T,R,B,L simulates env(safe-area-inset-*) through CDP, --vp=WxH overrides the phone viewport.
+const lefty = args.includes("--lefty"), calm = args.includes("--calm"), gray = args.includes("--gray"), pseudo = args.includes("--pseudo");
+const inset = args.find((a) => a.startsWith("--inset="))?.slice(8).split(",").map(Number);
+const vpArg = args.find((a) => a.startsWith("--vp="))?.slice(5).split("x").map(Number);
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
-const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => !a.startsWith("--") && a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-windup": ".windup-gate" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
 const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
@@ -55,7 +60,7 @@ async function layoutCheck(page, m) {
     if (a.x < -E || a.y < -E || a.x + a.w > vp.width + E || a.y + a.h > vp.height + E) bad.push(`outside viewport: ${a.n} [${a.x | 0},${a.y | 0},${a.w | 0}x${a.h | 0}]`);
     for (let j = i + 1; j < vis.length; j++) {
       const b = vis[j];
-      if (a.x < b.x + b.w - E && b.x < a.x + a.w - E && a.y < b.y + b.h - E && b.y < a.y + a.h - E) bad.push(`overlap: ${a.n} x ${b.n}`);
+      if (a.x < b.x + b.w - E && b.x < a.x + a.w - E && a.y < b.y + b.h - E && b.y < a.y + a.h - E) bad.push(`overlap: ${a.n} x ${b.n} [${[a.x,a.y,a.w,a.h,b.x,b.y,b.w,b.h].map(Math.round)}]`);
     }
     if (phone && a.n.startsWith("") && /^(?:[^:]*button|tp-|pchip|swing|target|duel|approach|run-|coach|chip|speed|link|primary)/.test(a.n) && Math.min(a.w, a.h) < 43.5 && a.w * a.h > 0) bad.push(`touch target <44px: ${a.n} ${a.w | 0}x${a.h | 0}`);
   }
@@ -74,9 +79,21 @@ async function layoutCheck(page, m) {
       if (Math.max(gx, gy) < 8 - E && Math.min(gx, gy) < 0 + E) bad.push(`gap under 8pt (${Math.max(gx, gy).toFixed(1)}): ${a.n} next to ${b.n}`);
     }
   }
+  // W36a: controls stay inside the safe area (simulated insets), text is not clipped in its box, and a left-handed layout puts the primary action on the left.
+  const ins = inset ?? [0, 0, 0, 0];
+  if (inset) for (const a of vis) if (/button|tp-|swing|target|run-|pchip/.test(a.n) && (a.x < ins[3] - E || a.y < ins[0] - E || a.x + a.w > vp.width - ins[1] + E || a.y + a.h > vp.height - ins[2] + E)) bad.push(`inside unsafe area: ${a.n} [${a.x | 0},${a.y | 0},${a.w | 0}x${a.h | 0}] insets ${ins}`);
+  const clipped = await page.evaluate(() => [...document.querySelectorAll(".tp button, .tp-note, .coach, .coach button, .scorebug, .scorebug *, .game-controls button, .windup-gate *, .matchup, .pchip, .run-box *")].filter((e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width * r.height > 0 && s.visibility !== "hidden" && e.children.length === 0 && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1) && s.overflow !== "visible" && s.textOverflow !== "ellipsis"; }).map((e) => `${e.tagName}.${String(e.className).split(" ")[0]}:${(e.textContent || "").trim().slice(0, 14)} ${e.scrollWidth}x${e.scrollHeight} in ${e.clientWidth}x${e.clientHeight}`));
+  for (const c of clipped) bad.push(`text clipped: ${c}`);
+  if (lefty && phone) {
+    const pr = await page.evaluate(() => { const e = document.querySelector(".tp .swing-btn, .tp .run-confirm, .windup-gate .swing-btn"); const r = e?.getBoundingClientRect(); return r && r.width ? r.left + r.width / 2 : null; });
+    if (pr !== null && pr > vp.width / 2) bad.push(`left-handed: primary action centre x=${pr | 0} is on the right half`);
+  }
   // Centre of the screen must be live ballpark pixels, not the flat page background.
   const cx = (vp.width / 2) | 0, cy = (vp.height / 2) | 0;
-  const png = await page.screenshot({ type: "png", clip: { x: cx - 60, y: cy - 40, width: 120, height: 80 } });
+  // The big-play card is opaque and can cover the centre in a short landscape viewport: probe the clear band above it instead.
+  const card = await page.evaluate(() => { const r = document.querySelector(".big-play")?.getBoundingClientRect(); return r && r.width ? r.top : null; });
+  const py = card !== null && card < cy + 40 ? Math.max(0, (card / 2 - 40) | 0) : cy - 40;
+  const png = await page.screenshot({ type: "png", clip: { x: cx - 60, y: py, width: 120, height: 80 } });
   const spread = await page.evaluate(async (b64) => {
     const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
     const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
@@ -125,15 +142,26 @@ await new Promise((ok, no) => {
 
 try {
   const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
-  const page = await browser.newPage(phone ? { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage(phone ? { viewport: { width: vpArg?.[0] ?? 844, height: vpArg?.[1] ?? 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
   page.on("pageerror", (e) => console.error("page error:", e.message));
   if (reduced) await page.emulateMedia({ reducedMotion: "reduce" });
   if (quality) await page.addInitScript((q) => { try { localStorage.setItem("bb.quality", q); } catch { /* shot runs without storage */ } }, quality);
+  if (lefty || calm) await page.addInitScript(([l, c]) => { try { if (l) localStorage.setItem("bb.lefty", "1"); if (c) localStorage.setItem("bb.reducedFlash", "1"); } catch { /* shot runs without storage */ } }, [lefty, calm]);
+  if (inset) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: inset[0], right: inset[1], bottom: inset[2], left: inset[3] } }).catch((e) => { throw new Error(`--inset needs Chrome safe-area emulation: ${e.message}`); });
+  }
+  if (pseudo) await page.addInitScript(() => { // dev-only: pad every text node by ~40% with accented filler, re-applied as React re-renders
+    const grow = (t) => { const v = t.nodeValue; if (!v || !v.trim() || t.__p === v) return; const out = v + "e".repeat(Math.ceil(v.trim().length * 0.4)); t.__p = out; t.nodeValue = out; };
+    const walk = (n) => { const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); let t; while ((t = w.nextNode())) if (t.parentElement && !/^(SCRIPT|STYLE)$/.test(t.parentElement.tagName)) grow(t); };
+    addEventListener("DOMContentLoaded", () => { walk(document.body); new MutationObserver(() => walk(document.body)).observe(document.body, { childList: true, subtree: true, characterData: true }); });
+  });
   let failures = 0;
   const rows = [];
   for (const m of moments) {
     await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}${hold !== undefined ? `&hold=${hold}` : ""}${hand ? `&hand=${hand}` : ""}${throwsArg ? `&throws=${throwsArg}` : ""}${seedArg ? `&seed=${seedArg}` : ""}`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
+    if (gray) await page.addStyleTag({ content: "html { filter: grayscale(1); }" });
     let shotStats = null;
     if (m.startsWith("shot-")) { // an action shot lasts about a second: wait until its camera is a third of the way through
       const want = { "shot-contact": "contact", "shot-release": "release", "shot-slide": "slide" }[m];

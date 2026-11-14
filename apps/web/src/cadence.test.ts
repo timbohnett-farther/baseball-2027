@@ -6,6 +6,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRng, playInteractive, tutorialSetup, type GameEvent, type UserInput } from "@bb/sim";
 import { ActionShotDirector, holdWithShot, SHOT_CAP, SHOT_MAX_MS, type ActionShotMode, type ShotFamily } from "./actionshot.ts";
+import { setComfort, reducedFlash, isLefty } from "./comfort.ts";
+import { shotTreatment } from "./shotfx.ts";
 import { blockingBudgetMs } from "./presentation.ts";
 import { cosmeticRng } from "./cosmetic.ts";
 import { QUALITIES, QUALITY_PROFILE, type Quality } from "./quality.ts";
@@ -179,4 +181,20 @@ test("schedules are repeatable and cover the stated cases", () => {
   assert.ok(Math.max(...iv("stall")) >= 500 && Math.min(...iv("stall")) < 17);
   assert.ok(Math.max(...iv("uneven")) > 33 && Math.min(...iv("uneven")) < 8);
   assert.equal(frameInterval("hz144", 0), 1000 / 144);
+});
+
+test("left-handed layout and reduced flash are presentation-only: the replay hash never moves, and calm only removes flashes", () => {
+  for (const m of matches) {
+    const before = hash(m.result);
+    for (const lefty of [false, true]) for (const calm of [false, true]) {
+      setComfort("lefty", lefty); setComfort("calm", calm);
+      assert.equal(isLefty(), lefty); assert.equal(reducedFlash() || !calm, true);
+      assert.equal(hash(run(m.setup, m.inputs).result), before, `lefty=${lefty} calm=${calm} seed ${m.setup.seed}`);
+    }
+  }
+  setComfort("lefty", false); setComfort("calm", false);
+  for (const tier of QUALITIES) {
+    const on = shotTreatment("contact", tier, false), off = shotTreatment("contact", tier, true);
+    assert.equal(off.pulse, 0); assert.ok(off.fx.length <= on.fx.length);
+  }
 });
