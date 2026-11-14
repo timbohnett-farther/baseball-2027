@@ -4,6 +4,7 @@ import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { getQuality, QUALITY_PROFILE, surfaceLook, type SurfaceLook } from "./quality.ts";
+import { BASE_FOG, dueEvents, poolSize, rigPositions, shotTreatment, type ShotTreatment } from "./shotfx.ts";
 import { blendRate, blockingBudgetMs, cameraViewFor, fitShots, type CameraView } from "./presentation.ts";
 import { holdWithShot, shotPose, type ActionShotDirector, type ShotPlan } from "./actionshot.ts";
 import {
@@ -26,6 +27,8 @@ const SHOT_MODE = typeof location !== "undefined" && location.search.includes("s
 const SHOT_THROWS: Hand = SHOT_MODE && /[?&]throws=L/.test(location.search) ? "L" : "R";
 const SHOT_HOLD = SHOT_MODE ? (() => { const m = /[?&]hold=([\d.]+)/.exec(location.search); return m ? Math.min(1, Math.max(0, Number(m[1]))) : null; })() : null;
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+/** W33b shot-VFX particle tints: warm spark at contact, chalk at the mound, tan dirt on the slide. */
+const FX_TINT: Record<"contact" | "release" | "slide", [number, number, number]> = { contact: [1, 0.86, 0.6], release: [0.9, 0.9, 0.85], slide: [1, 0.78, 0.5] };
 const FT = 0.3048;
 const BASES = [V(0, 0, 0), V(19.4, 0, -19.4), V(0, 0, -38.8), V(-19.4, 0, -19.4)]; // home, 1B, 2B, 3B
 const WALL_R = 112;
@@ -296,11 +299,11 @@ function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
 class Dust {
   readonly points: THREE.Points;
-  private pos: Float32Array; private col: Float32Array; private vel: Float32Array; private life: Float32Array;
+  private pos: Float32Array; private col: Float32Array; private vel: Float32Array; private life: Float32Array; private tint: Float32Array;
   private next = 0;
   constructor(private n: number, private ambient: boolean, size: number, tex: THREE.Texture, private rand: () => number) {
     this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3);
-    this.vel = new Float32Array(n * 3); this.life = new Float32Array(n);
+    this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.tint = new Float32Array(n * 3).fill(0.8);
     for (let i = 0; i < n; i++) {
       if (ambient) { this.pos.set([(rand() - 0.5) * 50, rand() * 9, -rand() * 45], i * 3); this.vel.set([0.5 + rand() * 0.6, 0.05, 0], i * 3); this.life[i] = 1; }
       else this.pos[i * 3 + 1] = -100;
@@ -313,16 +316,26 @@ class Dust {
     }));
     this.points.frustumCulled = false;
   }
-  burst(origin: THREE.Vector3, count: number, speed: number) {
+  /** `tint` (W33b shot VFX) colours these particles; the default is the stadium's tan dust. */
+  burst(origin: THREE.Vector3, count: number, speed: number, tint?: [number, number, number]) {
     for (let k = 0; k < count; k++) {
       const i = this.next; this.next = (this.next + 1) % this.n;
       const rand = this.rand;
+      this.tint.set(tint ?? [0.85, 0.79, 0.7], i * 3);
       this.pos.set([origin.x + (rand() - 0.5) * 0.4, origin.y, origin.z + (rand() - 0.5) * 0.4], i * 3);
       const a = rand() * Math.PI * 2, s = speed * (0.3 + rand());
       this.vel.set([Math.cos(a) * s, rand() * speed * 0.8, Math.sin(a) * s - speed * 0.2], i * 3);
       this.life[i] = 0.6 + rand() * 0.4;
     }
   }
+  /** Kill every live particle (a shot ended): nothing lingers into live play. */
+  clear() {
+    this.life.fill(0); this.col.fill(0);
+    for (let i = 0; i < this.n; i++) this.pos[i * 3 + 1] = -100;
+    (this.points.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.points.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+  }
+  dispose() { this.points.geometry.dispose(); (this.points.material as THREE.Material).dispose(); }
   update(dt: number) {
     for (let i = 0; i < this.n; i++) {
       const j = i * 3;
@@ -339,7 +352,7 @@ class Dust {
       if (this.pos[j + 1] < 0.02) { this.pos[j + 1] = 0.02; this.vel[j + 1] *= -0.2; }
       this.life[i] -= dt * 0.7;
       const f = Math.max(0, this.life[i]) * 0.9;
-      this.col[j] = 0.85 * f; this.col[j + 1] = 0.79 * f; this.col[j + 2] = 0.7 * f;
+      this.col[j] = this.tint[j] * f; this.col[j + 1] = this.tint[j + 1] * f; this.col[j + 2] = this.tint[j + 2] * f;
     }
     (this.points.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (this.points.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
@@ -372,6 +385,9 @@ class Director {
   private teams: PlayedGame["teams"];
   private burstDust: Dust; private drift: Dust;
   private rim: THREE.DirectionalLight; private pop: THREE.PointLight;
+  private stadium: { l: THREE.Light; base: number }[] = []; // key/fill/hemisphere, dimmed only while a shot is on screen (W33b)
+  private shotKey: THREE.DirectionalLight; private shotFx: Dust | null = null; private fxQ = -1;
+  private tr: ShotTreatment | null = null; private vignette: HTMLDivElement | null = null;
   private shake = 0;
   private plan: ShotPlan | null = null;
   private slideSub: SlideSubject | null = null;
@@ -383,7 +399,8 @@ class Director {
   private ump!: THREE.Group;
   private staged: { kind: ShotKind; hidden: [THREE.Object3D, boolean][]; actors: THREE.Group[]; figs: Record<string, THREE.Group>; hit: THREE.Vector3; rel: THREE.Vector3 } | null = null;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
-  private prof = QUALITY_PROFILE[getQuality()]; // graphics tier, read once per renderer
+  private tier = getQuality();
+  private prof = QUALITY_PROFILE[this.tier]; // graphics tier, read once per renderer
   private surf = surfaceLook(this.prof); // W33 material detail for that tier
   private raf = 0; private last = performance.now();
   private frameMs: number[] = []; private frames = 0; private last0 = 0; // shot mode: render-stats window
@@ -400,7 +417,7 @@ class Director {
     r.shadowMap.enabled = this.prof.shadowMap > 0;
     r.shadowMap.type = this.surf.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.scene.background = new THREE.Color("#0B0D12");
-    this.scene.fog = new THREE.FogExp2("#0B0D12", 0.0028);
+    this.scene.fog = new THREE.FogExp2("#0B0D12", BASE_FOG);
 
     // Night game under the towers: a bright, slightly warm key from the first-base bank, a cooler fill from
     // the third-base bank, rim from behind-right (VISUAL_DESIGN 7.2).
@@ -417,7 +434,10 @@ class Director {
     this.rim.position.set(35, 22, -70);
     this.pop = new THREE.PointLight("#f2e3c6", 0, 14);
     this.pop.position.set(0.4, 1.4, 0.8);
-    this.scene.add(key, key.target, fill, this.rim, this.pop, new THREE.HemisphereLight("#5b6a90", "#2a2418", 0.7));
+    const hemi = new THREE.HemisphereLight("#5b6a90", "#2a2418", 0.7);
+    this.shotKey = new THREE.DirectionalLight("#ffe2b8", 0); // W33b: warm key for action shots, dark (intensity 0) in live play
+    this.stadium = [key, fill, hemi].map((l) => ({ l, base: l.intensity }));
+    this.scene.add(key, key.target, fill, this.rim, this.pop, hemi, this.shotKey);
 
     this.buildPark();
     const white = new THREE.MeshStandardMaterial({ color: "#f4f1ea", roughness: 0.4, emissive: "#443322", emissiveIntensity: 0.4 });
@@ -443,6 +463,8 @@ class Director {
     this.burstDust = new Dust(Math.round(400 * this.prof.dust), false, 0.9, dust, this.rand);
     this.drift = new Dust(Math.round(90 * this.prof.dust), true, 0.55, dust, this.rand);
     this.scene.add(this.burstDust.points, this.drift.points);
+    const fxN = poolSize(this.tier);
+    if (fxN > 0) { this.shotFx = new Dust(fxN, false, 0.5, dust, this.rand); this.shotFx.points.visible = false; this.scene.add(this.shotFx.points); }
 
     this.cam.position.copy(this.homePos());
     this.raf = requestAnimationFrame(this.frame);
@@ -566,6 +588,8 @@ class Director {
 
   dispose() {
     cancelAnimationFrame(this.raf);
+    this.unstage();
+    if (this.shotFx) { this.scene.remove(this.shotFx.points); this.shotFx.dispose(); this.shotFx = null; }
     this.renderer.dispose();
   }
 
@@ -900,6 +924,7 @@ class Director {
     }
     this.ball.visible = true;
     this.drift.points.visible = false; this.burstDust.points.visible = false;
+    this.stageFx(kind);
   }
 
   private unstage() {
@@ -918,6 +943,7 @@ class Director {
     st.hidden.forEach(([o, v]) => { o.visible = v; });
     this.ball.visible = false;
     this.drift.points.visible = true; this.burstDust.points.visible = true;
+    this.unstageFx();
   }
 
   private syncStage() {
@@ -931,6 +957,56 @@ class Director {
     if (kind === "contact") this.poseContact(q);
     else if (kind === "release") this.poseRelease(q);
     else this.poseSlide(q);
+    this.driveFx(kind, q, s.dur);
+  }
+
+  // --- W33b: cinematic lighting, VFX and post for the three action shots (shotfx.ts); mounted with the shot, removed with it ---
+
+  private stageFx(kind: ShotKind) {
+    if (kind !== "contact" && kind !== "release" && kind !== "slide") return;
+    const calm = this.reduced || !!this.shots[0]?.still;
+    const t = this.tr = shotTreatment(kind, this.tier, calm);
+    this.stadium.forEach((s, i) => { s.l.intensity = s.base * (i === 0 ? Math.min(1, t.dim + 0.4) : t.dim); }); // the stadium key keeps its shadows, the surround falls away
+    (this.scene.fog as THREE.FogExp2).density = t.fog;
+    this.fxQ = -1;
+    if (this.shotFx) this.shotFx.points.visible = t.fx.length > 0;
+    const host = this.canvas.parentElement;
+    if (host && t.vignette > 0) {
+      const v = this.vignette = document.createElement("div");
+      v.className = "shot-vignette"; v.style.opacity = String(t.vignette); v.setAttribute("aria-hidden", "true");
+      host.insertBefore(v, this.canvas.nextSibling);
+    }
+    if (t.grade) this.canvas.style.filter = "contrast(1.08) saturate(1.12)";
+  }
+
+  private unstageFx() {
+    this.tr = null;
+    this.stadium.forEach((s) => { s.l.intensity = s.base; });
+    (this.scene.fog as THREE.FogExp2).density = BASE_FOG;
+    this.shotKey.intensity = 0; this.pop.intensity = 0; this.pop.position.set(0.4, 1.4, 0.8); this.rim.position.set(35, 22, -70); this.rim.color.set("#f2e3c6");
+    this.shotFx?.clear(); if (this.shotFx) this.shotFx.points.visible = false;
+    this.vignette?.remove(); this.vignette = null;
+    this.canvas.style.filter = "";
+  }
+
+  private driveFx(kind: "contact" | "release" | "slide", q: number, dur: number) {
+    const t = this.tr, st = this.staged;
+    if (!t || !st) return;
+    const subject: [number, number, number] = kind === "contact" ? [st.hit.x, st.hit.y, st.hit.z] : [this.look.x, this.look.y, this.look.z];
+    const rig = rigPositions([this.cam.position.x, this.cam.position.y, this.cam.position.z], subject);
+    this.rim.position.set(...rig.rim); this.rim.color.set("#cfe0ff"); this.rim.intensity = t.rim;
+    this.shotKey.position.set(...rig.key); this.shotKey.intensity = t.key;
+    if (kind === "contact" && t.pulse > 0 && q >= CONTACT_Q) {
+      this.pop.position.copy(st.hit); this.pop.intensity = t.pulse * Math.exp(-(q - CONTACT_Q) * dur * 9);
+    }
+    if (!this.shotFx) return;
+    const held = SHOT_HOLD !== null;
+    for (const e of dueEvents(t.fx, this.fxQ, q)) {
+      const at = kind === "contact" ? st.hit : kind === "release" ? V(st.figs.pitcher.position.x, 0.1, st.figs.pitcher.position.z) : V(st.figs.runnerWrap.position.x, 0.1, st.figs.runnerWrap.position.z);
+      this.shotFx.burst(at, e.n, kind === "contact" ? 2.6 : kind === "release" ? 1.4 : 2.6, FX_TINT[kind]);
+      if (held) for (let a = (q - e.q) * dur; a > 0; a -= 1 / 30) this.shotFx.update(Math.min(1 / 30, a)); // frozen capture: age what already fired
+    }
+    this.fxQ = q;
   }
 
   private hitPoint(g: THREE.Group, side: 1 | -1) {
@@ -1086,6 +1162,7 @@ class Director {
       return true;
     });
     this.burstDust.update(dt);
+    this.shotFx?.update(SHOT_HOLD !== null ? 0 : dt);
     this.drift.update(real);
     this.pop.intensity *= Math.exp(-real * 9);
     const kind = this.shots[0]?.kind;

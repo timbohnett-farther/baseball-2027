@@ -15,6 +15,7 @@ const phone = args.includes("--phone");
 // --check: layout assertions per duel-* moment (no overlapping HUD/controls, all inside the viewport, ballpark pixels in the centre).
 const check = args.includes("--check");
 // --perf: no pictures; print renderer stats (draw calls, triangles, frame time) per moment. --json=FILE also writes them.
+// --reduced emulates prefers-reduced-motion.
 // --quality=high|standard|battery sets the stored quality tier before the page loads.
 const perf = args.includes("--perf");
 // --phase=early|mid|late freezes an action shot at 0.15 / 0.5 / 0.85 of its run; --hand=L|R picks a left- or right-handed batter; --seed=N starts the fixture seed walk there.
@@ -24,8 +25,9 @@ const throwsArg = args.find((a) => a.startsWith("--throws="))?.slice(9); // pitc
 const seedArg = args.find((a) => a.startsWith("--seed="))?.slice(7);
 const hold = { early: 0.15, mid: 0.5, late: 0.85 }[phase ?? ""];
 const jsonOut = args.find((a) => a.startsWith("--json="))?.slice(7);
+const reduced = args.includes("--reduced"); // prefers-reduced-motion: reduce
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
-const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
@@ -125,6 +127,7 @@ try {
   const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   const page = await browser.newPage(phone ? { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
   page.on("pageerror", (e) => console.error("page error:", e.message));
+  if (reduced) await page.emulateMedia({ reducedMotion: "reduce" });
   if (quality) await page.addInitScript((q) => { try { localStorage.setItem("bb.quality", q); } catch { /* shot runs without storage */ } }, quality);
   let failures = 0;
   const rows = [];

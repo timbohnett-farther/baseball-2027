@@ -637,3 +637,5 @@ tr.in td { background: rgba(224, 164, 60, 0.05); }
   .rotate-hint { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; margin: 0; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5); pointer-events: none; }
   .rotate-hint::before { content: "\21BB  "; font-size: 18px; }
 }
+/* W33b: action-shot vignette, mounted by the Director only while a contact/release/slide shot is on screen. */
+.shot-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(4, 6, 10, 0.9) 100%); }
