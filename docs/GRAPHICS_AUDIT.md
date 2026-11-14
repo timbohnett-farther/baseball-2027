@@ -212,3 +212,18 @@ Tiers (`quality.ts`, stored as `bb.quality`, picked in the top bar, applied to t
 ## W33 results (live PBR)
 
 Desktop headless Chromium (SwiftShader), not device evidence. `shot.mjs --perf --quality=<tier>`, calls/before to after: duel-pitch high 153 to 151, standard 148 to 154, battery 152 to 153; shot-contact high 89 to 87, standard 88 to 92, battery 84 to 85 (within run noise; bases now have their own material, one extra call at most). Textures high 18 to 21, standard to 20, battery 17 (unchanged); programs high 10 to 11. Tier detail comes from `surfaceLook()` in `quality.ts`: Battery stays flat and shadowless, Standard adds speckle maps, High adds bump and PCF soft shadows. Speckle uses the seeded cosmetic RNG. Frame times on this renderer are too noisy to compare.
+
+
+## W33b results (cinematic action shots)
+
+Desktop headless Chromium (SwiftShader), not device evidence. Applies only while a contact, mound-release or slide shot is staged (`shotfx.ts` holds the pure tier mapping, schedule and light placement; `field.tsx` applies and fully restores it in `unstage`). Live play, the broadcast/off fallback, the sim, timing and the ball path are untouched.
+
+What it adds: a warm key plus cool rim light that follow the subject, the stadium lights dimmed and fog thickened so the stands recede, a pooled spark/dust/chalk burst (cosmetic RNG only, ages deterministically in held shots), a contact light pulse, a CSS vignette, and on High a mild contrast/saturation filter. High = all of it; Standard = lighter dim, half the particles, smaller vignette, no grade; Battery = rig and fog only (no vignette, grade, pulse or particles, no pool allocated).
+
+Reduced motion (or the still shot mode): no pulse, particles at 35%, rim static; vignette, fog and every required cue stay. `shot.mjs --reduced` emulates it.
+
+Draw calls before to after (high / standard / battery): contact 87/92/85 to 90/93/85; release 69/67/73 to 71/68/73; slide 113/118/112 to 114/119/112. Ceiling is 250. Programs unchanged (11/10/9). Points high 10400 to 10620.
+
+Verdict: contact burst and the fog/vignette depth read clearly and subjects stay legible. Rim separation is subtle. Slide dust reads weakly (small warm sparks, not convincing dirt). Release chalk puff was not visible at the capture time. Dirt shadows look weaker on High.
+
+Not verified: phone GPU performance or look, Standard-tier visual, release chalk visibility, real-GPU colour. `shot.mjs --phone --check` has one failure, `bigplay` (flat centre), which also fails on the pre-W33b tree.
