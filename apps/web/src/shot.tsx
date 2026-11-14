@@ -72,7 +72,7 @@ function toMoment(setup: InteractiveSetup, stop: (a: NonNullable<ReturnType<type
 }
 
 /** `/?shot=duel-pitch` / `duel-swing` / `duel-field`: the real DuelView on a fixture setup, for checking the tap controls. */
-function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal" | "resume" | "windup"; coach?: "tutorial" | "hints" }) {
+function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal" | "resume" | "windup" | "result"; coach?: "tutorial" | "hints" }) {
   const setup = useMemo(() => {
     if (coach === "tutorial") return tutorialSetup();
     nextId = 1;
@@ -81,7 +81,7 @@ function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: nu
   }, [side, kind, coach]);
   useEffect(() => {
     const t = setInterval(() => {
-      if ((document.querySelector(kind === "resume" ? ".pause-gate" : kind === "windup" ? ".windup-gate" : ".tp")) && document.querySelector(".field canvas")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
+      if ((document.querySelector(kind === "resume" ? ".pause-gate" : kind === "windup" ? ".windup-gate" : kind === "result" ? ".result-continue" : ".tp")) && document.querySelector(".field canvas")) { clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, side === "away" ? Math.min(wait, 100) : wait); }
     }, 50);
     return () => clearInterval(t);
   }, [wait, side]);
@@ -92,6 +92,7 @@ function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: nu
     : kind === "run" ? toMoment(setup, (a) => a.role === "run")
     : kind === "resume" ? toMoment(setup, (a) => a.role === "swing" && a.state.strikes === 1)
     : kind === "windup" ? toMoment(setup, (a) => a.role === "swing")
+    : kind === "result" ? toMoment(setup, () => false)
     : kind === "steal" ? toMoment(setup, (a) => a.role === "swing" && !!a.run?.steal.length) : undefined, [setup, kind, coach, side]);
   return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} onSkip={() => {}} shotInputs={shotInputs} coach={coach} shotPaused={kind === "resume"} shotWindup={kind === "windup"} /></div>;
 }
@@ -231,8 +232,8 @@ export function ShotView() {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }
     return <DuelShot side={duel === "duel-tutorial-swing" || duel === "duel-hint" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} coach={duel === "duel-hint" ? "hints" : "tutorial"} />;
   }
-  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal" || duel === "duel-resume" || duel === "duel-windup")
-    return <DuelShot side={duel === "duel-pitch" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-windup" ? "windup" : duel === "duel-resume" ? "resume" : duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
+  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal" || duel === "duel-resume" || duel === "duel-windup" || duel === "duel-result")
+    return <DuelShot side={duel === "duel-pitch" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-result" ? "result" : duel === "duel-windup" ? "windup" : duel === "duel-resume" ? "resume" : duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);

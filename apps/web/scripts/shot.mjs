@@ -34,14 +34,14 @@ const vpArg = args.find((a) => a.startsWith("--vp="))?.slice(5).split("x").map(N
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => !a.startsWith("--") && a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-windup": ".windup-gate" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-result": ".result-continue", "duel-windup": ".windup-gate" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
 const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
 const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"] };
 const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay", "shot-contact", "shot-release", "shot-slide"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
-const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .cue-caption:not(:empty), .coach p, .coach button, .tp button, .tp .zone";
+const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .cue-caption:not(:empty), .coach p, .coach button, .tp button, .tp .zone, .result-continue";
 async function layoutCheck(page, m) {
   const vp = page.viewportSize();
   // The ballpark is a lazy chunk: wait for its canvas to exist and draw a few frames before sampling.
@@ -67,7 +67,7 @@ async function layoutCheck(page, m) {
   // Touch contract (Kimi CLAUDE.md section 4, phone only): primary action >= 112x88, other gameplay controls >= 56x56,
   // base targets >= 64x64, and 8pt between neighbouring gameplay controls. Measured from the real DOM rects in CSS px.
   if (phone) {
-    const SIZES = [[".swing-btn, .run-confirm", 112, 88, "primary action"], [".duel-type, .approach button, .tp-toggle, .run-go, .run-burn, .target-cell, .pchip > button:first-child", 56, 56, "gameplay control"], [".throw-diamond button", 64, 64, "base target"]];
+    const SIZES = [[".swing-btn, .run-confirm, .result-continue", 112, 88, "primary action"], [".duel-type, .approach button, .tp-toggle, .run-go, .run-burn, .target-cell, .pchip > button:first-child", 56, 56, "gameplay control"], [".throw-diamond button", 64, 64, "base target"]];
     const rects = await page.evaluate((groups) => groups.flatMap(([sel, w, h, kind]) => [...document.querySelectorAll(sel)].map((e) => {
       const r = e.getBoundingClientRect(), s = getComputedStyle(e);
       return { n: ((e.className.baseVal === undefined ? e.className : "") + ":" + (e.textContent || "").trim()).slice(0, 24), x: r.left, y: r.top, w: r.width, h: r.height, need: [w, h], kind, vis: r.width * r.height > 0 && s.visibility !== "hidden" && s.display !== "none" };
@@ -110,8 +110,8 @@ async function layoutCheck(page, m) {
     const c = await page.evaluate(() => { const r = document.querySelector(".coach")?.getBoundingClientRect(); return r && r.width ? [r.left, r.top, r.width, r.height] : null; });
     if (c && c[0] < px + pw && px < c[0] + c[2] && c[1] < py + ph && py < c[1] + c[3]) bad.push(`coach covers the plate/batter: [${c.map(Math.round)}] vs plate [${plate}]`);
   }
-  // The resume gate dims the whole field on purpose, so only its own button is measured.
-  if (spread < 6 && m !== "duel-resume") bad.push(`centre pixels are flat (${spread} colours): ballpark not rendered`);
+  // The resume gate dims the whole field on purpose, so only its own button is measured; on the result screen the viewport centre is the page top, not the field.
+  if (spread < 6 && m !== "duel-resume" && m !== "duel-result") bad.push(`centre pixels are flat (${spread} colours): ballpark not rendered`);
   console.log(`${bad.length ? "FAIL" : "ok  "} ${m}: ${vis.length} HUD boxes, centre colours ${spread}`);
   for (const b of bad) console.log("   - " + b);
   return bad.length;

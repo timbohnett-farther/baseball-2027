@@ -120,6 +120,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   const card = usePlayCard(events[fieldIndex], speed, highlights.reel?.at);
   const youWon = g.result?.winner === setup.userSide;
   const done = !!g.result && caughtUp;
+  useEffect(() => { if (done) gameplayTelemetry.flow("result_shown"); }, [done]);
   const awaiting = caughtUp && !paused && !shotWindup ? g.awaiting : null;
   // Windup: the pitch is decided but its events are still playing. A swing tap here is ignored (see WindupGate).
   const windup = (shotWindup || !caughtUp) && !paused && !done && g.awaiting?.role === "swing" && !!g.awaiting.incoming;
@@ -134,6 +135,8 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
   // Once it's over, the server replays our choices against the seed and records the game.
   const [saved, setSaved] = useState<"saving" | "saved" | string | null>(null);
   const [reward, setReward] = useState<PlayedGame["reward"]>(undefined);
+  // The server pays once; a retried finish comes back saved with no reward block because the coins are already in the wallet.
+  const [repeat, setRepeat] = useState(false);
   const [badge, setBadge] = useState<number | null>(null);
   useEffect(() => {
     if (!g.result || saved) return;
@@ -148,7 +151,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     // If the device refused to store it, keep the resume save: reopening replays the last pitch and re-sends with the same id.
     if (enqueue({ gameId, body })) clearSnapshot();
     api<PlayedGame>("/api/games/interactive/finish", { body })
-      .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); p.reward?.arcade?.objectives.forEach((o) => { if (o.earned) playCue(`obj:${gameId}:${o.id}`, "objective_done"); }); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
+      .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); if (p.reward) gameplayTelemetry.flow("result_reward_shown"); else { setRepeat(true); gameplayTelemetry.flow("result_repeat_no_reward"); } p.reward?.arcade?.objectives.forEach((o) => { if (o.earned) playCue(`obj:${gameId}:${o.id}`, "objective_done"); }); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
         if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); clearSnapshotFor(gameId); setSaved(e.message); }
         else setSaved("Saved on this device. It will upload when you're back online.");
       });
@@ -165,9 +168,16 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
-          {done ? !highlights.reel && <button className="primary" onClick={onDone}>Done</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={quit}>Quit</button>}
+          {done ? <button className="primary result-continue" onClick={() => { gameplayTelemetry.flow("result_continue"); onDone(); }}>Continue</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={quit}>Quit</button>}
         </div>
       </div>
+
+      {done && g.result && (
+        <div className={`final-band ${youWon ? "win" : g.result.winner ? "loss" : ""}`}>
+          <span className="display">{youWon ? "Victory" : g.result.winner ? "Defeat" : "Tie game"}</span>
+          <span>{(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text}</span>
+        </div>
+      )}
 
       <p className="rotate-hint" aria-hidden>Turn your phone sideways for the full field.</p>
       {paused && !done && (
@@ -217,11 +227,8 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
 
       {done && g.result && (
         <>
-          <div className={`final-band ${youWon ? "win" : g.result.winner ? "loss" : ""}`}>
-            <span className="display">{youWon ? "Victory" : g.result.winner ? "Defeat" : "Tie game"}</span>
-            <span>{(events[events.length - 1] as Extract<GameEvent, { type: "final" }>).text}</span>
-          </div>
           {reward && <RewardLine reward={reward} />}
+          {repeat && !tutorial && <p className="muted duel-note" role="status">No new coins: this game was already saved and paid.</p>}
           {tutorial && saved === "saved" && (
             <div className="reward">
               <span className="reward-total"><span className="coin" aria-hidden /> {badge ? `+${badge} coins` : "Rookie Rally done"}</span>

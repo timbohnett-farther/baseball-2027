@@ -57,6 +57,8 @@ export function classifyIntent(input: UserInput, a: Awaiting | null): Outcome {
   return "accepted";
 }
 
+/** Local, in-memory flow markers. "result_*" are the result screen's own steps; none leave the device. */
+export type FlowName = "start" | "resume" | "tutorial" | "half_start" | "final" | "saved" | "result_shown" | "result_reward_shown" | "result_repeat_no_reward" | "result_continue";
 type Counts = Record<string, number>;
 const bump = (o: Counts, k: string, n = 1) => { o[k] = (o[k] ?? 0) + n; };
 
@@ -117,7 +119,7 @@ export class GameplayTelemetry {
     bump(this.s.flow, resumed ? "resume" : "start");
   }
 
-  flow(name: string) { bump(this.s.flow, name); }
+  flow(name: FlowName) { bump(this.s.flow, name); }
   hint(id: string) { bump(this.s.hints, id); }
 
   /** The user submitted an input. `token` is the phase token the tap carried, `logLength` the log length at commit time. */

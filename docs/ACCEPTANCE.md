@@ -57,9 +57,16 @@ Status key: PASS = a named test or script covers it and passes; GAP = built but 
 | W37a iPhone audio unlock, haptic feel, device loudness | EVIDENCE_MISSING | no physical phone run |
 | W37a screen-reader (VoiceOver/TalkBack) reading of captions | EVIDENCE_MISSING | not run |
 | W37a human playtest of commentary tone and mix | EVIDENCE_MISSING | no human session |
+| W37b scorebug reads truthfully: batting side marked without colour, full-sentence aria-label (half, inning, score, outs, count, runners) | PASS (desktop) | game.tsx Scorebug; DOM/aria checked in headless Chromium at 844x390 and 667x375; capture images were not viewed |
+| W37b result screen: Continue is the one primary action, 112x88, present while the final band and highlight reel show, never gated on an animation | PASS (desktop) | shot.mjs `--check` duel-result moment (new): HUD boxes inside the viewport, primary size contract met |
+| W37b repeat finish (no `reward` block) says "No new coins: this game was already saved and paid." | PARTIAL | duel.tsx code path only; the harness finish POST fails (no mock), so the message was not rendered in a browser |
+| W37b `--pseudo --lefty --vp=667x375 --inset=0,44,21,44` `--check` | PASS (desktop) | 12 prior failures fixed without shrinking any touch target; also clean at 844x390 default/lefty/calm/gray/pseudo and 667x375 and 932x430 with insets |
+| W37b caption renders in a real browser from a normal game start | PASS (desktop) | local server + Vite, drafted team, LAD game: `.cue-caption[data-on="1"]` showed "New half-inning under way.", "Finds a hole, one base.", "Swung on and missed."; box x~341 y311 w~160 h22 at 844x390, overlapping no button; image not viewed |
+| W37b result-flow telemetry events typed (local, in-memory) | PASS (logic only) | `FlowName` union in gameplaytelemetry.ts, tsc clean; no new unit test |
+| W37b phone-sized legibility of home/scorebug/result on a physical device, human readability | EVIDENCE_MISSING | no physical phone run, no human session |
 | W32 action shots: shots per match | PARTIAL | auto-sim 30 seeds, no retune: full mean 1.40 (max 4), reduced mean 0.80 (max 2), below the 1-3 target. W32b: the server re-sim, immediate-finish and saved-replay all set `facts`, so Watch gets the same shots; tests show outcomes and hashes identical with `shot` removed |
 
-Counts: PASS 9 (incl. partials), GAP 3, EVIDENCE_MISSING 7 (ARC 17.8 rows). W29b changed no row status; the 17.3 row stays partial.
+Counts (all table rows): PASS 36 (desktop/logic, incl. 'partial'/'known gap' variants), PARTIAL 4, GAP 2, INFERRED 1, EVIDENCE_MISSING 18. W37b adds 5 PASS, 1 PARTIAL, 1 EVIDENCE_MISSING; earlier counts line was stale.
 
 ## Wall Reaper scope (PUP 9.1)
 

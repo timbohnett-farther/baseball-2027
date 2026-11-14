@@ -380,8 +380,10 @@ export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
   const s = e.state;
   const flash = e.type === "play" && e.runs > 0;
   const assist = (game.rules ?? 0) >= 3 ? rallyAssist(s) : null;
+  const batting: Side = s.half === "top" ? "away" : "home";
+  const runners = (["first", "second", "third"] as const).filter((b) => s.bases[b] !== null);
   const row = (side: Side) => (
-    <div className={`bug-row ${s.fire === side ? "fire" : ""}`} style={{ ["--team" as string]: game.teams[side].color }}>
+    <div className={`bug-row ${s.fire === side ? "fire" : ""} ${batting === side ? "bat" : ""}`} style={{ ["--team" as string]: game.teams[side].color }}>
       <span className="bug-abbr">{game.teams[side].abbr}</span>
       <span className={`bug-score ${flash && (s.half === "top" ? "away" : "home") === side ? "flash" : ""}`} key={`${side}${s.score[side]}`}>{s.score[side]}</span>
       {assist === side && <span className="bug-assist" title="Trailing by 3+: Heat gains are 25% bigger">ASSIST ×1.25</span>}
@@ -391,7 +393,7 @@ export function Scorebug({ game, index }: { game: PlayedGame; index: number }) {
     </div>
   );
   return (
-    <div className="scorebug" aria-label={`${game.teams.away.abbr} ${s.score.away}, ${game.teams.home.abbr} ${s.score.home}`}>
+    <div className="scorebug" aria-label={`${s.half === "top" ? "Top" : "Bottom"} ${s.inning}, ${game.teams[batting].abbr} batting. ${game.teams.away.abbr} ${s.score.away}, ${game.teams.home.abbr} ${s.score.home}. ${s.outs} out, count ${s.balls}-${s.strikes}, ${runners.length ? `runners on ${runners.join(" and ")}` : "bases empty"}`}>
       {/* ARC 10.6 reading order: inning, score, outs, count, bases. Heat and Rally stay secondary. */}
       <div className="bug-teams">
         <span className="bug-inning">{s.half === "top" ? "▲ Top" : "▼ Bot"} {s.inning}</span>
