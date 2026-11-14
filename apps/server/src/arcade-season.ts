@@ -56,12 +56,12 @@ export async function startArcadeSeason(db: Db, userId: number, teamId: number, 
   return season!;
 }
 
-interface UserGame { gameNo: number; round: number; opponentTeamId: number; gameId: number | null; result: "W" | "L" | "T" | null; userScore: number | null; opponentScore: number | null; difficulty: SuggestedDifficulty | null; stars: Stars | null }
+interface UserGame { userSide: "home" | "away" | null; gameNo: number; round: number; opponentTeamId: number; gameId: number | null; result: "W" | "L" | "T" | null; userScore: number | null; opponentScore: number | null; difficulty: SuggestedDifficulty | null; stars: Stars | null }
 
 async function userGames(db: Db, seasonId: number): Promise<UserGame[]> {
   const rows = await db.select({ sg: seasonGames, g: { userScore: games.userScore, opponentScore: games.opponentScore, difficulty: games.difficulty } }).from(seasonGames)
     .leftJoin(games, eq(games.id, seasonGames.gameId)).where(eq(seasonGames.seasonId, seasonId)).orderBy(seasonGames.gameNo);
-  return rows.map(({ sg, g }) => ({ gameNo: sg.gameNo, round: sg.round, opponentTeamId: sg.opponentTeamId, gameId: sg.gameId, result: sg.result, userScore: g?.userScore ?? null, opponentScore: g?.opponentScore ?? null, difficulty: g?.difficulty ?? null, stars: sg.stars }));
+  return rows.map(({ sg, g }) => ({ userSide: sg.userSide, gameNo: sg.gameNo, round: sg.round, opponentTeamId: sg.opponentTeamId, gameId: sg.gameId, result: sg.result, userScore: g?.userScore ?? null, opponentScore: g?.opponentScore ?? null, difficulty: g?.difficulty ?? null, stars: sg.stars }));
 }
 
 async function lifetimeStars(db: Db, userId: number): Promise<number> {
@@ -135,7 +135,7 @@ export async function arcadeState(db: Db, season: SeasonRow): Promise<ArcadeSeas
 
   const schedule: ArcadeFixture[] = userRows.map((g) => ({
     gameNo: g.gameNo, round: g.round, label: g.round === 0 ? `Game ${g.gameNo}` : g.round === 1 ? "Semifinal" : "Final",
-    opponent: opponentView(club(g.opponentTeamId)), gameId: g.gameId, result: g.result, userScore: g.userScore, opponentScore: g.opponentScore,
+    opponent: opponentView(club(g.opponentTeamId)), userSide: g.userSide ?? "home", gameId: g.gameId, result: g.result, userScore: g.userScore, opponentScore: g.opponentScore,
     objectives: objectiveViews(g.stars), stars: g.stars?.earned?.length ?? 0, difficulty: g.difficulty, suggested: suggestedDifficulty(g.gameNo - 1, g.round > 0),
   }));
   const next = season.status === "done" ? null : schedule.find((g) => g.gameId === null) ?? null;

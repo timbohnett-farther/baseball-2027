@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ARCADE_GAMES, RIVAL_GAME_INDEX, UNLOCKS, buildLeague, computeStandings, cpuGame, cpuResults, cpuRound, deriveStyle, semiPairs, suggestedDifficulty, unlocksBetween,
+  ARCADE_GAMES, RIVAL_GAME_INDEX, UNLOCKS, buildLeague, computeStandings, cpuGame, cpuResults, cpuRound, deriveStyle, qualification, semiPairs, suggestedDifficulty, unlocksBetween,
   type ClubProfile, type GameRow,
 } from "./arcade-season.ts";
 import { BAT_BY_ID, COSMETICS } from "./items.ts";
@@ -139,4 +139,22 @@ test("home/away: seven fixtures alternate, the extra home game reverses next sea
   assert.equal(finalSide("away", "home", 1, 0), "home");
   assert.equal(finalSide("home", "home", 2, 1), "away");
   assert.equal(finalSide("away", "away", 0, 3), "home");
+});
+
+test("qualification: clinched, alive and eliminated come from the table and never early", () => {
+  const table = (ws: number[], me = 0) => ws.map((w, i) => ({ w, you: i === me, inPlayoffs: false }));
+  // Nothing played: everyone is alive.
+  assert.equal(qualification(table([0, 0, 0, 0, 0, 0, 0, 0]), 0), "alive");
+  // Three games in at 3-0 against a field that can still reach 3 wins: only 3 clubs level at most? Here 7 others can still catch up.
+  assert.equal(qualification(table([3, 1, 1, 1, 1, 1, 1, 1]), 3), "alive");
+  // One game left, 6 wins, only two clubs can still reach 6: clinched.
+  assert.equal(qualification(table([6, 5, 5, 3, 3, 2, 2, 1]), 6), "clinched");
+  // One game left, 1 win (max 2), four clubs already above 2: eliminated.
+  assert.equal(qualification(table([1, 5, 4, 4, 3, 3, 2, 0]), 6), "eliminated");
+  // Level on wins with others that could finish above: still alive, because the tiebreakers are not decided yet.
+  assert.equal(qualification(table([3, 3, 3, 3, 3, 3, 3, 3]), 4), "alive");
+  // Regular season over: the real seeds decide.
+  const done = table([5, 5, 4, 4, 4, 3, 2, 1]).map((r, i) => ({ ...r, inPlayoffs: i < 4 }));
+  assert.equal(qualification(done, ARCADE_GAMES), "clinched");
+  assert.equal(qualification(done.map((r, i) => ({ ...r, you: i === 5 })), ARCADE_GAMES), "eliminated");
 });

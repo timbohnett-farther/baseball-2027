@@ -54,14 +54,25 @@ body { margin: 0; min-height: 100vh; background: var(--base); font-variant-numer
 /* Display type: condensed caps with slight tracking. */
 h1, h2, h3, .display { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 
-.hero { position: relative; padding: 48px 0 24px; }
+.hero { position: relative; padding: 72px 0 24px; }
 .hero h1 { margin: 0; font-size: clamp(40px, 7vw, 72px); line-height: 1; color: var(--text); text-shadow: 0 0 28px rgba(224, 164, 88, 0.18); }
 .hero .tag { margin: 8px 0 0; color: var(--text-2); font-size: 18px; }
-.userbar { position: absolute; top: 16px; right: 0; font-size: 14px; color: var(--text-2); }
+.userbar { position: absolute; top: 16px; right: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 14px; font-size: 14px; color: var(--text-2); }
 .userbar b { color: var(--text); }
 .userbar .vol { width: 64px; vertical-align: middle; margin: 0 6px; accent-color: var(--accent, #3b82f6); }
 .userbar .mix { display: inline-block; vertical-align: middle; }
 .userbar .mix label { display: block; text-align: right; }
+.userbar .link, .userbar select.link { white-space: nowrap; }
+/* Phone: the settings row becomes a normal-flow, wrapping block under the page edge so it never overlaps the title. */
+@media (max-width: 640px) {
+  .userbar { position: static; justify-content: flex-start; padding-top: 12px; gap: 2px 12px; }
+  .hero { padding-top: 16px; }
+  .userbar .sep { display: none; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .userbar .link, .userbar select.link, .userbar .mix summary { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; }
+  .userbar .vol { min-height: 44px; }
+}
 .status { margin-top: 14px; font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); display: inline-block; }
 .dot.ok { background: var(--amber); }
@@ -715,3 +726,13 @@ html[data-calm="1"] .heat-meter-bar i { transition: none; }
 .cue-caption[data-on="1"] { opacity: 1; transition: opacity 0.15s; }
 html[data-calm="1"] .cue-caption[data-on="1"] { transition: none; }
 @media (max-width: 700px) and (orientation: portrait) { .cue-caption { max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)); } }
+
+/* --- Season hub clarity (W37c) ------------------------------------------------------ */
+.arc-now { display: grid; gap: 6px; margin-top: 12px; }
+.arc-now p { margin: 0; }
+.arc-q { white-space: normal; }
+.arc-q.good { color: var(--amber); box-shadow: inset 0 0 0 1px rgba(224, 164, 88, 0.6); }
+.arc-q.warn { color: var(--text); box-shadow: inset 0 0 0 1px rgba(242, 227, 198, 0.4); }
+.arc-q.bad { color: var(--bad); box-shadow: inset 0 0 0 1px var(--bad); }
+.arc-q.info { color: var(--text-2); box-shadow: inset 0 0 0 1px rgba(242, 227, 198, 0.2); }
+.arc-after { margin-top: 8px; }

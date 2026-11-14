@@ -51,7 +51,7 @@ export function SeasonView({ onDraft }: { onDraft: () => void }) {
           </p>
           <ErrorNote message={error} />
           <p className="play-buttons">
-            <button className="primary" disabled={busy} onClick={start}>{busy ? "Setting the schedule…" : "Start season"}</button>
+            <button className="primary" disabled={busy} onClick={start}>{busy ? "Setting the schedule…" : season ? `Start Season ${season.number + 1}` : "Start season"}</button>
             <button onClick={onDraft}>My team</button>
           </p>
         </section>

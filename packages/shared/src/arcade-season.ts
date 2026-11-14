@@ -284,6 +284,26 @@ export function unlocksBetween(before: number, after: number): Unlock[] {
   return out;
 }
 
+// --- Qualification ---------------------------------------------------------------------------
+
+export type Qualification = "clinched" | "alive" | "eliminated";
+
+/**
+ * Where the user stands in the top-4 race, from the table alone. Every club plays seven games and has played `played`,
+ * so each can still add at most `ARCADE_GAMES - played` wins. Conservative: ties on wins count against the user, so
+ * "clinched" and "eliminated" are never wrong, they only arrive a game late. Once the season is over the real seeds decide.
+ */
+export function qualification(rows: { w: number; you: boolean; inPlayoffs: boolean }[], played: number): Qualification {
+  const me = rows.find((r) => r.you);
+  if (!me) return "alive";
+  const left = Math.max(0, ARCADE_GAMES - played);
+  if (left === 0) return me.inPlayoffs ? "clinched" : "eliminated";
+  const others = rows.filter((r) => !r.you);
+  if (others.filter((r) => r.w + left >= me.w).length <= 3) return "clinched";
+  if (others.filter((r) => r.w > me.w + left).length >= 4) return "eliminated";
+  return "alive";
+}
+
 // --- API shapes ------------------------------------------------------------------------------
 
 export interface ObjectiveView { id: string; label: string; kind: "result" | "scout" | "arcade"; earned: boolean | null }
@@ -298,6 +318,8 @@ export interface ArcadeFixture {
   round: number;
   label: string;
   opponent: ArcadeOpponent;
+  /** Which dugout the user is in. Rows from before side alternation have no stored side and are home (the original rule). */
+  userSide: Side;
   gameId: number | null;
   result: "W" | "L" | "T" | null;
   userScore: number | null;

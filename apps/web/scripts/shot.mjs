@@ -34,7 +34,7 @@ const vpArg = args.find((a) => a.startsWith("--vp="))?.slice(5).split("x").map(N
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
 const [outDir = join(web, "shots"), ...only] = args.filter((a) => !a.startsWith("--") && a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
-const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-result": ".result-continue", "duel-windup": ".windup-gate" };
+const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-caption": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-result": ".result-continue", "duel-windup": ".windup-gate" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
 const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);

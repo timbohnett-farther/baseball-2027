@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ArcadeFixture, ArcadeSeasonState, ArcadeStanding, BracketGame, LifetimeTrack, SuggestedDifficulty } from "@bb/shared";
 import { ErrorNote } from "./ui.tsx";
+import { hubNow, sideWord } from "./seasonhub.ts";
 
 const DIFFS: { id: SuggestedDifficulty; label: string }[] = [{ id: "rookie", label: "Rookie" }, { id: "pro", label: "Pro" }, { id: "allstar", label: "All-Star" }];
 const diffLabel = (d: SuggestedDifficulty) => DIFFS.find((x) => x.id === d)!.label;
@@ -17,6 +18,7 @@ export function Stars({ n, of = 3, label }: { n: number; of?: number; label?: st
 /** Season hub for the 7-game arcade format: round tracker, next opponent with its objectives, standings, bracket, lifetime track. */
 export function ArcadeHub({ season, busy, error, onPlay }: { season: ArcadeSeasonState; busy: boolean; error: string | null; onPlay: (mode: "sim" | "duel", difficulty: SuggestedDifficulty) => void }) {
   const { next } = season;
+  const now = hubNow(season);
   return (
     <>
       <section className="panel">
@@ -26,8 +28,14 @@ export function ArcadeHub({ season, busy, error, onPlay }: { season: ArcadeSeaso
           <span className="chip ready">{season.stars.season}/{season.stars.max} stars</span>
           {season.rewardCoins > 0 && <span className="chip"><span className="coin" aria-hidden /> +{season.rewardCoins} season coins</span>}
         </div>
+        <div className="arc-now" aria-label="Season status">
+          <p className="arc-kicker">{now.stage}</p>
+          <p><span className={`chip arc-q ${now.standing.tone}`}>{now.standing.label}</span> <span className="muted">{now.standing.detail}</span></p>
+          {now.next && <p><b>{now.next}</b></p>}
+          <p className="small muted">{now.progress}</p>
+        </div>
         <RoundTracker season={season} />
-        {next && <NextUp key={next.gameNo} fixture={next} busy={busy} error={error} onPlay={onPlay} />}
+        {next && <NextUp key={next.gameNo} fixture={next} rematch={now.rematch} busy={busy} error={error} onPlay={onPlay} />}
       </section>
       <div className="arc-cols">
         <Standings rows={season.standings} playoffs={season.status !== "regular"} />
@@ -47,6 +55,7 @@ function RoundTracker({ season }: { season: ArcadeSeasonState }) {
           <span className="arc-round-label">{f.round === 0 ? `G${f.gameNo}` : f.label}</span>
           <span className="abbr">{f.opponent.abbr}</span>
           {f.result ? <span className={`result ${f.result}`}>{f.result} {f.userScore}-{f.opponentScore}</span> : <span className="muted small">{f.gameNo === nextNo ? "Next" : "Upcoming"}</span>}
+          <span className="muted small">{sideWord(f)}</span>
           {f.result && <Stars n={f.stars} />}
         </li>
       ))}
@@ -54,13 +63,13 @@ function RoundTracker({ season }: { season: ArcadeSeasonState }) {
   );
 }
 
-function NextUp({ fixture: f, busy, error, onPlay }: { fixture: ArcadeFixture; busy: boolean; error: string | null; onPlay: (mode: "sim" | "duel", d: SuggestedDifficulty) => void }) {
+function NextUp({ fixture: f, rematch, busy, error, onPlay }: { fixture: ArcadeFixture; rematch: boolean; busy: boolean; error: string | null; onPlay: (mode: "sim" | "duel", d: SuggestedDifficulty) => void }) {
   const [diff, setDiff] = useState<SuggestedDifficulty>(f.suggested);
   const o = f.opponent;
   return (
     <div className="arc-next">
       <div className="arc-opp">
-        <p className="arc-kicker">{f.round > 0 ? f.label : `Game ${f.gameNo} of 7`}{o.rival && <span className="chip ready arc-rival-chip">Rival</span>}</p>
+        <p className="arc-kicker">{rematch ? `Rematch: ${f.label}` : f.round > 0 ? f.label : `Game ${f.gameNo} of 7`} <span className="chip">{sideWord(f)}</span>{o.rival && <span className="chip ready arc-rival-chip">Rival</span>}</p>
         <h3>{o.name}</h3>
         <p><span className="chip">{o.styleLabel}</span></p>
         <p className="muted">{o.scouting}</p>
@@ -68,6 +77,7 @@ function NextUp({ fixture: f, busy, error, onPlay }: { fixture: ArcadeFixture; b
       </div>
       <div className="arc-objs">
         <h4>Earn up to 3 stars</h4>
+        <p className="small muted">Played over 3 innings. Stars are counted once the server confirms the game.</p>
         <ul>
           {f.objectives.map((ob) => <li key={ob.id}><span className="star" aria-hidden>☆</span> {ob.label}</li>)}
         </ul>
@@ -77,7 +87,7 @@ function NextUp({ fixture: f, busy, error, onPlay }: { fixture: ArcadeFixture; b
         <p className="small muted">Suggested for this game: {diffLabel(f.suggested)}. The sim ignores difficulty.</p>
         <ErrorNote message={error} />
         <p className="play-buttons">
-          <button className="primary" disabled={busy} onClick={() => onPlay("duel", diff)}>{busy ? "Warming up…" : "Play it yourself"}</button>
+          <button className="primary" disabled={busy} onClick={() => onPlay("duel", diff)}>{busy ? "Warming up…" : rematch ? "Play the rematch" : "Play it yourself"}</button>
           <button disabled={busy} onClick={() => onPlay("sim", diff)}>Watch the sim</button>
         </p>
       </div>

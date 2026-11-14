@@ -5,6 +5,7 @@ import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
 import { CATALOG, type ShotPlan } from "./actionshot.ts";
 import { DuelView } from "./duel.tsx";
+import { CueCaption, showCaption } from "./captions.tsx";
 import { AbilityCue, GameView, PlayCard } from "./game.tsx";
 
 // Dev-only art review: `/?shot=hr` renders the ballpark full-screen at a named moment of a fixture game
@@ -72,7 +73,7 @@ function toMoment(setup: InteractiveSetup, stop: (a: NonNullable<ReturnType<type
 }
 
 /** `/?shot=duel-pitch` / `duel-swing` / `duel-field`: the real DuelView on a fixture setup, for checking the tap controls. */
-function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: number; kind?: "field" | "run" | "steal" | "resume" | "windup" | "result"; coach?: "tutorial" | "hints" }) {
+function DuelShot({ side, wait, kind, coach, caption }: { side: "home" | "away"; wait: number; caption?: boolean; kind?: "field" | "run" | "steal" | "resume" | "windup" | "result"; coach?: "tutorial" | "hints" }) {
   const setup = useMemo(() => {
     if (coach === "tutorial") return tutorialSetup();
     nextId = 1;
@@ -94,7 +95,8 @@ function DuelShot({ side, wait, kind, coach }: { side: "home" | "away"; wait: nu
     : kind === "windup" ? toMoment(setup, (a) => a.role === "swing")
     : kind === "result" ? toMoment(setup, () => false)
     : kind === "steal" ? toMoment(setup, (a) => a.role === "swing" && !!a.run?.steal.length) : undefined, [setup, kind, coach, side]);
-  return <div className="shot-duel"><DuelView setup={setup} onDone={() => {}} onSkip={() => {}} shotInputs={shotInputs} coach={coach} shotPaused={kind === "resume"} shotWindup={kind === "windup"} /></div>;
+  useEffect(() => { if (caption) showCaption({ key: "shot", cue: "pitch_strike", text: "Strike two", priority: 1, until: Date.now() + 3_600_000 }); }, [caption]);
+  return <div className="shot-duel">{caption && <CueCaption />}<DuelView setup={setup} onDone={() => {}} onSkip={() => {}} shotInputs={shotInputs} coach={coach} shotPaused={kind === "resume"} shotWindup={kind === "windup"} /></div>;
 }
 
 const CLUBS: { name: string; abbr: string; style: ClubStyle; star: string }[] = [
@@ -118,7 +120,7 @@ const SUGGEST: SuggestedDifficulty[] = ["rookie", "rookie", "pro", "pro", "pro",
 function fixtureRow(i: number, played: number, got: number[]): ArcadeFixture {
   const done = i < played;
   return {
-    gameNo: i + 1, round: 0, label: `Game ${i + 1}`, opponent: opp(i), gameId: done ? i + 1 : null, result: done ? (i % 3 === 1 ? "L" : "W") : null,
+    gameNo: i + 1, round: 0, label: `Game ${i + 1}`, opponent: opp(i), userSide: (i + 2) % 2 === 0 ? "home" : "away", gameId: done ? i + 1 : null, result: done ? (i % 3 === 1 ? "L" : "W") : null,
     userScore: done ? 5 - (i % 3) : null, opponentScore: done ? 2 + (i % 3) : null,
     objectives: OBJ.map(([id, label], k) => ({ id: `${id}-${i}`, label, kind: k === 0 ? "result" : k === 1 ? "scout" : "arcade", earned: done ? k < (got[i] ?? 0) : null })),
     stars: done ? got[i] ?? 0 : 0, difficulty: done ? SUGGEST[i]! : null, suggested: SUGGEST[i]!,
@@ -232,8 +234,8 @@ export function ShotView() {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }
     return <DuelShot side={duel === "duel-tutorial-swing" || duel === "duel-hint" ? "away" : "home"} wait={Number(q.get("t") ?? 600)} coach={duel === "duel-hint" ? "hints" : "tutorial"} />;
   }
-  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal" || duel === "duel-resume" || duel === "duel-windup" || duel === "duel-result")
-    return <DuelShot side={duel === "duel-pitch" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-result" ? "result" : duel === "duel-windup" ? "windup" : duel === "duel-resume" ? "resume" : duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
+  if (duel === "duel-pitch" || duel === "duel-swing" || duel === "duel-field" || duel === "duel-run" || duel === "duel-steal" || duel === "duel-resume" || duel === "duel-windup" || duel === "duel-result" || duel === "duel-caption")
+    return <DuelShot caption={duel === "duel-caption"} side={duel === "duel-pitch" || duel === "duel-caption" || duel === "duel-field" ? "home" : "away"} wait={Number(q.get("t") ?? 600)} kind={duel === "duel-result" ? "result" : duel === "duel-windup" ? "windup" : duel === "duel-resume" ? "resume" : duel === "duel-field" ? "field" : duel === "duel-run" ? "run" : duel === "duel-steal" ? "steal" : undefined} />;
   const moment = (MOMENTS as readonly string[]).includes(q.get("shot") ?? "") ? q.get("shot") as Moment : "pitch";
   const wait = Number(q.get("t") ?? 600);
   const want = Number(q.get("seed") ?? 0);

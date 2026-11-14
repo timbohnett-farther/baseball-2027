@@ -153,3 +153,29 @@ test("arcade season: sides alternate, new seasons start from the season number, 
   assert.equal(saved!.opponentScore, out.result!.final.home);
   assert.equal(saved!.result, out.result!.winner === null ? "T" : out.result!.winner === "away" ? "W" : "L");
 });
+
+test("arcade season: the state shows each fixture's side, legacy null rows read as home, and played games carry their real star progress", async () => {
+  const headers = await newManager("arc4", "10.0.2.4", TEAM_COLORS[3]);
+  const s = (await app.inject({ method: "POST", url: "/api/season", headers })).json() as ArcadeSeasonState;
+  const rows = await getDb().select().from(seasonGames).where(eq(seasonGames.seasonId, s.id)).orderBy(seasonGames.gameNo);
+  s.schedule.forEach((f, i) => assert.equal(f.userSide, rows[i]!.userSide, `fixture ${f.gameNo} shows the stored side`));
+  assert.equal(s.next!.userSide, rows[0]!.userSide);
+  await getDb().update(seasonGames).set({ userSide: null }).where(eq(seasonGames.seasonId, s.id));
+  const legacy = await season(headers);
+  assert.ok(legacy.schedule.every((f) => f.userSide === "home"), "a row with no stored side is shown as home, the documented rule");
+  // Play two games: stars on the state equal the objectives earned, and the season total is their sum.
+  let total = 0;
+  for (let n = 0; n < 2; n++) {
+    const cur = await season(headers);
+    const res = await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: cur.next!.opponent.id, seasonId: cur.id } });
+    assert.equal(res.statusCode, 201, res.body);
+    total += res.json().reward.arcade.stars;
+  }
+  const after2 = await season(headers);
+  const played = after2.schedule.filter((f) => f.gameId !== null);
+  assert.equal(played.length, 2);
+  for (const f of played) assert.equal(f.stars, f.objectives.filter((o) => o.earned).length);
+  assert.equal(after2.stars.season, total);
+  assert.equal(after2.played, 2);
+  assert.equal(after2.next!.gameNo, 3);
+});

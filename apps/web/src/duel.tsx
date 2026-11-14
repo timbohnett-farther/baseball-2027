@@ -3,7 +3,7 @@
 // choices so far; each new choice reveals the next few events, which play out on the field.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TutorialCompleteResponse } from "@bb/shared";
+import type { ArcadeSeasonState, SeasonState, TutorialCompleteResponse } from "@bb/shared";
 import { playInteractive, type Aim, type AbilityRequest, type AbilityStatus, type Awaiting, type Base, type GameEvent, type InteractiveSetup, type PitchType, type PlayedGame, type SimPlayer, type Side, type UserInput } from "@bb/sim";
 import { api, ApiError } from "./api.ts";
 import { dequeue, enqueue, isFinal } from "./outbox.ts";
@@ -15,6 +15,7 @@ import { planAfterResume } from "./actionshot.ts";
 import { AbilityCue, BoxScoreView, holdFor, PlayCard, ReelCard, Scorebug, SkipPlay, usePlayCard, useReel } from "./game.tsx";
 import { Coach } from "./coach.tsx";
 import { RewardLine } from "./store.tsx";
+import { afterGameLine, SAVED_ON_DEVICE, starsNote } from "./seasonhub.ts";
 import { AdvancePanel, RunStrip } from "./run.tsx";
 import { useComfort } from "./comfort.ts";
 import { gameplayTelemetry } from "./gameplaytelemetry.ts";
@@ -153,9 +154,18 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
     api<PlayedGame>("/api/games/interactive/finish", { body })
       .then((p) => { dequeue(gameId); clearSnapshotFor(gameId); setReward(p.reward); if (p.reward) gameplayTelemetry.flow("result_reward_shown"); else { setRepeat(true); gameplayTelemetry.flow("result_repeat_no_reward"); } p.reward?.arcade?.objectives.forEach((o) => { if (o.earned) playCue(`obj:${gameId}:${o.id}`, "objective_done"); }); setSaved("saved"); gameplayTelemetry.flow("saved"); }, (e: Error) => {
         if (e instanceof ApiError && isFinal(e.status)) { dequeue(gameId); clearSnapshotFor(gameId); setSaved(e.message); }
-        else setSaved("Saved on this device. It will upload when you're back online.");
+        else setSaved(SAVED_ON_DEVICE);
       });
   }, [g.result, saved, inputs, setup, tutorial, gameId, seasonId]);
+  // After a season game: say what Continue leads to, from the server's own season state (format 2 only).
+  const [afterLine, setAfterLine] = useState<string | null>(null);
+  useEffect(() => {
+    if (!seasonId || saved !== "saved") return;
+    let live = true;
+    api<ArcadeSeasonState | SeasonState>("/api/season").then((s) => { if (live && "format" in s && s.format === 2) setAfterLine(afterGameLine(s)); }, () => {});
+    return () => { live = false; };
+  }, [seasonId, saved]);
+  const note = starsNote({ seasonGame: !!seasonId && !tutorial, saved, reward, repeat });
   const lastCall = [...events.slice(0, shown + 1)].reverse().find((e): e is Extract<GameEvent, { type: "play" }> => e.type === "play");
 
   return (
@@ -168,7 +178,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
-          {done ? <button className="primary result-continue" onClick={() => { gameplayTelemetry.flow("result_continue"); onDone(); }}>Continue</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={quit}>Quit</button>}
+          {done ? <button className="primary result-continue" onClick={() => { gameplayTelemetry.flow("result_continue"); onDone(); }}>{seasonId && !tutorial ? "Continue to season" : "Continue"}</button> : tutorial ? <button className="link" aria-label="Skip tutorial" onClick={onSkip}>Skip</button> : <button className="link" onClick={quit}>Quit</button>}
         </div>
       </div>
 
@@ -229,6 +239,8 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
         <>
           {reward && <RewardLine reward={reward} />}
           {repeat && !tutorial && <p className="muted duel-note" role="status">No new coins: this game was already saved and paid.</p>}
+          {note && <p className={`duel-note ${note.tone === "bad" ? "bad" : "muted"}`} role="status">{note.text}</p>}
+          {afterLine && <p className="duel-note arc-after" role="status"><b>{afterLine}</b></p>}
           {tutorial && saved === "saved" && (
             <div className="reward">
               <span className="reward-total"><span className="coin" aria-hidden /> {badge ? `+${badge} coins` : "Rookie Rally done"}</span>

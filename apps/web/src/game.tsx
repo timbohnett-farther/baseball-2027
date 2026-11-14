@@ -325,7 +325,7 @@ export function GameView({ game, onDone }: { game: PlayedGame; onDone: () => voi
           {done && highlights.reel && <SkipPlay e={events[shownIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
           {done && !highlights.reel && highlights.available && <button className="link" onClick={highlights.start}>Watch highlights</button>}
-          {done && !highlights.reel && <button className="primary" onClick={onDone}>Done</button>}
+          {done && !highlights.reel && <button className="primary" onClick={onDone}>{game.reward?.arcade ? "Continue to season" : "Done"}</button>}
         </div>
       </div>
 
