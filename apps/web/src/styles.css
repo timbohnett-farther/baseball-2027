@@ -68,10 +68,14 @@ h1, h2, h3, .display { font-family: var(--display); text-transform: uppercase; l
   .userbar { position: static; justify-content: flex-start; padding-top: 12px; gap: 2px 12px; }
   .hero { padding-top: 16px; }
   .userbar .sep { display: none; }
+  /* W38: six tabs wrap into rows in normal flow instead of squeezing past the viewport; labels stay on one line and every tab keeps the 44px floor. */
+  .tabs { flex-wrap: wrap; gap: 0 20px; }
+  .tabs button { white-space: nowrap; }
 }
 @media (hover: none) and (pointer: coarse) {
   .userbar .link, .userbar select.link, .userbar .mix summary { min-height: 44px; display: inline-flex; align-items: center; padding: 0 4px; }
   .userbar .vol { min-height: 44px; }
+  .tabs button { min-width: 44px; }
 }
 .status { margin-top: 14px; font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); display: inline-block; }
