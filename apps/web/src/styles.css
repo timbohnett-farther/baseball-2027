@@ -655,6 +655,8 @@ tr.in td { background: rgba(224, 164, 60, 0.05); }
 .pause-gate { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(11, 13, 18, 0.88); text-align: center; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .pause-gate .display { font-size: 28px; }
 .pause-gate button { min-height: 56px; min-width: 160px; font-size: 19px; }
+/* The panel's backdrop-filter makes it the containing block of position: fixed children, so the gate sized itself to the (taller) panel and pushed Ready below a short landscape viewport. */
+.panel:has(.pause-gate) { backdrop-filter: none; }
 @media (max-width: 640px) and (orientation: portrait) and (hover: none) {
   .rotate-hint { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; margin: 0; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5); pointer-events: none; }
   .rotate-hint::before { content: "\21BB  "; font-size: 18px; }
