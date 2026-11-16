@@ -36,8 +36,8 @@ const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const PERF = import.meta.env.DEV;
 /** Dev A/B switch for the W35a evidence runs (`?w35a=off`): no prewarm and the pre-W35a dispose, so before/after can be measured on one build. */
 const LEGACY = PERF && new URLSearchParams(location.search).get("w35a") === "off";
-/** W33b shot-VFX particle tints: warm spark at contact, chalk at the mound, tan dirt on the slide. */
-const FX_TINT: Record<"contact" | "release" | "slide", [number, number, number]> = { contact: [1, 0.86, 0.6], release: [0.9, 0.9, 0.85], slide: [1, 0.78, 0.5] };
+/** W33b shot-VFX particle tints: warm spark at contact, chalk at the mound, dark clay dirt on the slide. The pool uses normal blending, so a tint is the particle's real colour (additive stacking read as glowing white dots). */
+const FX_TINT: Record<"contact" | "release" | "slide", [number, number, number]> = { contact: [1, 0.86, 0.6], release: [0.9, 0.9, 0.85], slide: [0.72, 0.54, 0.36] };
 const FT = 0.3048;
 const BASES = [V(0, 0, 0), V(19.4, 0, -19.4), V(0, 0, -38.8), V(-19.4, 0, -19.4)]; // home, 1B, 2B, 3B
 const WALL_R = 112;
@@ -316,7 +316,7 @@ class Dust {
   readonly points: THREE.Points;
   private pos: Float32Array; private col: Float32Array; private vel: Float32Array; private life: Float32Array; private tint: Float32Array;
   private next = 0;
-  constructor(private n: number, private ambient: boolean, size: number, tex: THREE.Texture, private rand: () => number) {
+  constructor(private n: number, private ambient: boolean, size: number, tex: THREE.Texture, private rand: () => number, additive = true) {
     this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 3);
     this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.tint = new Float32Array(n * 3).fill(0.8);
     for (let i = 0; i < n; i++) {
@@ -327,7 +327,7 @@ class Dust {
     geo.setAttribute("position", new THREE.BufferAttribute(this.pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(this.col, 3));
     this.points = new THREE.Points(geo, new THREE.PointsMaterial({
-      size, map: tex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+      size, map: tex, vertexColors: true, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, fog: false,
     }));
     this.points.frustumCulled = false;
   }
@@ -503,7 +503,7 @@ class Director {
     this.drift = new Dust(Math.round(90 * this.prof.dust), true, 0.55, dust, this.rand);
     this.scene.add(this.burstDust.points, this.drift.points);
     const fxN = poolSize(this.tier);
-    if (fxN > 0) { this.shotFx = new Dust(fxN, false, 0.5, dust, this.rand); this.shotFx.points.visible = false; this.scene.add(this.shotFx.points); }
+    if (fxN > 0) { this.shotFx = new Dust(fxN, false, 0.5, dust, this.rand, false); this.shotFx.points.visible = false; this.scene.add(this.shotFx.points); }
 
     this.cam.position.copy(this.homePos());
     this.raf = requestAnimationFrame(this.frame);
