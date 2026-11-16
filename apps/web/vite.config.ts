@@ -12,7 +12,7 @@ function serviceWorker(): Plugin {
       const files = Object.keys(bundle).filter((f) => !f.endsWith(".map"));
       const hash = createHash("sha1");
       for (const f of files) hash.update(f);
-      const precache = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", ...files.filter((f) => f !== "index.html").map((f) => `/${f}`)];
+      const precache = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png", "/fonts/inter-latin.woff2", "/fonts/inter-latin-ext.woff2", "/fonts/oswald-latin.woff2", "/fonts/oswald-latin-ext.woff2", ...files.filter((f) => f !== "index.html").map((f) => `/${f}`)];
       const source = readFileSync(new URL("./sw.template.js", import.meta.url), "utf8")
         .replace("__VERSION__", hash.digest("hex").slice(0, 10))
         .replace("__PRECACHE__", JSON.stringify([...new Set(precache)]));

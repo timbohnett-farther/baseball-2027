@@ -34,3 +34,20 @@ The remaining four are one chain. `npm audit` offers `drizzle-kit@0.18.1` as the
 - `npm run build`: ok; apps/web/dist contains sw.js, manifest.webmanifest, icons, assets.
 - Built server (`node apps/server/dist/index.js`, PORT 3917) served the built app: `/`, `/sw.js`, `/manifest.webmanifest` and client routes return `Cache-Control: no-cache`; `/assets/*.js` returns `public, max-age=31536000, immutable` (the setHeaders change works under v10).
 - Browser smoke: `shot.mjs --phone --check` on duel-pitch and season-hub passed (dev server, as allowed). No live server API round trip in the browser was run.
+
+## Self-hosted fonts (W38, 2026-11-16)
+
+Inter and Oswald were loaded from fonts.googleapis.com / fonts.gstatic.com on every page load, so the first paint needed a third-party round trip and an offline start fell back to system fonts. They are now served from `apps/web/public/fonts/` (declared by `@font-face` in `apps/web/index.html`, `font-display: swap`) and precached by the service worker. No npm dependency was added.
+
+Source: the woff2 files Google Fonts itself serves, resolved from `https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Oswald:wght@500;600&display=swap` (the same request index.html made), downloaded on 2026-11-16 from fonts.gstatic.com. Each is a variable font, so one file covers all requested weights; only the `latin` and `latin-ext` subsets are kept (the other scripts were never used by the game).
+
+| File | Upstream URL | SHA-256 | Bytes |
+|---|---|---|---|
+| inter-latin.woff2 | https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2 | c940764593d0fe5d596be327ca7558855e018039fb78509aa21921fd3644c3e4 | 48432 |
+| inter-latin-ext.woff2 | https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2 | a28eb6d3ccb534ae0c94ca999371df024aab60b08c3c8a5720ee9e32fa0faaa2 | 85272 |
+| oswald-latin.woff2 | https://fonts.gstatic.com/s/oswald/v57/TK3IWkUHHAIjg75cFRf3bXL8LICs1_Fv40pKlN4NNSeSASz7FmlWHYjMdZwl.woff2 | 9dde3797547520f762f4ba3a822d417a0872b962bc78753a7ee9f955382b6b85 | 21412 |
+| oswald-latin-ext.woff2 | https://fonts.gstatic.com/s/oswald/v57/TK3IWkUHHAIjg75cFRf3bXL8LICs1_Fv40pKlN4NNSeSASz7FmlYHYjMdZwlou4.woff2 | 7b6295733e76a64d4e0b61e68a565fac062bfc9a285dfcdee9e20ca0b3a613f5 | 18944 |
+
+Licenses: both families are SIL Open Font License 1.1 (https://openfontlicense.org), which allows redistribution and embedding with the font files. Inter: Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter). Oswald: Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont). The license texts were not downloaded into the repo; the links above are the record. The copyright lines are from the upstream project pages as remembered, not read from the font files' name tables in this session.
+
+Verification: headless Chrome against the built app with every non-localhost request aborted made 0 external requests, `document.fonts` loaded Inter 400-700 and Oswald 500-600 from `/fonts/*.woff2`, and the four files are in the generated `sw.js` precache list. A full offline reload through the installed service worker was not run.
