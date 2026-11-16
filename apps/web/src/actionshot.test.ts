@@ -362,3 +362,14 @@ test("telemetry never changes a decision: the plans match a director that nobody
   a.telemetry();
   assert.deepEqual(pa, pb);
 });
+
+// W38b: Director needs a WebGL canvas, so this pins the staging bookkeeping in source. Groups that left `runners` but are still in the
+// scene (home-run batter, scorers trotting home, fading outs) must be tracked in `exiting`, and stageIn must hide them like any figure.
+test("staging a Contact shot hides every exiting runner group (no untracked figure beside the staged batter)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./field.tsx", import.meta.url), "utf8");
+  const stageIn = src.slice(src.indexOf("stageIn("), src.indexOf("stageIn(") + 1500);
+  assert.match(stageIn, /this\.exiting\.forEach\(\(o\) => \{ if \(o\.parent\) hide\(o\); \}\)/, "stageIn must hide tracked exiting groups");
+  assert.match(src, /if \(remove\) this\.exiting\.add\(g\)/, "runPath(remove) must track the group it sends home");
+  assert.match(src, /this\.exiting\.add\(g\);\s*\n\s*this\.tween\(0\.4[^\n]*this\.exiting\.delete\(g\); this\.scene\.remove\(g\)/, "fadeOut must track the group until it is removed");
+});
