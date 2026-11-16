@@ -49,8 +49,9 @@ Rally Duel and season arcade play, rulesets 1-9, abilities with per-ability gold
 - Match length: computed median 2.8 min (p90 3.9) at 1.5 s per prompt against the 5-8 min target. Computed only; no human timing exists.
 - Shots per match (auto-sim, W32 row in ACCEPTANCE): full mean 1.40, reduced mean 0.80 against a 1-3 target; reduced is below it. Not re-measured in RC01.
 - Finish idempotency lock is single-instance (inferred from code and the PGlite test).
-- Google Fonts (Inter, Oswald) load from fonts.googleapis.com in index.html: an offline and privacy dependency.
-- 441 px layout width on the home page at 390 px portrait emulation; nav tab wrap; legacy format-1 season hub keeps the old layout.
+- Legacy format-1 season hub keeps the old layout. (W38 closed the 441 px home width at 390 px portrait and the nav tab wrap, and self-hosted Inter/Oswald; see DEPENDENCY_AUDIT.)
+- `shot.mjs --phone --check` duel-resume fails at 844x390 in every variant checked (default, lefty, calm, reduced, gray, pseudo): primary "Ready" [342,351,160x56] extends below the 390 px viewport. Reproduced on the pre-W38 baseline 07867d8, so it is not a W38 regression; the other 16 moments pass. Outside the W38 ownership boundary (resume HUD); open.
+- Contact action shot on a home run (batter-runner on the scoring path) leaves a second figure at the plate: the batter group that `Director` converts to a runner is in neither `batter` nor `runners`, so `stageIn` does not hide it. Fix is in `field.tsx` `stageIn`/runner bookkeeping, outside the W38 ownership boundary; open.
 - Haptics control is hidden on iPhone Safari; there is no on-phone telemetry, frame readout or build label, so a tester counts by hand.
 - Largest bundles: field chunk 551 KB, index 395 KB (not measured on a phone).
 - 4 moderate dev-only audit advisories.
