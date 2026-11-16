@@ -435,6 +435,8 @@ class Director {
   private shotEvent: GameEvent | null = null; // the event the planned action shot replays
   private lastPitch: Extract<GameEvent, { type: "pitch" }> | null = null;
   private ump!: THREE.Group;
+  /** Figures that left `batter`/`runners` but are still on the field (scoring runners, the home-run batter, outs fading); a shot must hide them too. */
+  private exiting = new Set<THREE.Object3D>();
   private staged: { kind: ShotKind; hidden: [THREE.Object3D, boolean][]; actors: THREE.Group[]; figs: Record<string, THREE.Group>; hit: THREE.Vector3; rel: THREE.Vector3 } | null = null;
   private rand: () => number; // cosmetic stream (cosmetic.ts), never the sim's
   private tier = getQuality();
@@ -750,7 +752,8 @@ class Director {
 
   private fadeOut(g: THREE.Object3D, delay: number, then?: () => void) {
     const s = g.scale.x;
-    this.tween(0.4, (p) => g.scale.setScalar(s * (1 - p)), delay, () => { this.scene.remove(g); disposeFigure(g); then?.(); });
+    this.exiting.add(g);
+    this.tween(0.4, (p) => g.scale.setScalar(s * (1 - p)), delay, () => { this.exiting.delete(g); this.scene.remove(g); disposeFigure(g); then?.(); });
   }
 
   // --- event handling ----------------------------------------------------------------------
@@ -1001,7 +1004,7 @@ class Director {
     if (!e) return;
     const hidden: [THREE.Object3D, boolean][] = [];
     const hide = (o: THREE.Object3D | null | undefined) => { if (o) { hidden.push([o, o.visible]); o.visible = false; } };
-    hide(this.batter); this.runners.forEach((r) => hide(r)); hide(this.onDeck); hide(this.fielders[1]); hide(this.ump);
+    hide(this.batter); this.runners.forEach((r) => hide(r)); this.exiting.forEach((o) => { if (o.parent) hide(o); }); hide(this.onDeck); hide(this.fielders[1]); hide(this.ump);
     const st: NonNullable<Director["staged"]> = this.staged = { kind, hidden, actors: [], figs: {}, hit: V(0, 1, 0), rel: V(0, 2, -17) };
     const bat: Side = this.battingSide(e), def: Side = bat === "away" ? "home" : "away";
     const add = (key: string, g: THREE.Group) => { this.scene.add(g); st.actors.push(g); st.figs[key] = g; return g; };
@@ -1217,6 +1220,7 @@ class Director {
   }
 
   private runPath(g: THREE.Object3D, from: number, to: number, delay: number, remove: boolean, pace = 0.5) {
+    if (remove) this.exiting.add(g);
     for (let b = from; b < to; b++) {
       const a = BASES[b % 4], c = BASES[(b + 1) % 4], k = b - from;
       this.tween(pace, (p) => g.position.lerpVectors(a, c, p), delay + k * pace);
