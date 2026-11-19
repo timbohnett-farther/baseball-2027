@@ -28,7 +28,7 @@ const rejectedBot = {}; // inputs the bot logged that the classifier would not a
 for (let seed = from; seed <= to; seed++) {
   const userSide = seed % 2 ? "away" : "home";
   const inputs = [];
-  const g = playInteractive({ away, home, seed, innings, rules: CURRENT_RULES, difficulty: cpu, userSide, inputs, auto: makeBot(bot, seed, userSide, { away, home }, innings) });
+  const g = playInteractive({ away, home, seed, innings, rules: CURRENT_RULES, difficulty: cpu, userSide, inputs, auto: makeBot(bot, seed, userSide, { away, home }, innings, CURRENT_RULES) });
   // Replay the way the live game does: after each commit the match is re-simulated from the seed, the collector sees the
   // new events, then the next input is classified against the Awaiting it was answering.
   const t = new GameplayTelemetry(() => 0);

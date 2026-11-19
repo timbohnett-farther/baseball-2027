@@ -6,10 +6,13 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { ABILITIES, BOUNDS, NEUTRAL, TEAM_RALLY_BREAKER, arm, cancel, check, combine, commit, expire, fieldContextOk, newLedger } from "./ability.ts";
 import type { Actor } from "./ability.ts";
-import { CURRENT_RULES, playInteractive } from "./game.ts";
+import { playInteractive } from "./game.ts";
+
 import { PROFILES, chooseAbility, makeBot, type Bot, type Scene } from "./cpu.ts";
 import { createRng } from "./rng.ts";
 import type { AbilityId, AbilityRequest, Awaiting, GameEvent, Side, SimPlayer, SimTeam, UserInput } from "./types.ts";
+/** The ability goldens were captured under rules 9 and stay there; rules 10 has its own goldens (cpu-field-golden.test.ts). */
+const PINNED_RULES = 9;
 
 let nextId = 20_000;
 const hitter = (r: number, position = "LF"): SimPlayer => ({
@@ -238,7 +241,7 @@ function abilityBot(target: AbilityId, force: boolean): Bot {
 const heatOf = (e: GameEvent, id: number) => e.state.heat[id] ?? 0;
 const prevOf = (events: GameEvent[], i: number) => (i > 0 ? events[i - 1] : null);
 
-function playWith(seed: number, bot: Bot, userSide: Side = "home", rules = CURRENT_RULES, difficulty: "pro" | "allstar" | "rookie" = "pro") {
+function playWith(seed: number, bot: Bot, userSide: Side = "home", rules = PINNED_RULES, difficulty: "pro" | "allstar" | "rookie" = "pro") {
   const inputs: UserInput[] = [];
   const g = playInteractive({ away, home, seed, innings: 3, rules: rules as 9, userSide, inputs, startHeat: 100, difficulty, auto: bot });
   return { g, inputs };
@@ -298,9 +301,9 @@ for (const id of IDS) {
 }
 
 test("golden fixture: the first ability game per ability replays to the pinned event hash", () => {
-  if (process.env.UPDATE_ABILITY_GOLDEN === "1") writeFileSync(fixturePath, JSON.stringify({ rules: CURRENT_RULES, seeds: SWEEP_SEEDS.length, abilities: computed }, null, 2) + "\n");
+  if (process.env.UPDATE_ABILITY_GOLDEN === "1") writeFileSync(fixturePath, JSON.stringify({ rules: PINNED_RULES, seeds: SWEEP_SEEDS.length, abilities: computed }, null, 2) + "\n");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { rules: number; abilities: typeof computed };
-  assert.equal(fixture.rules, CURRENT_RULES);
+  assert.equal(fixture.rules, PINNED_RULES);
   assert.deepEqual(Object.keys(fixture.abilities).sort(), [...IDS].sort(), "fixture covers every shipped ability");
   for (const id of IDS) assert.deepEqual(computed[id], fixture.abilities[id], `${id} golden`);
 });

@@ -77,3 +77,15 @@ Mirror pairing (pro vs pro) is symmetric on commits (1.40 / 1.40) and the win ra
 Measured, real MLB clubs (N=500): pro vs pro bot win 58%, commits 1.98 / 1.95; allstar vs pro 63%; pro vs allstar 38%; Rally Breaker uses/game bot 0.358, cpu 0.272; AFTERBURNER bot 0.000, cpu 0.174; runs/game 4.79.
 
 The bot-seat win rates move only a few points off 50% on the even mirror (48% at N=200; real clubs 58% at N=100, within the noise of a 100-game sample, not tested for significance).
+
+## W43 (ruleset 10): findings 1-3 closed for the computer
+
+Every change is gated on `rules >= 10`; rules 1-9 replay byte-identically (pinned hashes in `cpu-field.test.ts`, existing fixtures untouched).
+
+1. Fielding abilities: when the user bats, the computer may ask for FIELD_WALL_REAPER, FIELD_ACROBAT or FIELD_CANNON_ARM on a ball in play whose kind passes `fieldContextOk`, only inside the close-play band, paying the catalog Heat cost, with the user's window, reach and timing rules. The decision reads the ball kind and the base state only (never whether the ball is a hit), draws from `cpuRng`, and the timing is its own sloppy-scaled draw.
+2. `makeBot` now attaches Afterburner to a steal (rules 10), the same request a person can send.
+3. Vortex was a formula bug: `0.55 + 0.05 * zr(70 - eye)` never cleared the profile bars. Rules 10 scores it 0.55 + 0.05 * ((70 - eye) / 10) on a two-strike count against a hitter with eye below 72, else 0.25.
+
+Replay fix found on the way: with rules 10 a throw-over logged for the next half could be consumed by the previous half's loop top after the computer's own pickoff ended that half, desynchronising the log. Rules 10 leaves such an input for its own half. Regression test in `cpu-field.test.ts`.
+
+Numbers (synthetic 70/70, 3 innings, N=200 per pairing, observed not tuned) are in the W43 commit message and `gameplay-report.mjs` output.

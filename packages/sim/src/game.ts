@@ -35,8 +35,11 @@ const MAX_INNINGS = 9;
  *      "pro" difficulty with the computer's extras out of reach plays as v6 would; auto-sims (no user seat) are identical to v6.
  *  8 = W29: the throw-over limit (two) resets for every batter instead of lasting the whole match, for both sides.
  *  9 = W29b: balance pass (TUNE9: shorter at-bats, more balls in play and hits, slower Rally fill) and, for new seasons, home/away alternation.
+ * 10 = W43: the computer fields with the user's tools. On a close ball in play against the user's bat it may spend its fielder's Heat on
+ *      Wall Reaper, Acrobat or Cannon Arm (same cost, same context, same effects, own decision stream), the Vortex score no longer
+ *      collapses to zero, and the soak bot attaches Afterburner to a steal. Rules 1-9 never read any of it.
  */
-export const CURRENT_RULES: RulesVersion = 9;
+export const CURRENT_RULES: RulesVersion = 10;
 
 /**
  * Every outcome knob rules 9 retunes, in one place (ARC 11.5-11.6 pace levers: at-bat length, contact/outcome mix, Rally fill).
@@ -338,7 +341,7 @@ const inZone = (a: Aim) => Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1;
 
 /** Rules v7: the computer decides on an ability for this pitch (own stream) and, if it takes one, pays for it like a person would. */
 function cpuUse(c: Ctx, role: "bat" | "pitch", who: SimPlayer, side: Side, batter: SimPlayer, pitcher: SimPlayer | null): Effects | null {
-  const scene = sceneOf(c.state, c.innings, role, side, heatOf(c, who.id), batter.batting, (pitcher ?? who).pitching, c.profile);
+  const scene = sceneOf(c.state, c.innings, role, side, heatOf(c, who.id), batter.batting, (pitcher ?? who).pitching, c.profile, c.rules);
   const req = chooseAbility(c.profile, c.cpuRng, scene);
   return req ? useAbility(c, role, who, side, req, role === "bat" ? swingFor(req.id) : undefined, undefined, true) : null;
 }
@@ -482,6 +485,31 @@ function ballInPlay(c: Ctx, batter: SimPlayer, pitcher: SimPlayer, swing?: Ctx["
     c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit, out: !isHit };
     if (play) thrown = { to: f.throwTo && play.options.includes(f.throwTo) ? f.throwTo : play.recommended, rec: play.recommended };
     fieldFx = f.fx;
+  } else if (c.user && c.rules >= 10 && fieldingSide(c) !== c.user.side && Math.abs(r - (hr + hit)) < CONTEST_BAND) {
+    // Rules 10: the computer's fielder gets the same close play the user's does, and may spend its own Heat on a fielding ability.
+    // It decides from the ball's kind and the situation only (what the user's fielding prompt shows), never from whether the ball is a hit.
+    const kind: FieldContext["kind"] = x < ground ? "grounder" : x < flyEnd ? "fly" : "liner";
+    const fielder = pickFielder(c.teams[fieldingSide(c)], kind, (x * 1000) % 1);
+    const play = kind === "grounder" ? throwPlay(c.state) : undefined;
+    const ctx: FieldContext = { kind, doublePlay: !!play };
+    const scene = sceneOf(c.state, c.innings, "field", fieldingSide(c), heatOf(c, fielder.id), batter.batting, pitcher.pitching, c.profile, c.rules, ctx);
+    const req = chooseAbility(c.profile, c.cpuRng, scene);
+    const fx = req ? useAbility(c, "field", fielder, fieldingSide(c), req, undefined, ctx, true) : null;
+    if (fx) {
+      // A committed ability brings a glove tap whose timing is drawn like the soak bot's, so Acrobat's window and the tap quality read the same as the user's.
+      const timing = Math.max(-1, Math.min(1, (c.cpuRng.next() + c.cpuRng.next() - 1) * c.profile.sloppy));
+      const window = clamp(1 + 0.15 * z(fielder.batting?.fielding), 0.6, 1.4);
+      const q = 1 - Math.min(1, Math.abs(timing) / (window * fx.fieldWindow)), q0 = 1 - Math.min(1, Math.abs(timing) / window);
+      const wasHit = r < hr + hit;
+      const reach = c.cpuActive?.def.id !== "FIELD_WALL_REAPER" || wasHit ? fx.reach : 0;
+      const r0 = r + (q0 - 0.5) * 2 * CONTEST_BAND;
+      r += (q - 0.5) * 2 * CONTEST_BAND + reach * CONTEST_BAND;
+      const isHit = r < hr + hit;
+      if (c.cpuActive?.def.role === "field" && r0 < hr + hit && !isHit) c.cpuActive.triggered = true;
+      c.lastField = { fielderId: fielder.id, robbed: wasHit && !isHit, booted: !wasHit && isHit, out: !isHit };
+      if (play) thrown = { to: play.recommended, rec: play.recommended };
+      fieldFx = fx;
+    }
   }
 
   if (r < hr + hit) return x < triple ? "triple" : x < triple + double ? "double" : "single";
@@ -661,6 +689,9 @@ function runExtras(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine: 
   for (;;) {
     const inp = u.inputs[u.cursor];
     if (!inp || (inp.kind !== "run" && inp.kind !== "team") || (inp.kind === "run" && inp.action === "advance")) return;
+    // Rules 10: a steal or throw-over for the other half was logged after this loop top (the computer's own pickoff can end a half
+    // first), so it waits for its half instead of being dropped here. Older logs keep the old behaviour.
+    if (c.rules >= 10 && inp.kind === "run" && u.side !== (inp.action === "steal" ? bSide : fSide)) return;
     u.cursor++;
     if (c.state.outs >= 3) continue; // the half is over: late requests are dropped
     if (inp.kind === "team") { useBreaker(c, u.side); continue; }
@@ -692,7 +723,7 @@ function cpuPrePitch(c: Ctx, bSide: Side, fSide: Side, pitcher: SimPlayer, pLine
     const cands = (["first", "second"] as const).filter((k) => b[k] !== null && b[k === "first" ? "second" : "third"] === null);
     const best = cands.map((k) => ({ k, chance: stealChance(c, b[k]!, k, pitcher, fSide) })).sort((x, y) => y.chance - x.chance)[0];
     if (best && best.chance >= p.stealMin && r.next() < p.stealRate) {
-      const id = b[best.k]!, fx = chooseAbility(p, r, sceneOf(c.state, c.innings, "run", cpuSide, heatOf(c, id), findPlayer(c, id).batting, pitcher.pitching, p));
+      const id = b[best.k]!, fx = chooseAbility(p, r, sceneOf(c.state, c.innings, "run", cpuSide, heatOf(c, id), findPlayer(c, id).batting, pitcher.pitching, p, c.rules));
       stealAttempt(c, bSide, fSide, pitcher, pLine, best.k, fx, true);
     }
   } else if (c.cpuPickoffs < PICKOFF_LIMIT && r.next() < p.pickoffRate) {

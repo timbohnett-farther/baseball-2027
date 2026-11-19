@@ -63,7 +63,7 @@ const all: Row[] = [];
 function game(seed: number, bot: Difficulty, cpu: Difficulty, userSide: Side): Row {
   const { away, home } = teamsFor(seed);
   const inputs: UserInput[] = [];
-  const g = playInteractive({ away, home, seed, innings: INNINGS, rules: RULES, difficulty: cpu, userSide, inputs, auto: makeBot(bot, seed, userSide, { away, home }, INNINGS) });
+  const g = playInteractive({ away, home, seed, innings: INNINGS, rules: RULES, difficulty: cpu, userSide, inputs, auto: makeBot(bot, seed, userSide, { away, home }, INNINGS, RULES) });
   const r = g.result!;
   const row: Row = { pitches: 0, pa: 0, runs: r.final.home + r.final.away, hr: 0, presentationMs: 0, inputs: inputs.length, half: 0,
     breakerBot: 0, breakerCpu: 0, runAhead: /Run-ahead/.test(r.events.at(-1)!.type === "final" ? (r.events.at(-1) as { text: string }).text : ""),

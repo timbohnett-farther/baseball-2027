@@ -1,4 +1,4 @@
-import { ABILITIES } from "./ability.ts";
+import { ABILITIES, fieldContextOk, type FieldContext } from "./ability.ts";
 import { createRng, type Rng } from "./rng.ts";
 import type { AbilityRequest, Awaiting, Batting, Difficulty, GameState, PitchType, Pitching, Side, SimTeam, UserInput } from "./types.ts";
 
@@ -63,7 +63,7 @@ export function zoneAim(p: CpuProfile, rx: number, ry: number): { x: number; y: 
 
 /** Everything the policy reads about the moment, from the acting side's point of view. */
 export interface Scene {
-  role: "bat" | "pitch" | "run";
+  role: "bat" | "pitch" | "run" | "field";
   heat: number;
   balls: number; strikes: number; outs: number;
   risp: boolean; loaded: boolean; late: boolean;
@@ -72,16 +72,20 @@ export interface Scene {
   batting: Batting | null | undefined; pitching: Pitching | null | undefined;
   /** How predictable the pitcher's mix is: the share of fastballs. */
   fastShare: number;
+  /** Rules v10: the ruleset the scene is read under (the Vortex score and the fielding scores differ from v10). */
+  rules?: number;
+  /** Rules v10, field role: the ball the glove is closing on, the same facts the user's fielding prompt shows. */
+  ball?: FieldContext;
 }
 
-export function sceneOf(state: GameState, innings: number, role: Scene["role"], side: Side, heat: number, batting: Batting | null | undefined, pitching: Pitching | null | undefined, p: CpuProfile): Scene {
+export function sceneOf(state: GameState, innings: number, role: Scene["role"], side: Side, heat: number, batting: Batting | null | undefined, pitching: Pitching | null | undefined, p: CpuProfile, rules = 9, ball?: FieldContext): Scene {
   const b = state.bases;
   return {
     role, heat, balls: state.balls, strikes: state.strikes, outs: state.outs,
     risp: b.second !== null || b.third !== null, loaded: b.first !== null && b.second !== null && b.third !== null,
     late: state.inning >= innings - 1,
     margin: side === "home" ? state.score.home - state.score.away : state.score.away - state.score.home,
-    batting, pitching, fastShare: p.mix[0],
+    batting, pitching, fastShare: p.mix[0], rules, ...(ball ? { ball } : {}),
   };
 }
 
@@ -98,7 +102,14 @@ export function utility(id: AbilityRequest["id"], s: Scene): number {
     case "PITCH_MIRAGE": return 0.3 + 0.8 * (s.fastShare - 0.5) + (s.risp ? 0.12 : 0) + (s.late ? 0.1 : 0);
     case "PITCH_VORTEX":
       if (s.loaded || (s.pitching?.control ?? 70) < 60) return -1;
+      // Rules 1-9 fed the eye gap through zr() again, which left every 70-eye hitter at 0.2 (below any profile's bar): Vortex never fired.
+      // Rules 10: 0.55 at two strikes against a hitter with eye under 72, plus 0.05 for each 10 points below 70; 0.25 otherwise.
+      if ((s.rules ?? 9) >= 10) return s.strikes === 2 && (s.batting?.eye ?? 70) < 72 ? 0.55 + 0.05 * ((70 - (s.batting?.eye ?? 70)) / 10) : 0.25;
       return s.strikes === 2 && (s.batting?.eye ?? 70) < 72 ? 0.55 + 0.05 * zr(70 - (s.batting?.eye ?? 70)) : 0.25;
+    // Rules 10 fielding: scored on the ball's kind and the base situation only, never on whether the ball is a hit.
+    case "FIELD_WALL_REAPER": return (s.rules ?? 9) >= 10 && s.ball && fieldContextOk(id, s.ball) ? 0.4 + (s.risp ? 0.15 : 0) + (s.late ? 0.1 : 0) : -1;
+    case "FIELD_ACROBAT": return (s.rules ?? 9) >= 10 && s.ball && fieldContextOk(id, s.ball) ? 0.35 + (s.risp ? 0.12 : 0) + (s.late ? 0.1 : 0) : -1;
+    case "FIELD_CANNON_ARM": return (s.rules ?? 9) >= 10 && s.ball && fieldContextOk(id, s.ball) ? 0.45 + (s.late ? 0.05 : 0) + (s.outs === 0 ? 0.05 : 0) : -1;
     case "RUN_AFTERBURNER": return 0.5 + (s.late ? 0.1 : 0);
     default: return -1;
   }
@@ -135,7 +146,7 @@ export interface Bot {
  * A user seat driven by a CPU profile, for AI-vs-AI soak tests. It answers only what the engine asks, from the same
  * policy functions the computer uses, with its own seeded stream; its choices are logged like a person's, so the game replays.
  */
-export function makeBot(difficulty: Difficulty, seed: number, side: Side, teams: Record<Side, SimTeam>, innings: number): Bot {
+export function makeBot(difficulty: Difficulty, seed: number, side: Side, teams: Record<Side, SimTeam>, innings: number, rules = 9): Bot {
   const p = PROFILES[difficulty], rng = createRng((seed ^ 0x9e3779b9) >>> 0);
   const find = (id: number) => [...teams.away.lineup, ...teams.home.lineup, ...teams.away.pitchers, ...teams.home.pitchers].find((x) => x.id === id);
   const noise = () => Math.max(-1, Math.min(1, (rng.next() + rng.next() - 1) * p.sloppy));
@@ -145,7 +156,13 @@ export function makeBot(difficulty: Difficulty, seed: number, side: Side, teams:
       if (v.team?.available && rng.next() < p.breakerRate && v.team.targets.reduce((n, t) => n + t.heat, 0) >= p.breakerHeat) out.push({ kind: "team", action: "rally_breaker" });
       if (v.role === "swing") {
         const go = v.run?.steal.find((r) => r.chance >= p.stealMin);
-        if (go && rng.next() < p.stealRate) out.push({ kind: "run", action: "steal", from: go.base === "second" ? "second" : "first" });
+        if (go && rng.next() < p.stealRate) {
+          const from = go.base === "second" ? "second" : "first";
+          // Rules 10: attach Afterburner to the steal the way the computer does (same scene, own stream); earlier rules never did.
+          const rid = rules >= 10 ? v.state.bases[from] : null;
+          const ask = rid != null ? chooseAbility(p, rng, sceneOf(v.state, innings, "run", side, v.state.heat[rid] ?? 0, find(rid)?.batting, find(v.pitcherId)?.pitching, p, rules)) : undefined;
+          out.push({ kind: "run", action: "steal", from, ...(ask ? { ability: ask } : {}) });
+        }
       } else if (v.run && v.run.pickoffsLeft > 0 && v.run.pickoff.length && rng.next() < p.pickoffRate) {
         out.push({ kind: "run", action: "pickoff", at: v.run.pickoff[0].base });
       }
@@ -157,7 +174,7 @@ export function makeBot(difficulty: Difficulty, seed: number, side: Side, teams:
         const pitcher = find(a.pitcherId), batter = find(a.batterId);
         const strike = rng.next() < 0.55 + p.zone;
         const aim = strike ? zoneAim(p, rng.next() * 2 - 1, rng.next() * 2 - 1) : { x: (rng.next() < 0.5 ? -1 : 1) * (1.05 + rng.next() * 0.4), y: (rng.next() * 2 - 1) * 0.8 };
-        const ask = chooseAbility(p, rng, sceneOf(a.state, innings, "pitch", side, a.state.heat[a.pitcherId] ?? 0, batter?.batting, pitcher?.pitching, p));
+        const ask = chooseAbility(p, rng, sceneOf(a.state, innings, "pitch", side, a.state.heat[a.pitcherId] ?? 0, batter?.batting, pitcher?.pitching, p, rules));
         return { kind: "pitch", type, aim, ...(ask && a.abilities.find((x) => x.id === ask.id)?.available ? { ability: ask } : {}) };
       }
       if (a.role === "swing") {
@@ -165,7 +182,7 @@ export function makeBot(difficulty: Difficulty, seed: number, side: Side, teams:
         const inc = a.incoming!;
         const zone = Math.abs(inc.aim.x) <= 1 && Math.abs(inc.aim.y) <= 1;
         const swingP = zone ? 0.7 + p.zoneSwing + (a.state.strikes === 2 ? p.protect : 0) : 0.28 + p.chase;
-        const ask = chooseAbility(p, rng, sceneOf(a.state, innings, "bat", side, a.state.heat[a.batterId] ?? 0, batter?.batting, pitcher?.pitching, p));
+        const ask = chooseAbility(p, rng, sceneOf(a.state, innings, "bat", side, a.state.heat[a.batterId] ?? 0, batter?.batting, pitcher?.pitching, p, rules));
         if (rng.next() >= swingP) return { kind: "swing", swing: "take", timing: 0 };
         const swing = ask ? swingFor(ask.id) : (batter?.batting?.power ?? 70) > 78 ? "power" : "contact";
         return { kind: "swing", swing, timing: noise(), ...(ask && a.abilities.find((x) => x.id === ask.id)?.available ? { ability: ask } : {}) };
