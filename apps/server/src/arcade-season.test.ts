@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { regularSide, slotsFor, TEAM_COLORS, UNLOCKS, type ArcadeSeasonState, type Player } from "@bb/shared";
 import { buildApp } from "./app.ts";
 import { closeDb, getDb, initDb } from "./db/index.ts";
-import { games, seasonGames } from "./db/schema.ts";
+import { coinLedger, games, seasonGames } from "./db/schema.ts";
 import { playInteractive, type SimTeam } from "@bb/sim";
 import { pool, startStore } from "./store.ts";
 
@@ -104,6 +104,12 @@ test("arcade season: a full season pays what it reports, unlocks match the store
 
   const me = (await app.inject({ url: "/api/me", headers })).json();
   assert.equal(me.coins, coins, "the coins the games reported are the coins in the wallet");
+  // W41: every coin in the wallet has a ledger row (games, season bonuses, arcade stars and unlock coins), and the balances chain.
+  const rows = await getDb().select().from(coinLedger).where(eq(coinLedger.userId, me.id)).orderBy(coinLedger.id);
+  assert.equal(rows.reduce((n, r) => n + r.delta, 0), me.coins, "the ledger sums to the wallet");
+  assert.ok(rows.every((r, i) => r.balanceAfter === (i ? rows[i - 1]!.balanceAfter : 0) + r.delta), "balances chain row to row");
+  assert.ok(rows.some((r) => r.kind === "arcade") || stars === 0, "star coins are on the ledger");
+  assert.ok(rows.every((r) => ["game", "season", "arcade"].includes(r.kind)));
   const store = (await app.inject({ url: "/api/store", headers })).json();
   for (const id of unlocked) assert.ok(store.owned.includes(id), `${id} should be owned`);
 

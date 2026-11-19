@@ -6,7 +6,7 @@ import { slotsFor, SEASON_LENGTH, SEASON_REWARDS, TEAM_COLORS, type Player, type
 import { playInteractive, type SimTeam } from "@bb/sim";
 import { buildApp } from "./app.ts";
 import { closeDb, getDb, initDb } from "./db/index.ts";
-import { games, seasonGames, seasons, users, userTeams } from "./db/schema.ts";
+import { coinLedger, games, seasonGames, seasons, users, userTeams } from "./db/schema.ts";
 import { settleSeason } from "./season.ts";
 import { pool, startStore } from "./store.ts";
 
@@ -189,4 +189,17 @@ test("a user with an unfinished format-1 season cannot start another", async () 
   await legacySeason(m);
   const res = await app.inject({ method: "POST", url: "/api/season", headers: m.headers });
   assert.equal(res.statusCode, 400);
+});
+
+test("W41 ledger: a legacy season's bonus writes a 'season' ledger row and the ledger sums to the wallet", async () => {
+  const m = await manager("leg_ledger", "10.8.0.9");
+  const id = await legacySeason(m);
+  let bonus = 0;
+  for (let i = 0; i < SEASON_LENGTH; i++) bonus += await settle(m, id, i < 11 ? "W" : "L");
+  assert.equal(bonus, SEASON_REWARDS.regular + SEASON_REWARDS.berth);
+  const rows = await getDb().select().from(coinLedger).where(eq(coinLedger.userId, m.userId)).orderBy(coinLedger.id);
+  assert.ok(rows.length >= 1 && rows.every((r) => r.kind === "season" && r.delta > 0), JSON.stringify(rows));
+  assert.equal(rows.reduce((n, r) => n + r.delta, 0), bonus);
+  assert.equal(rows.at(-1)!.balanceAfter, await coinsOf(m), "the last row's balance is the wallet");
+  assert.ok(rows.every((r, i) => i === 0 || r.balanceAfter === rows[i - 1]!.balanceAfter + r.delta), "balances chain");
 });

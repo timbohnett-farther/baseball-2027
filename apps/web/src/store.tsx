@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   COSMETIC_SLOTS, LEGENDARY_MILESTONES, UNLOCK_STARS_BY_ITEM, woodDeltas,
-  type BatLength, type BatWeight, type Cosmetic, type CosmeticSlot, type Gear, type StoreState, type SuperBat, type Wood,
+  type BatLength, type BatWeight, type Cosmetics, type CosmeticSlot, type Gear, type MyTeam, type StoreState, type SuperBat, type Wood,
 } from "@bb/shared";
+import { TryOn } from "./tryon.tsx";
 import { StarSummary } from "./arcade.tsx";
 import { api } from "./api.ts";
 import { ErrorNote, Loading, toast } from "./ui.tsx";
@@ -17,8 +18,15 @@ const BUILD_LABEL = { alloy: "One-piece alloy", composite: "Two-piece composite"
 const SLOT_LABEL: Record<CosmeticSlot, { title: string; note: string }> = {
   helmet: { title: "Batting helmet", note: "Worn by whoever is up." },
   cleats: { title: "Cleats", note: "Every player on your club." },
-  gloves: { title: "Batting gloves", note: "Looks only. Zero effect on ratings." },
+  gloves: { title: "Batting gloves", note: "Worn by whoever is up." },
+  jersey: { title: "Jersey style", note: "Every player on your club." },
+  batskin: { title: "Bat skin", note: "Paints the bat your batter swings." },
+  celebration: { title: "Home-run celebration", note: "Plays where a homer lands. Quiet with reduced motion." },
 };
+const LEDGER_LABEL: Record<string, string> = { game: "Game reward", tutorial: "Tutorial reward", season: "Season bonus", arcade: "Arcade stars and unlocks" };
+
+/** What the try-on panel is showing: a slot's colourway (null = stock) or a Super Bat. */
+type Sel = { slot: CosmeticSlot | "bat"; id: string | null };
 
 type Ask = { id: string; name: string; price: number; bat: boolean };
 
@@ -50,9 +58,19 @@ export function StoreView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
+  const [sel, setSel] = useState<Sel | null>(null);
+  const [teamColor, setTeamColor] = useState("#2e9e5b");
 
   const load = () => api<StoreState>("/api/store").then(setStore, (e: Error) => setError(e.message));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api<MyTeam>("/api/my-team").then((t) => setTeamColor(t.color), () => {}); }, []);
+  const gear = store?.gear;
+  // The preview is the worn gear with the tapped item swapped in; nothing is saved until Equip.
+  const look = useMemo(() => {
+    const cosmetics: Cosmetics = { ...(gear?.cosmetics ?? {}) };
+    let superBat = gear?.superBat ?? null;
+    if (sel?.slot === "bat") superBat = sel.id; else if (sel) cosmetics[sel.slot] = sel.id;
+    return { color: teamColor, superBat, cosmetics };
+  }, [gear, sel, teamColor]);
 
   const setGear = async (patch: Partial<Gear>) => {
     setError(null);
@@ -67,6 +85,7 @@ export function StoreView() {
     try {
       const r = await api<{ coins: number; batId?: string; itemId?: string }>("/api/store/buy", { body: ask.bat ? { batId: ask.id } : { cosmeticId: ask.id } });
       setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, ask.id] });
+      setSel({ slot: ask.bat ? "bat" : (store!.cosmetics.find((c) => c.id === ask.id)?.slot ?? "helmet"), id: ask.id });
       toast(ask.bat ? `${ask.name} is yours. ${r.coins.toLocaleString()} coins left.` : `${ask.name} added to your locker.`);
       load(); // the new purchase shows up in Recent coins
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); setAsk(null); }
@@ -88,6 +107,11 @@ export function StoreView() {
       <p className="muted">Win games to earn coins. Every win pays, shutouts and homers pay extra, and a streak keeps adding up.</p>
       <ErrorNote message={error} onRetry={load} />
 
+      <div className="tryon-dock">
+        <TryOn look={look} />
+        <TryBar sel={sel} store={store} busy={busy} onSet={setGear} onBuy={setAsk} />
+      </div>
+
       <h3>Your wood bat</h3>
       <div className="wood">
         <Pick label="Wood" options={WOODS.map((w) => ({ v: w.wood, label: w.label, note: w.note }))} value={wood.wood}
@@ -104,14 +128,14 @@ export function StoreView() {
       </div>
 
       <h3>Your look</h3>
-      <p className="muted">Colourways for your club. Pick one per slot; the stock look is always free.</p>
+      <p className="muted">Gear changes how your team looks, not how it plays. Tap anything to try it on; the stock look is always free.</p>
       {COSMETIC_SLOTS.map((slot) => {
         const worn = store.gear.cosmetics?.[slot] ?? null;
         return (
           <div key={slot} className="look-row">
             <div className="look-head"><b>{SLOT_LABEL[slot].title}</b><small className="muted">{SLOT_LABEL[slot].note}</small></div>
             <div className="swatches">
-              <button className={`swatch stock ${worn ? "" : "on"}`} onClick={() => setGear({ cosmetics: { [slot]: null } })} title="Stock look">
+              <button className={`swatch stock ${worn ? "" : "on"} ${sel?.slot === slot && sel.id === null ? "peek" : ""}`} onClick={() => setSel({ slot, id: null })} title="Stock look">
                 <span className="swatch-dot" /><span>Stock</span>
               </button>
               {store.cosmetics.filter((c) => c.slot === slot).map((c) => {
@@ -120,9 +144,8 @@ export function StoreView() {
                 const stars = UNLOCK_STARS_BY_ITEM[c.id];
                 const locked = !owned && stars !== undefined;
                 return (
-                  <button key={c.id} className={`swatch tier-${c.tier} ${on ? "on" : ""}`} title={c.name}
-                    disabled={busy === c.id || locked}
-                    onClick={() => (on ? setGear({ cosmetics: { [slot]: null } }) : owned ? setGear({ cosmetics: { [slot]: c.id } }) : setAsk({ id: c.id, name: c.name, price: c.price, bat: false }))}>
+                  <button key={c.id} className={`swatch tier-${c.tier} ${on ? "on" : ""} ${sel?.id === c.id ? "peek" : ""}`} title={c.name}
+                    onClick={() => setSel({ slot, id: c.id })}>
                     <span className="swatch-dot" style={{ background: c.color }} />
                     <span>{c.name}</span>
                     <small>{on ? "Worn" : owned ? "Owned" : locked ? `Unlock at ${stars} stars` : `${c.price}`}</small>
@@ -135,14 +158,14 @@ export function StoreView() {
       })}
 
       <h3>Super Power Bats</h3>
-      <p className="muted">Show off a bat in your locker. Super Bats are looks only: they do not change ratings, Heat or any swing.</p>
+      <p className="muted">Every Super Bat is a skin with its own look in the field. Tap a bat to try it on.</p>
       <div className="store-grid">
         {store.bats.map((b) => {
           const owned = store.owned.includes(b.id);
           const equipped = store.gear.superBat === b.id;
           const milestone = usual(b);
           return (
-            <article key={b.id} className={`bat-card tier-${b.tier} ${equipped ? "equipped" : ""}`}>
+            <article key={b.id} className={`bat-card tier-${b.tier} ${equipped ? "equipped" : ""} ${sel?.id === b.id ? "peek" : ""}`} onClick={() => setSel({ slot: "bat", id: b.id })}>
               <div className="bat-top">
                 <span className={`chip tier-chip`}>{b.tier}</span>
                 <span className="chip">{CLASS_LABEL[b.cls]}</span>
@@ -154,7 +177,8 @@ export function StoreView() {
                 <div><dt>Swing</dt><dd>{SWING_LABEL[b.swingWeight]}</dd></div>
                 <div><dt>Build</dt><dd>{BUILD_LABEL[b.build]}</dd></div>
               </dl>
-              <div className="bat-actions">
+              <div className="bat-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="link" onClick={() => setSel({ slot: "bat", id: b.id })}>Try on</button>
                 {equipped ? <button className="link" onClick={() => setGear({ superBat: null })}>Unequip</button>
                   : owned ? <button className="primary" onClick={() => setGear({ superBat: b.id })}>Equip</button>
                   : milestone ? <span className="chip">Unlock at {milestone} wins · {store.wins}/{milestone}</span>
@@ -174,7 +198,7 @@ export function StoreView() {
         <ul className="ledger">
           {store.ledger.map((l) => (
             <li key={l.id}>
-              <span>{l.kind === "game" ? "Game reward" : `Bought ${itemName(store, l.itemId)}`}</span>
+              <span>{LEDGER_LABEL[l.kind] ?? `Bought ${itemName(store, l.itemId)}`}</span>
               <b className={l.delta < 0 ? "neg" : "pos"}>{l.delta > 0 ? "+" : ""}{l.delta.toLocaleString()}</b>
               <small className="muted">{l.balanceAfter.toLocaleString()} left</small>
             </li>
@@ -183,6 +207,28 @@ export function StoreView() {
       )}
       {ask && <ConfirmSheet ask={ask} coins={store.coins} busy={busy === ask.id} onCancel={() => setAsk(null)} onBuy={confirmBuy} />}
     </section>
+  );
+}
+
+/** Under the preview: what is being tried on, and the separate Buy / Equip button. Tapping an item never buys or equips by itself. */
+function TryBar({ sel, store, busy, onSet, onBuy }: { sel: Sel | null; store: StoreState; busy: string | null; onSet: (p: Partial<Gear>) => void; onBuy: (a: Ask) => void }) {
+  if (!sel) return <p className="tryon-bar muted">Tap any item below to try it on.</p>;
+  const bat = sel.slot === "bat";
+  const item = sel.id === null ? null : bat ? store.bats.find((b) => b.id === sel.id) : store.cosmetics.find((c) => c.id === sel.id);
+  const name = item?.name ?? "Stock look";
+  const owned = sel.id === null || store.owned.includes(sel.id);
+  const worn = bat ? store.gear.superBat === sel.id : (store.gear.cosmetics?.[sel.slot as CosmeticSlot] ?? null) === sel.id;
+  const set = (id: string | null) => onSet(bat ? { superBat: id } : { cosmetics: { [sel.slot]: id } });
+  const stars = sel.id ? UNLOCK_STARS_BY_ITEM[sel.id] : undefined;
+  const milestone = bat && item ? LEGENDARY_MILESTONES.find((m) => m.batId === sel.id)?.wins : undefined;
+  return (
+    <div className="tryon-bar" role="status">
+      <span><b>{name}</b> <small className="muted">{worn ? "Worn now" : owned ? "In your locker" : "Previewing"}</small></span>
+      {owned ? (worn ? (sel.id !== null && <button className="link" onClick={() => set(null)}>Take off</button>) : <button className="primary" onClick={() => set(sel.id)}>Equip</button>)
+        : milestone ? <span className="chip">Unlock at {milestone} wins</span>
+        : stars !== undefined ? <span className="chip">Unlock at {stars} stars</span>
+        : item && <button className="primary" disabled={busy === sel.id} onClick={() => onBuy({ id: sel.id!, name: item.name, price: item.price, bat })}>Buy · {item.price.toLocaleString()}</button>}
+    </div>
   );
 }
 

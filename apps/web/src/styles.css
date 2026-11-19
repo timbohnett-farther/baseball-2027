@@ -426,6 +426,19 @@ tr.you td { background: rgba(224, 164, 60, 0.08); }
 .swatch-dot { width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1px solid rgba(0,0,0,0.35); background: linear-gradient(135deg, #cfd3d8, #5c6066); }
 .swatch span:not(.swatch-dot) { font-size: 0.78rem; }
 .swatch small { font-size: 0.68rem; opacity: 0.7; }
+.swatch.peek, .bat-card.peek { outline: 2px solid var(--text-2, #9aa3b5); outline-offset: 1px; }
+.bat-card { cursor: pointer; }
+.bat-actions .link, .tryon-bar button, .tryon-turn { min-height: 44px; min-width: 44px; }
+
+/* W41 store try-on: one small 3D batter that stays in view while you browse */
+.tryon-dock { position: sticky; top: 0; z-index: 5; background: var(--surface, #12151c); padding: 8px 0; margin-bottom: 8px; }
+.tryon { position: relative; border-radius: 8px; overflow: hidden; background: #161a22; }
+.tryon-canvas { display: block; width: 100%; height: 220px; }
+.tryon-turn { position: absolute; right: 4px; bottom: 4px; }
+.tryon-flat { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; height: 220px; justify-content: center; }
+.tryon-shirt { width: 90px; height: 70px; border-radius: 18px 18px 8px 8px; }
+.tryon-bat { width: 150px; height: 14px; border-radius: 7px; }
+.tryon-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin: 6px 0 0; flex-wrap: wrap; }
 
 /* --- W17 polish: loading, empty, toasts, keyboard --------------------------------------- */
 .loading { display: flex; align-items: center; gap: 10px; margin: 0; }
@@ -766,3 +779,4 @@ html[data-calm="1"] .cue-caption[data-on="1"] { transition: none; }
 .ledger li span { flex: 1; }
 .ledger .neg { color: var(--bad); }
 .ledger .pos { color: var(--good); }
+@media (max-height: 500px) { .tryon-dock { position: static; } .tryon-canvas, .tryon-flat { height: 180px; } }

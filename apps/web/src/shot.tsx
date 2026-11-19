@@ -39,6 +39,9 @@ function fixture(seed: number, awayAbbr = "HAR"): PlayedGame {
   nextId = 1;
   const away = team("Harbor City", awayAbbr, "#1d4e89", AWAY);
   const home = team("Ridgeback", "RDG", "#b3302a", HOME);
+  // W41 art review: `?skin=<batskin id>` dresses both clubs with that bat skin so any batter shows it in play.
+  const skin = new URLSearchParams(location.search).get("skin");
+  if (skin) for (const t of [away, home]) t.gear = { cosmetics: { batskin: skin } } as SimTeam["gear"];
   const result = simulateGame({ away, home, seed, facts: true });
   return { id: 0, createdAt: "", opponent: { id: 0, name: away.name, abbr: away.abbr }, userSide: "home", teams: { away, home }, result };
 }
@@ -157,6 +160,7 @@ function arcadeFixture(kind: "hub" | "bracket"): ArcadeSeasonState {
 
 /** W40 `/?shot=store`, `store-confirm`, `my-team`: the real pages over a stubbed fetch (no server in the shot harness). */
 function StoreShot({ moment }: { moment: string }) {
+  const tryOn = moment === "store-tryon";
   const [ready, setReady] = useState(false);
   useMemo(() => {
     const store: StoreState = {
@@ -173,8 +177,12 @@ function StoreShot({ moment }: { moment: string }) {
   }, []);
   useEffect(() => {
     const t = setInterval(() => {
-      if (moment === "store-confirm") { const b = document.querySelector<HTMLButtonElement>(".bat-actions .primary:not([disabled])"); if (b && !document.querySelector(".sheet")) b.click(); if (!document.querySelector(".sheet")) return; }
-      else if (!document.querySelector(moment === "store" ? ".ledger, .store" : ".team-head")) return;
+      if (tryOn) { // tap a rare bat skin: previews only, then wait for the 3D panel (or its flat fallback) to draw
+        const b = document.querySelector<HTMLButtonElement>('.swatch[title="Ember"]') ?? [...document.querySelectorAll<HTMLButtonElement>(".swatch")].filter((x) => x.closest(".look-row")?.textContent?.includes("Bat skin")).pop();
+        if (b && !document.querySelector(".tryon-bar b")?.textContent?.match(/\S/)) b.click();
+        if (!document.querySelector(".tryon-canvas, .tryon-flat") || !document.querySelector(".tryon-bar b")) return;
+      } else if (moment === "store-confirm") { const b = document.querySelector<HTMLButtonElement>(".bat-actions .primary:not([disabled])"); if (b && !document.querySelector(".sheet")) b.click(); if (!document.querySelector(".sheet")) return; }
+      if (!tryOn && moment !== "store-confirm" && !document.querySelector(moment === "store" ? ".ledger, .store" : ".team-head")) return;
       clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; setReady(true); }, 200);
     }, 100);
     return () => clearInterval(t);
@@ -259,7 +267,7 @@ export function ShotView() {
   const duel = q.get("shot");
   if (duel === "perf-soak") return <SoakView />;
   if (duel === "cadence-match") return <CadenceView seed={Number(q.get("seed") ?? 11)} />;
-  if (duel === "store" || duel === "store-confirm" || duel === "my-team") return <StoreShot moment={duel} />;
+  if (duel === "store" || duel === "store-tryon" || duel === "store-confirm" || duel === "my-team") return <StoreShot moment={duel} />;
   if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }

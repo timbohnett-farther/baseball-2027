@@ -32,14 +32,15 @@ const lefty = args.includes("--lefty"), calm = args.includes("--calm"), gray = a
 const inset = args.find((a) => a.startsWith("--inset="))?.slice(8).split(",").map(Number);
 const vpArg = args.find((a) => a.startsWith("--vp="))?.slice(5).split("x").map(Number);
 const quality = args.find((a) => a.startsWith("--quality="))?.slice(10);
-const [outDir = join(web, "shots"), ...only] = args.filter((a) => !a.startsWith("--") && a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
+const skinArg = args.find((a) => a.startsWith("--skin="))?.slice(7); // W41: dress both clubs with this bat skin id
+const [outDir = join(web, "shots"), ...only] = args.filter((a) => !a.startsWith("--") && a !== "--phone" && a !== "--check" && a !== "--perf" && a !== "--reduced" && !a.startsWith("--skin=") && !a.startsWith("--phase=") && !a.startsWith("--hand=") && !a.startsWith("--seed=") && !a.startsWith("--throws=") && !a.startsWith("--json=") && !a.startsWith("--quality="));
 // duel-* shots must show live controls; a shot taken after the panel closed is a failure, not a picture.
 const CONTROLS = { "duel-pitch": ".tp .target-cell", "duel-caption": ".tp .target-cell", "duel-swing": ".tp .swing-btn", "duel-field": ".tp .swing-btn", "duel-run": ".tp .run-confirm", "duel-steal": ".tp .run-go", "duel-tutorial-pitch": ".coach", "duel-tutorial-swing": ".coach", "duel-hint": ".coach", "duel-resume": ".pause-gate .primary", "duel-result": ".result-continue", "duel-windup": ".windup-gate" };
 // Static W28 presentation shots (no controls): an ability cue over the ballpark, and a big-play card.
 const STATIC = { ability: ".ability-cue", bigplay: ".big-play" };
 const DUELS = Object.keys(CONTROLS);
 // Season hub shots are plain pages (no ballpark): checked for overflow, touch size and key content instead.
-const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"], "store": [".store", ".bat-card", ".ledger"], "store-confirm": [".sheet", ".sheet-actions"], "my-team": [".team-head", ".power"] };
+const HUBS = { "season-hub": [".arc-rounds", ".arc-next", ".arc-objs li", ".arc-track", "table"], "season-bracket": [".arc-bracket", ".arc-game", "table", ".arc-track"], "season-stars": [".arc-summary", ".final-band"], "store": [".store", ".bat-card", ".ledger"], "store-tryon": [".tryon", ".tryon-bar"], "store-confirm": [".sheet", ".sheet-actions"], "my-team": [".team-head", ".power"] };
 const moments = only.length ? only : perf ? ["pitch", "single", "hr", "bigplay", "shot-contact", "shot-release", "shot-slide"] : check ? [...DUELS, ...Object.keys(HUBS), ...Object.keys(STATIC)] : ["pitch", "swing", "hr", "k", "single", "double", "final", ...Object.keys(STATIC)];
 const HUD = ".ability-cue, .big-play, .scorebug, .game-controls button, .matchup, .heat-meter, .tp-note, .cue-caption:not(:empty), .coach p, .coach button, .tp button, .tp .zone, .result-continue";
 // Distinct 12-bit colours in a 120x80 patch at the viewport centre (the big-play card is opaque and can cover the centre in a short landscape viewport: probe the clear band above it instead).
@@ -168,7 +169,7 @@ try {
   let failures = 0;
   const rows = [];
   for (const m of moments) {
-    await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}${hold !== undefined ? `&hold=${hold}` : ""}${hand ? `&hand=${hand}` : ""}${throwsArg ? `&throws=${throwsArg}` : ""}${seedArg ? `&seed=${seedArg}` : ""}`, { waitUntil: "load" });
+    await page.goto(`http://localhost:${port}/?shot=${m}&t=${process.env.SHOT_T ?? 700}${hold !== undefined ? `&hold=${hold}` : ""}${hand ? `&hand=${hand}` : ""}${skinArg ? `&skin=${skinArg}` : ""}${throwsArg ? `&throws=${throwsArg}` : ""}${seedArg ? `&seed=${seedArg}` : ""}`, { waitUntil: "load" });
     await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 30000 });
     if (gray) await page.addStyleTag({ content: "html { filter: grayscale(1); }" });
     let shotStats = null;

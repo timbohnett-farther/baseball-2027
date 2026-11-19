@@ -6,6 +6,7 @@ import { requireUser } from "./auth.ts";
 import { getDb } from "./db/index.ts";
 import { users } from "./db/schema.ts";
 import { isInput } from "./games.ts";
+import { writeLines } from "./ledger.ts";
 
 /** Rookie Rally: a fixed-seed game that is never stored as a game; only the player's completion is. */
 export async function tutorialRoutes(app: FastifyInstance) {
@@ -18,8 +19,13 @@ export async function tutorialRoutes(app: FastifyInstance) {
     if (!finished) return reply.code(400).send({ error: "Finish the practice game first." });
     const db = getDb();
     // The status flip and the coins are one statement, so a double submit pays once.
-    const paid = await db.update(users).set({ tutorialStatus: "done", coins: sql`${users.coins} + ${TUTORIAL_REWARD}` })
-      .where(and(eq(users.id, req.user!.id), or(isNull(users.tutorialStatus), ne(users.tutorialStatus, "done")))).returning({ coins: users.coins });
+    // The ledger row rides in the same transaction.
+    const paid = await db.transaction(async (tx) => {
+      const rows = await tx.update(users).set({ tutorialStatus: "done", coins: sql`${users.coins} + ${TUTORIAL_REWARD}` })
+        .where(and(eq(users.id, req.user!.id), or(isNull(users.tutorialStatus), ne(users.tutorialStatus, "done")))).returning({ coins: users.coins });
+      if (rows.length) await writeLines(tx, req.user!.id, [{ delta: TUTORIAL_REWARD, kind: "tutorial" }], rows[0].coins);
+      return rows;
+    });
     if (paid.length) return { tutorial: "done", coins: paid[0].coins, reward: TUTORIAL_REWARD } satisfies TutorialCompleteResponse;
     const [row] = await db.select({ coins: users.coins }).from(users).where(eq(users.id, req.user!.id));
     return { tutorial: "done", coins: row.coins, reward: 0 } satisfies TutorialCompleteResponse;

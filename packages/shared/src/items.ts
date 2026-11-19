@@ -136,7 +136,7 @@ export interface Gear {
 export interface CoinLedgerEntry {
   id: number;
   delta: number;
-  kind: "purchase" | "game";
+  kind: "purchase" | "game" | "tutorial" | "season" | "arcade";
   /** The item bought, for purchases. */
   itemId: string | null;
   balanceAfter: number;
@@ -162,8 +162,31 @@ export interface GearRequest { wood?: WoodSpec; superBat?: string | null; cosmet
 // so the sim never reads them. Names are the game's own (no real brands). Rare colourways cost more;
 // Legendary stays bats-only and milestone-only (see LEGENDARY_MILESTONES).
 
-export type CosmeticSlot = "helmet" | "cleats" | "gloves";
-export const COSMETIC_SLOTS: CosmeticSlot[] = ["helmet", "cleats", "gloves"];
+export type CosmeticSlot = "helmet" | "cleats" | "gloves" | "jersey" | "batskin" | "celebration";
+export const COSMETIC_SLOTS: CosmeticSlot[] = ["helmet", "cleats", "gloves", "jersey", "batskin", "celebration"];
+
+/** W41 looks. A bat skin is a colour, a grip accent, a finish and a simple pattern painted on the batter's bat. */
+export type BatFinish = "matte" | "gloss" | "metal" | "glow";
+export type BatPattern = "plain" | "stripes" | "bands" | "flames" | "dots";
+export interface BatLook { color: string; accent: string; finish: BatFinish; pattern: BatPattern }
+/** Jersey styles the rig can draw on the shirt texture (the team colours still come from the team). */
+export type JerseyStyle = "pinstripe" | "chalk" | "piping" | "band" | "sleeves";
+/** Home-run celebrations: a presentation-only cue after the result is resolved. */
+export type CelebrationCue = "confetti" | "sparks" | "stars" | "rainbow" | "fireworks";
+
+/** The visible look of each Super and Legendary bat, so owning one changes what your batter swings. */
+export const SUPER_BAT_LOOKS: Record<string, BatLook> = {
+  thunderclap: { color: "#2b2f3a", accent: "#f0c43c", finish: "metal", pattern: "bands" },
+  "comet-tail": { color: "#3a7bd5", accent: "#ffffff", finish: "gloss", pattern: "stripes" },
+  hornet: { color: "#f0c43c", accent: "#1b1b1f", finish: "gloss", pattern: "stripes" },
+  skyhook: { color: "#7fd0f4", accent: "#1f4fb6", finish: "gloss", pattern: "bands" },
+  "ninth-wave": { color: "#1f6f8f", accent: "#9ff5e8", finish: "glow", pattern: "flames" },
+  ironwood: { color: "#8a6a45", accent: "#2a1d12", finish: "matte", pattern: "bands" },
+  "quiet-storm": { color: "#5c6470", accent: "#c9ced6", finish: "matte", pattern: "dots" },
+  anvil: { color: "#b8bcc4", accent: "#c72838", finish: "metal", pattern: "bands" },
+  lantern: { color: "#e8913a", accent: "#fff3c4", finish: "glow", pattern: "dots" },
+  "midnight-sun": { color: "#1a1440", accent: "#ffcf4a", finish: "glow", pattern: "flames" },
+};
 
 export interface Cosmetic {
   id: string;
@@ -173,10 +196,16 @@ export interface Cosmetic {
   color: string;
   tier: "common" | "rare";
   price: number;
+  /** Bat skins: the full look. */
+  look?: BatLook;
+  /** Jersey styles: the stripe, piping or sleeve treatment. */
+  style?: JerseyStyle;
+  /** Celebrations: which cue plays after a home run. */
+  cue?: CelebrationCue;
 }
 
-const cos = (slot: CosmeticSlot, id: string, name: string, color: string, tier: Cosmetic["tier"] = "common"): Cosmetic =>
-  ({ id: `${slot}-${id}`, slot, name, color, tier, price: tier === "rare" ? 350 : 120 });
+const cos = (slot: CosmeticSlot, id: string, name: string, color: string, tier: Cosmetic["tier"] = "common", extra: Partial<Cosmetic> = {}): Cosmetic =>
+  ({ id: `${slot}-${id}`, slot, name, color, tier, price: tier === "rare" ? 350 : 120, ...extra });
 
 export const COSMETICS: Cosmetic[] = [
   cos("helmet", "matte-black", "Matte Black", "#1c1c20"),
@@ -197,7 +226,31 @@ export const COSMETICS: Cosmetic[] = [
   cos("gloves", "navy", "Deep Navy", "#1d2a55"),
   cos("gloves", "teal", "Tidewater", "#2aa9a1", "rare"),
   cos("gloves", "pink", "Hot Pink", "#f04f9d", "rare"),
+  // W41 looks: jersey styles, bat skins and home-run celebrations. All looks only; the sim never reads them.
+  cos("jersey", "pinstripe", "Pinstripe", "#dfe3ea", "common", { style: "pinstripe" }),
+  cos("jersey", "chalk", "Chalk Line", "#f4f1ea", "common", { style: "chalk" }),
+  cos("jersey", "piping", "Side Piping", "#f0c43c", "common", { style: "piping" }),
+  cos("jersey", "band", "Chest Band", "#ffffff", "common", { style: "band" }),
+  cos("jersey", "sleeves", "Gold Sleeves", "#e0b030", "rare", { style: "sleeves" }),
+  cos("batskin", "candy", "Candy Stripe", "#e0334a", "common", { look: { color: "#e0334a", accent: "#ffffff", finish: "gloss", pattern: "stripes" } }),
+  cos("batskin", "midnight", "Midnight", "#20243a", "common", { look: { color: "#20243a", accent: "#7fd0f4", finish: "matte", pattern: "bands" } }),
+  cos("batskin", "lime", "Lime Dots", "#9bd62c", "common", { look: { color: "#9bd62c", accent: "#1b3b0f", finish: "gloss", pattern: "dots" } }),
+  cos("batskin", "chrome", "Mirror Chrome", "#d4d8e0", "rare", { look: { color: "#d4d8e0", accent: "#5b6270", finish: "metal", pattern: "plain" } }),
+  cos("batskin", "ember", "Ember", "#e8561a", "rare", { look: { color: "#e8561a", accent: "#ffd34a", finish: "glow", pattern: "flames" } }),
+  cos("celebration", "confetti", "Confetti Pop", "#f04f9d", "common", { cue: "confetti" }),
+  cos("celebration", "sparks", "Sparkler", "#f0c43c", "common", { cue: "sparks" }),
+  cos("celebration", "stars", "Star Shower", "#7fd0f4", "common", { cue: "stars" }),
+  cos("celebration", "rainbow", "Rainbow Burst", "#9bd62c", "rare", { cue: "rainbow" }),
+  cos("celebration", "fireworks", "Big Fireworks", "#e8561a", "rare", { cue: "fireworks" }),
 ];
+
+/** The bat look to paint: an equipped bat skin wins, else the equipped Super Bat's own look, else null (stock wood). */
+export function resolveBatLook(g?: { superBat?: string | null; cosmetics?: Cosmetics } | null): BatLook | null {
+  const skin = g?.cosmetics?.batskin;
+  const c = skin ? COSMETIC_BY_ID[skin] : undefined;
+  if (c?.look && c.slot === "batskin") return c.look;
+  return g?.superBat ? SUPER_BAT_LOOKS[g.superBat] ?? null : null;
+}
 export const COSMETIC_BY_ID: Record<string, Cosmetic> = Object.fromEntries(COSMETICS.map((c) => [c.id, c]));
 
 /** Equipped colourway per slot; a missing or null slot means the team's stock look. */

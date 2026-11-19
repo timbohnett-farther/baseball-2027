@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 import type { GameEvent, PlayedGame, Side, SimPlayer, SimTeam } from "@bb/sim";
-import { COSMETIC_BY_ID, type CosmeticSlot } from "@bb/shared";
+import { COSMETIC_BY_ID, resolveBatLook, type BatLook, type CelebrationCue, type CosmeticSlot, type JerseyStyle } from "@bb/shared";
 import { cosmeticRng, SHOT_SEED } from "./cosmetic.ts";
 import { FrameClock } from "./cadence.ts";
 import { getQuality, QUALITY_PROFILE, surfaceLook, type SurfaceLook } from "./quality.ts";
@@ -166,18 +166,66 @@ const jerseyNumber = (p: SimPlayer) => 2 + ((p.id * 37) % 97);
 
 const jerseys = new Map<string, THREE.CanvasTexture>();
 /** Release every cached jersey texture (1024x512 each): they belong to the park that dressed with them and would otherwise grow with every match and opponent. */
-function disposeJerseys() {
+export function disposeJerseys() {
   perfLog.jerseysDisposed += jerseys.size;
   jerseys.forEach((t) => t.dispose());
   jerseys.clear();
+  batTextures.forEach((t) => t.dispose());
+  batTextures.clear();
 }
+const batTextures = new Map<string, THREE.CanvasTexture>();
+/** Pattern wrap for a bat skin (u runs round the barrel, v along it). Cached per look and released with the jerseys. */
+function batTexture(look: BatLook): THREE.CanvasTexture {
+  const key = `${look.color}|${look.accent}|${look.pattern}`;
+  const hit = batTextures.get(key);
+  if (hit) return hit;
+  const w = 64, h = 128;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d")!;
+  g.fillStyle = look.color; g.fillRect(0, 0, w, h);
+  g.fillStyle = look.accent;
+  if (look.pattern === "stripes") for (let x = 0; x < w; x += 16) g.fillRect(x, 0, 6, h);
+  else if (look.pattern === "bands") for (let y = 8; y < h; y += 32) g.fillRect(0, y, w, 12);
+  else if (look.pattern === "dots") for (let y = 10; y < h; y += 22) for (let x = (y / 22) % 2 ? 8 : 24; x < w; x += 32) { g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); }
+  else if (look.pattern === "flames") for (let x = 0; x < w; x += 16) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 8, h * 0.45); g.lineTo(x + 16, h); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  batTextures.set(key, t);
+  return t;
+}
+/** Skin a rig's bat (batter and shot figures share the same "bat" group): pattern, finish and a slightly fatter barrel so it reads at distance. Null puts the stock wood back. */
+function paintBat(g: THREE.Group, look: BatLook | null) {
+  const stick = g.getObjectByName("bat")?.children[0] as THREE.Mesh | undefined;
+  if (!stick) return;
+  const m = stick.material as THREE.MeshStandardMaterial;
+  stick.scale.set(look ? 1.45 : 1, 1, look ? 1.45 : 1);
+  m.map = look ? batTexture(look) : null;
+  m.color.set(look ? "#ffffff" : "#c9a06a");
+  const f = look?.finish;
+  m.roughness = f === "gloss" ? 0.18 : f === "metal" ? 0.25 : f === "matte" ? 0.85 : 0.45;
+  m.metalness = f === "metal" ? 0.85 : f === "gloss" ? 0.1 : 0;
+  m.emissive.set(f === "glow" && look ? look.accent : "#000000");
+  m.emissiveIntensity = f === "glow" ? 0.7 : 0;
+  m.needsUpdate = true;
+}
+/** Bought jersey styles (W41), drawn under the name and number. Sleeves recolour the sleeve material in `dress` instead. */
+function drawJerseyStyle(g: CanvasRenderingContext2D, style: JerseyStyle, w: number, h: number, fg: string) {
+  g.fillStyle = fg; g.strokeStyle = fg;
+  if (style === "chalk") { g.globalAlpha = 0.35; for (let x = 20; x < w; x += 64) { g.fillRect(x, 0, 3, h); g.fillRect(x + 8, 0, 3, h); } }
+  else if (style === "piping") { g.globalAlpha = 0.9; for (const x of [0, w * 0.25 - 4, w * 0.75 - 4, w - 8]) g.fillRect(x, 0, 8, h); }
+  else if (style === "band") { g.globalAlpha = 0.5; g.fillRect(0, h * 0.06, w, h * 0.12); g.fillRect(0, h * 0.2, w, h * 0.03); }
+  g.globalAlpha = 1;
+}
+
 /**
  * Jersey texture for the torso capsule: team colour, pinstripes for every other club, a name arc over a big
  * number on the back (drawn mirrored, since the capsule's u axis runs toward the player's left) and a small
  * number on the left chest. u=0 is the chest, u=0.5 the spine; v runs bottom to top.
  */
 function jerseyTexture(team: SimTeam, player: SimPlayer | null): THREE.CanvasTexture {
-  const key = `${team.abbr}|${player?.id ?? ""}`;
+  const style = COSMETIC_BY_ID[team.gear?.cosmetics?.jersey ?? ""]?.style;
+  const key = `${team.abbr}|${player?.id ?? ""}|${style ?? ""}`;
   const hit = jerseys.get(key);
   if (hit) return hit;
   const w = 1024, h = 512;
@@ -189,10 +237,11 @@ function jerseyTexture(team: SimTeam, player: SimPlayer | null): THREE.CanvasTex
   const fg = light ? "#121418" : "#f4f1ea";
   g.fillStyle = `#${base.getHexString()}`; g.fillRect(0, 0, w, h);
   const pin = [...team.abbr].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 2 === 1;
-  if (pin) {
+  if (pin || style === "pinstripe") {
     g.fillStyle = light ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.28)";
     for (let x = 6; x < w; x += 26) g.fillRect(x, 0, 3, h);
   }
+  if (style) drawJerseyStyle(g, style, w, h, fg);
   g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle";
   if (player) {
     const num = String(jerseyNumber(player));
@@ -222,7 +271,7 @@ function jerseyTexture(team: SimTeam, player: SimPlayer | null): THREE.CanvasTex
  * belt and cleats, posed limbs. Batters get a helmet, a bat held at the back shoulder and the frame turned to
  * face the plate (right-handed). Fielders get a glove. Generic faces only, no likenesses.
  */
-function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THREE.Group {
+export function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THREE.Group {
   const g = new THREE.Group();
   const rig = new THREE.Group();
   rig.name = "rig";
@@ -291,7 +340,7 @@ function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = false): THR
 }
 
 /** Put a rig in a team's uniform: jersey texture (with the player's name/number when known), sleeves, cap, socks. */
-function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
+export function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
   const u = g.userData as {
     bodyMat: THREE.MeshStandardMaterial; sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial;
     cleatMat: THREE.MeshStandardMaterial; helmetMat: THREE.MeshStandardMaterial; gloveMat: THREE.MeshStandardMaterial; skin: string; bat: boolean;
@@ -299,7 +348,10 @@ function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
   u.bodyMat.map = jerseyTexture(team, player);
   u.bodyMat.color.set("#ffffff"); // colour lives in the texture now
   u.bodyMat.needsUpdate = true;
-  u.sleeveMat.color.set(team.color);
+  const jerseyStyle = COSMETIC_BY_ID[team.gear?.cosmetics?.jersey ?? ""]?.style;
+  const sleeveBase = new THREE.Color(team.color);
+  u.sleeveMat.color.copy(sleeveBase);
+  if (jerseyStyle === "sleeves") u.sleeveMat.color.set(sleeveBase.r * 0.3 + sleeveBase.g * 0.59 + sleeveBase.b * 0.11 > 0.35 ? "#121418" : "#f4f1ea");
   u.capMat.color.set(team.color).multiplyScalar(0.8);
   // Bought colourways (only the user's team carries any); otherwise the stock look.
   const look = (slot: CosmeticSlot) => COSMETIC_BY_ID[team.gear?.cosmetics?.[slot] ?? ""]?.color;
@@ -309,6 +361,7 @@ function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
     if (helmet) u.helmetMat.color.set(helmet); else u.helmetMat.color.set(team.color).multiplyScalar(0.8);
     u.gloveMat.color.set(look("gloves") ?? u.skin);
   }
+  paintBat(g, resolveBatLook(team.gear && { superBat: team.gear.superBat?.id ?? null, cosmetics: team.gear.cosmetics }));
 }
 
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
@@ -693,6 +746,23 @@ class Director {
 
   private tween(dur: number, fn: (p: number) => void, delay = 0, end?: () => void) { this.tweens.push({ t: 0, delay, dur: Math.max(dur, 0.0001), fn, end }); }
   private after(delay: number, fn: () => void) { this.tween(0.0001, () => {}, delay, fn); }
+  /**
+   * Bought home-run celebration (W41): a few tinted particle bursts where the ball lands, fired from the callback that already
+   * runs at landing, so it adds no delay, no input and no extra shots. Skipped for reduced motion and reduced flash.
+   */
+  private celebrate(cosmeticId: string | null | undefined, at: THREE.Vector3) {
+    const cue = COSMETIC_BY_ID[cosmeticId ?? ""]?.cue;
+    if (!cue || this.reduced || reducedFlash()) return;
+    const tints: Record<CelebrationCue, [number, number, number][]> = {
+      confetti: [[1, 0.35, 0.65], [0.3, 0.8, 1], [1, 0.85, 0.2]],
+      sparks: [[1, 0.8, 0.3]],
+      stars: [[0.6, 0.85, 1], [1, 1, 1]],
+      rainbow: [[1, 0.2, 0.2], [1, 0.7, 0.1], [0.3, 0.9, 0.3], [0.3, 0.5, 1], [0.7, 0.3, 1]],
+      fireworks: [[1, 0.4, 0.15], [1, 0.9, 0.4], [0.5, 0.7, 1]],
+    };
+    const big = cue === "fireworks" ? 40 : 24;
+    tints[cue].forEach((tint, i) => this.after(2.7 + i * 0.12, () => this.burstDust.burst(V(at.x, 7 + i * 0.6, at.z), big, cue === "sparks" ? 7 : 5, tint)));
+  }
 
   /** Finish everything still running, so a fast-forwarded event never leaves the field half-animated. */
   private flush() {
@@ -917,6 +987,7 @@ class Director {
       const to = polar(Math.max(feet * FT, WALL_R + 6), ang * 0.8); to.y = 9;
       this.flight(contact, to, 38 + rnd(idx, 2) * 14, 2.7);
       this.after(2.7, () => { this.burstDust.burst(V(to.x, 6, to.z), 30, 4); this.ball.visible = false; });
+      this.celebrate(this.teams[this.battingSide(e)].gear?.cosmetics?.celebration, to);
       this.tween(1.6, (p) => this.nearestOF(ang).position.lerpVectors(FIELD_POS[7], polar(WALL_R - 6, ang * 0.8), p * 0.6), 0.4);
     } else if (o === "single") {
       const to = polar(42 + rnd(idx, 2) * 16, ang);

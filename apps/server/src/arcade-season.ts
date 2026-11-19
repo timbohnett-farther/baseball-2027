@@ -11,6 +11,7 @@ import {
 } from "@bb/shared";
 import { evaluateObjectives, objectiveDef, pickObjectives, type GameResult } from "@bb/sim";
 import type { Db } from "./db/index.ts";
+import { creditCoins } from "./ledger.ts";
 import { games, seasonGames, seasons, userItems, users, userTeams } from "./db/schema.ts";
 import { teamPlayers, teamSummaries } from "./store.ts";
 import type { SeasonRow } from "./season.ts";
@@ -244,7 +245,9 @@ export async function settleArcade(db: Db, season: SeasonRow, gameId: number, ou
   }
   const coins = bonus + starCoins + unlockCoins;
   if (bonus > 0) patch.rewardCoins = season.rewardCoins + bonus;
-  if (coins > 0) await db.update(users).set({ coins: sql`${users.coins} + ${coins}` }).where(eq(users.id, season.userId));
+  if (coins > 0) await creditCoins(db, season.userId, [
+    { delta: bonus, kind: "season", gameId }, { delta: starCoins, kind: "arcade", gameId }, { delta: unlockCoins, kind: "arcade", gameId },
+  ]);
   if (Object.keys(patch).length) await db.update(seasons).set(patch).where(eq(seasons.id, season.id));
   return { season: bonus, stars: starCoins, unlockCoins, objectives: objectiveViews(stars), unlocks, lifetimeStars: after };
 }

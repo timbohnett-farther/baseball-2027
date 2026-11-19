@@ -4,6 +4,7 @@ import { ARCADE_FORMAT, PLAYOFF_ROUNDS, ROUND_WINS, SEASON_LENGTH, SEASON_REWARD
 import { createRng } from "@bb/sim";
 import { arcadeCareer, arcadeState, startArcadeSeason } from "./arcade-season.ts";
 import { requireUser } from "./auth.ts";
+import { creditCoins } from "./ledger.ts";
 import { getDb, type Db } from "./db/index.ts";
 import { games, mlbTeams, seasonGames, seasons, users, userTeams } from "./db/schema.ts";
 import { teamSummaries } from "./store.ts";
@@ -94,7 +95,7 @@ export async function settleSeason(db: Db, season: SeasonRow, gameId: number, ou
   }
   if (bonus > 0) {
     patch.rewardCoins = season.rewardCoins + bonus;
-    await db.update(users).set({ coins: sql`${users.coins} + ${bonus}` }).where(eq(users.id, season.userId));
+    await creditCoins(db, season.userId, [{ delta: bonus, kind: "season", gameId }]);
   }
   if (Object.keys(patch).length) await db.update(seasons).set(patch).where(eq(seasons.id, season.id));
   return bonus;

@@ -6,6 +6,9 @@ import { playInteractive, tutorialSetup, type UserInput } from "@bb/sim";
 import { buildApp } from "./app.ts";
 import { closeDb, initDb } from "./db/index.ts";
 import { startStore } from "./store.ts";
+import { getDb } from "./db/index.ts";
+import { coinLedger } from "./db/schema.ts";
+import { eq } from "drizzle-orm";
 
 let app: FastifyInstance;
 before(async () => {
@@ -77,4 +80,15 @@ test("tutorial: skipping is remembered, pays nothing, and never undoes a finishe
   const done = await app.inject({ method: "POST", url: "/api/tutorial/complete", headers, payload: { inputs: tutorialLog() } });
   assert.equal(done.json().reward, TUTORIAL_REWARD, "a skipper who later plays it still earns the badge");
   assert.equal((await app.inject({ method: "POST", url: "/api/tutorial/skip", headers })).json().tutorial, "done");
+});
+
+test("W41 ledger: finishing the tutorial writes exactly one 'tutorial' ledger row, and a replay writes none", async () => {
+  const { cookie, me } = await signup("rookie_ledger", "10.0.1.7");
+  const headers = { cookie };
+  const inputs = tutorialLog();
+  await app.inject({ method: "POST", url: "/api/tutorial/complete", headers, payload: { inputs } });
+  await app.inject({ method: "POST", url: "/api/tutorial/complete", headers, payload: { inputs } });
+  const rows = await getDb().select().from(coinLedger).where(eq(coinLedger.userId, me.id));
+  assert.equal(rows.length, 1, JSON.stringify(rows));
+  assert.deepEqual([rows[0]!.kind, rows[0]!.delta, rows[0]!.balanceAfter], ["tutorial", TUTORIAL_REWARD, me.coins + TUTORIAL_REWARD]);
 });

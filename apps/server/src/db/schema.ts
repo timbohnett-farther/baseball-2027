@@ -82,13 +82,13 @@ export const userItems = pgTable("user_items", {
   acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.itemId] })]);
 
-/** Every coin change from a purchase or a game payout, written in the same transaction as the change itself. */
+/** Every coin change (purchase, game payout, tutorial, season and arcade bonuses), written in the same transaction as the change itself. */
 export const coinLedger = pgTable("coin_ledger", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   /** Signed: positive earns, negative spends. */
   delta: integer("delta").notNull(),
-  kind: text("kind").$type<"purchase" | "game">().notNull(),
+  kind: text("kind").$type<"purchase" | "game" | "tutorial" | "season" | "arcade">().notNull(),
   itemId: text("item_id"),
   gameId: integer("game_id"),
   balanceAfter: integer("balance_after").notNull(),
