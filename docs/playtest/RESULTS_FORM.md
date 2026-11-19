@@ -34,7 +34,11 @@ ACCEPTANCE.md row names are quoted from docs/ACCEPTANCE.md. This form does not c
 | R27 | W36a physical touch ergonomics; ARC 17.3 device | A5, A3-A6 | Thumb reach, missed taps, tiny targets | Words, count: | EVIDENCE_MISSING |
 | R28 | W37a human playtest of commentary tone and mix | B, C, G | Tester reaction to captions and sound | Words: | EVIDENCE_MISSING |
 | R29 | W36a / W37a screen-reader (VoiceOver) passes | none | Not covered by this kit's sessions | Add a session if wanted | EVIDENCE_MISSING |
-| R30 | W37c legacy format-1 seasons | none | Needs an old-format season; not reproducible from a new account | Not covered | EVIDENCE_MISSING |
+| R30 | W37c legacy format-1 seasons | none | Needs an old-format season; not reproducible from a new account (W39 added server tests only) | Not covered | EVIDENCE_MISSING |
+| R31 | W40 store confirm sheet | M1 | Did Tester A buy an item and understand the confirm sheet (item, price, balance after)? | Their words, taps, "Need N more coins" seen: | EVIDENCE_MISSING |
+| R32 | W41 try-on and looks | M2 | Did Tester A try on a look and tell Preview from Buy and Equip? Did the try-on stay in view on a short landscape screen? | Their words, what was hard to reach: | EVIDENCE_MISSING |
+| R33 | W40 "Recent coins" list | M3 | Could Tester A find "Recent coins" and say where coins came from? | Found / not found, their words: | EVIDENCE_MISSING |
+| R34 | W42 create-a-player | N1, N2, N3 | Did Tester A make a player, edit him, and see him in a game, unaided? | Help count, stuck step, their words: | EVIDENCE_MISSING |
 
 ## Result-time notes
 - Observer, date, build commit: 

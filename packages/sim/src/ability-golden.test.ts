@@ -11,7 +11,7 @@ import { playInteractive } from "./game.ts";
 import { PROFILES, chooseAbility, makeBot, type Bot, type Scene } from "./cpu.ts";
 import { createRng } from "./rng.ts";
 import type { AbilityId, AbilityRequest, Awaiting, GameEvent, Side, SimPlayer, SimTeam, UserInput } from "./types.ts";
-/** The ability goldens were captured under rules 9 and stay there; rules 10 has its own goldens (cpu-field-golden.test.ts). */
+/** The ability goldens were captured under rules 9 and stay there; rules 10 has its own goldens (cpu-field.test.ts). */
 const PINNED_RULES = 9;
 
 let nextId = 20_000;

@@ -1,6 +1,6 @@
 # Facilitator script
 
-Read the quoted lines aloud, exactly. Do not add hints, name gestures, or point at the screen. Stopwatch lines are marked [T]. Record in RESULTS_FORM.md (row ids R01..R24) and DEVICE_CHECKLIST.md.
+Read the quoted lines aloud, exactly. Do not add hints, name gestures, or point at the screen. Stopwatch lines are marked [T]. Record in RESULTS_FORM.md (row ids R01..R34) and DEVICE_CHECKLIST.md.
 
 Settings reach: Play tab > settings row on the top card. Controls: Sound, Volume, Mix, Captions, Haptics (not shown on iPhone, normal), Graphics quality, Action shots, Left-handed, Reduced flash.
 
@@ -59,3 +59,16 @@ Finish a game, "Continue", then play the rematch three times in a row. Record pe
 ## Session L: install to home screen and offline finish [R24, R25]
 Install: Safari Share > Add to Home Screen. Open the home-screen icon. Record: full screen, landscape, name shown.
 Offline: play online until a game is well in progress, then turn on airplane mode before the last out and finish. Record: finishing worked, the result showed, and after turning airplane mode off the game uploaded (Season tab shows the finished game). Note anything lost. Do not use this session for the very first run (the app needs an online load once so its files are cached).
+
+## Session M: store [R31, R32, R33] (needs a few coins on the account, earned by playing; do not buy coins or give the tester an account)
+Say: "Open the Store tab and buy something you like. Tell me what you are thinking." Do not name the confirm sheet, "Try on" or "Recent coins".
+M1 Buy [R31]. Record: item chosen, whether the confirm sheet was read, whether Cancel or Buy was pressed, and the words for "Need N more coins" if shown. Record the badge words the tester reads aloud (Owned, Equipped, Worn, "Unlock at ...").
+M2 Try on [R32]. "Show me how an item would look before you buy it." Record: found the try-on or not, tapped Turn, understood that Preview does not buy, whether the try-on panel stayed in view in landscape (describe, do not guess).
+M3 Recent coins [R33]. "Where did your coins come from?" Record: found "Recent coins" alone or not, and their words.
+
+## Session N: create a player [R34]
+Say: "Make a player for your team." Do not say how many steps there are.
+N1 Make. Record: help count, the name typed (write only "a name", never the name itself), position and look choices in words, any point-budget or cap message and the words used.
+N2 Edit. "Change one thing about your player." Record: found the edit, what was changed, stuck points.
+N3 See in a game. Start any game with the player on the roster. Record: found him ("Yours" tag), whether the tester said he looked or played like theirs.
+Do not write the child's chosen name in any file. Stop at once if the tester tires or asks to stop.

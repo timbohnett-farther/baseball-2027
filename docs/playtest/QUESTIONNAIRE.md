@@ -33,3 +33,6 @@ Scale where asked: 1 = not at all, 5 = a lot (show five circles; pointing is fin
 | F11 | Gestures tried that the game does not use | | R10 |
 | F12 | Tester reaction to commentary captions and sound (words) | | R28 |
 | F13 | Fatigue, frustration, or stop requests (time) | | note on the form |
+| F14 | Store: did the tester buy with the confirm sheet, and say what it showed? | | R31 |
+| F15 | Store: try-on found and understood; "Recent coins" found (words) | | R32, R33 |
+| F16 | Create a player: made, edited, seen in a game; help count and stuck step (never write the name) | | R34 |

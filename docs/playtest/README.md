@@ -21,7 +21,7 @@ Status: kit ready. No playtest has been run. Every result is `EVIDENCE_MISSING` 
 - Game: https://baseball-2027-production.up.railway.app
 
 ## Which build
-There is no build label inside the app. Before each session open `https://baseball-2027-production.up.railway.app/health` in Safari and copy the `version` value (7-character commit, e.g. a9f23e3 when this kit was written). Write it in DEVICE_CHECKLIST.md. If it changes mid-session, note the time and the new value.
+Since W39 the app can show its build id: Settings > "Build info" (off by default; also an optional frame-rate readout). If you do not turn it on, before each session open `https://baseball-2027-production.up.railway.app/health` in Safari and copy the `version` value (7-character commit, e.g. a9f23e3 when this kit was written). Write it in DEVICE_CHECKLIST.md. If it changes mid-session, note the time and the new value.
 
 ## Before the tester arrives (facilitator only, about 10 min)
 The Play, Season and My team screens need an account and a drafted team. Do this yourself, off camera. Never write the username or password into any kit file.
@@ -46,6 +46,8 @@ The Play, Season and My team screens need an account and a drafted team. Do this
 | J | Background/resume mid-pitch and mid-shot | 5 |
 | K | Repeated rematches (3 in a row) | 12 |
 | L | Install to home screen, offline finish | 10 |
+| M | Store: buy with the confirm sheet, try on a look, find "Recent coins" | 8 |
+| N | Create a player: make, edit, see in a game | 8 |
 
 Order A, B, C first (the tester has not learned the game yet in A). D to L can be reordered. Take a break after any 30 minutes. Skip a session rather than push a tired child.
 
