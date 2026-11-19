@@ -19,6 +19,7 @@ import { RewardLine } from "./store.tsx";
 import { afterGameLine, SAVED_ON_DEVICE, starsNote } from "./seasonhub.ts";
 import { AdvancePanel, RunStrip } from "./run.tsx";
 import { useComfort } from "./comfort.ts";
+import { abilityChipLabel, baseTargetLabel, gloveLabel, speedLabel, swingLabel } from "./a11y.ts";
 import { gameplayTelemetry } from "./gameplaytelemetry.ts";
 import { ABILITY_ICON, APPROACH_TEXT, appendInput, cellAim, cellTag, chipState, chipTap, keyCell, survivesApproach, swingTap, WAIT_HINT, type Approach, type ChipCtx } from "./touch.ts";
 
@@ -174,7 +175,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
       <div className="game-top">
         <Scorebug game={shell} index={Math.min(shown, events.length - 1)} />
         <div className="game-controls">
-          {!done && [1, 2].map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}x</button>)}
+          {!done && [1, 2].map((x) => <button key={x} className={`speed ${speed === x ? "on" : ""}`} aria-label={speedLabel(x)} aria-pressed={speed === x} onClick={() => setSpeed(x)}>{x}x</button>)}
           {!done && !caughtUp && <SkipPlay e={current} speed={speed} plan={planFor(shown)} director={planFor.director} index={shown} onSkip={() => setShown((n) => n + 1)} />}
           {done && highlights.reel && <SkipPlay e={events[fieldIndex]} speed={speed} onSkip={highlights.skip} />}
           {done && highlights.reel && <button className="link" onClick={highlights.stop}>Stop</button>}
@@ -196,7 +197,7 @@ export function DuelView({ setup, seasonId, onDone, shotInputs, coach, onSkip, r
           <b className="display">{resume && inputs === resume.inputs ? "Welcome back" : "Paused"}</b>
           <span>{setup.teams.away.abbr} {current.state.score.away} - {current.state.score.home} {setup.teams.home.abbr}</span>
           <small>Picks up at the start of the pitch.</small>
-          <button className="primary" autoFocus onClick={() => setPaused(false)}>Ready</button>
+          <button className="primary" autoFocus aria-label="Resume game" onClick={() => setPaused(false)}>Ready</button>
         </div>
       )}
       <Suspense fallback={<div className="field" />}><FieldView game={shell} index={fieldIndex} speed={speed} plan={highlights.reel ? null : planAfterResume(planFor(fieldIndex), fieldIndex, settled.current)} director={planFor.director} onShot={(i) => playCue(`shot:${gameId}:${i}`, "action_shot")}><AbilityCue e={events[fieldIndex]} speed={speed} /></FieldView></Suspense>
@@ -339,7 +340,7 @@ function AbilityChips({ abilities, heat, armed, onArm, approach, onApproach }: {
           const v = chipState(a, ctx);
           return (
             <div key={a.id} className={`pchip pchip-${v.state}`}>
-              <button aria-pressed={v.state === "armed"} aria-disabled={v.state === "disabled"}
+              <button aria-pressed={v.state === "armed"} aria-disabled={v.state === "disabled"} aria-label={abilityChipLabel(a.name, a.cost, v.label, v.state === "armed")}
                 onPointerDown={() => { press.current = { fired: false, t: setTimeout(() => { if (press.current) { press.current.fired = true; setNote({ text: a.summary }); } }, 450) }; }}
                 onPointerUp={() => press.current && clearTimeout(press.current.t)}
                 onPointerLeave={() => press.current && clearTimeout(press.current.t)}
@@ -447,7 +448,7 @@ function WindupGate() {
   }, []);
   return (
     <div className={`windup-gate ${lefty ? "lefty" : ""}`}>
-      <button className="swing-btn" aria-disabled="true" onPointerDown={() => { gameplayTelemetry.windupTap(); setHint(true); }}>SWING<small className="key">WAIT</small></button>
+      <button className="swing-btn" aria-disabled="true" aria-label="Swing, wait for the pitch" onPointerDown={() => { gameplayTelemetry.windupTap(); setHint(true); }}>SWING<small className="key">WAIT</small></button>
       <p className="windup-hint" role="status">{hint ? WAIT_HINT : ""}</p>
     </div>
   );
@@ -530,12 +531,12 @@ function SwingPanel({ pitcher, batter, heat, v3, incoming, sup, approach, onAppr
           </div>
           <div className="tp-swing-row">
             {sup && !v3 && (
-              <button className={`super ${canSuper ? "ready" : ""}`} disabled={!canSuper} onPointerDown={() => swing("power", true)}
+              <button className={`super ${canSuper ? "ready" : ""}`} aria-label={`${swingLabel("super")}, ${sup.charges} left`} disabled={!canSuper} onPointerDown={() => swing("power", true)}
                 title={sup.charges === 0 ? "No charges left" : sup.clutch ? "Clutch spot. Spend a charge." : "Only in clutch spots"}>
                 Super <small>{sup.charges} left</small>
               </button>
             )}
-            <button className="swing-btn" onPointerDown={() => swing(approach)}>SWING<small className="key">Space</small></button>
+            <button className="swing-btn" aria-label={swingLabel(approach)} onPointerDown={() => swing(approach)}>SWING<small className="key">Space</small></button>
           </div>
           <small className="muted tp-hint">Swing when the marker hits the gold. Don't tap to take.</small>
         </div>
@@ -598,7 +599,7 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove, s
           {throws && (
             <div className="throw-diamond" role="radiogroup" aria-label="Throw to">
               {(["second", "third", "first", "home"] as const).filter((b) => throws.options.includes(b)).map((b) => (
-                <button key={b} role="radio" aria-checked={pick === b} data-base={b}
+                <button key={b} role="radio" aria-checked={pick === b} data-base={b} aria-label={baseTargetLabel(b, b === throws.recommended)}
                   className={`${pick === b ? "on" : ""} ${b === throws.recommended ? "rec" : ""}`} onClick={() => setPick(b)}>
                   <b>{BASE_LABEL[b]}</b>{b === throws.recommended && <small>BEST</small>}
                 </button>
@@ -614,7 +615,7 @@ function FieldPanel({ batter, fielder, kind, throws, heat, abilities, onGlove, s
             <i className="timing-marker" style={{ animationDuration: `${ms}ms` }} />
           </div>
           <div className="tp-swing-row">
-            <button className="swing-btn" onPointerDown={glove}>{GLOVE_VERB[kind]}<small className="key">Space</small></button>
+            <button className="swing-btn" aria-label={gloveLabel(GLOVE_VERB[kind])} onPointerDown={glove}>{GLOVE_VERB[kind]}<small className="key">Space</small></button>
           </div>
           <small className="muted tp-hint">Tap when the marker hits the gold. Nail it and you steal a hit; miss and it drops in.{throws ? " Pick the throw first: the wrong base costs the double play." : ""}</small>
         </div>

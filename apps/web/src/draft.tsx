@@ -131,7 +131,7 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
             </div>
             {team.draft.ready ? (
               team.status === "ready"
-                ? <p className="ok">Your team is set. Games are coming next!</p>
+                ? <p className="ok">Your team is set. Head to the Play or Season tab to take the field.</p>
                 : <p><button className="primary" disabled={busy !== null} onClick={finish}>Finish draft</button></p>
             ) : (
               <ul className="needs">{team.draft.problems.map((p) => <li key={p}>{p}</li>)}</ul>

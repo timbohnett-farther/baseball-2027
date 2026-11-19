@@ -5,6 +5,8 @@ import { useMix, useSound, useVolume } from "./audio.ts";
 import { CueCaption, useCaptions } from "./captions.tsx";
 import { hapticsSupported, useHaptics } from "./haptics.ts";
 import { useComfort } from "./comfort.ts";
+import { BuildLabel } from "./buildlabel.tsx";
+import { useBuildLabel } from "./buildlabel.ts";
 import { QUALITIES, QUALITY_LABEL, useQuality, type Quality } from "./quality.ts";
 import { ACTION_SHOT_LABEL, ACTION_SHOT_MODES, useActionShots } from "./actionshots.ts";
 import type { ActionShotMode } from "./actionshot.ts";
@@ -39,6 +41,7 @@ export function App() {
   const [quality, setQuality] = useQuality();
   const [lefty, toggleLefty] = useComfort("lefty");
   const [calm, toggleCalm] = useComfort("calm");
+  const [buildLabel, toggleBuildLabel] = useBuildLabel();
   const [actionShots, setActionShots] = useActionShots();
   const [view, setView] = useState<View>({ kind: "teams" });
   const [offline, setOffline] = useState(false);
@@ -100,6 +103,7 @@ export function App() {
     return (
       <>
         <Toaster />
+        <BuildLabel />
         <Suspense fallback={<section className="panel">Taking the field…</section>}>
           <DuelView setup={resumed.setup} seasonId={resumed.seasonId} resume={{ gameId: resumed.gameId, inputs: resumed.inputs }} onDone={leave} />
         </Suspense>
@@ -110,6 +114,7 @@ export function App() {
   return (
     <>
     <a className="skip" href="#main">Skip to content</a>
+    <BuildLabel />
     <Atmosphere />
     <Toaster />
     {update && <div className="update-bar" role="status">A new version is ready. <button className="link" onClick={update}>Update</button></div>}
@@ -141,6 +146,7 @@ export function App() {
           <select className="link" value={actionShots} onChange={(e) => setActionShots(e.target.value as ActionShotMode)} aria-label="Action shots" title="Action shots: short replay cameras after big plays">{ACTION_SHOT_MODES.map((m) => <option key={m} value={m}>{"Shots: " + ACTION_SHOT_LABEL[m]}</option>)}</select>
           <button className="link" onClick={toggleLefty} aria-pressed={lefty} title="Mirror the touch controls for left-handed play">{lefty ? "Left-handed: on" : "Left-handed: off"}</button>
           <button className="link" onClick={toggleCalm} aria-pressed={calm} title="Remove flashes and pulses (also follows your device's reduced-motion setting)">{calm ? "Reduced flash: on" : "Reduced flash: off"}</button>
+          <button className="link" onClick={toggleBuildLabel} aria-pressed={buildLabel} title="Show the build id and frame rate in a corner of the screen">{buildLabel ? "Build info: on" : "Build info: off"}</button>
           <span className="sep">·</span>
           {me ? <>Hi, <b>{me.displayName}</b> · <button className="link" onClick={signOut}>Sign out</button></>
             : me === null && <button className="link" onClick={() => setView({ kind: "sign-in" })}>Sign in</button>}

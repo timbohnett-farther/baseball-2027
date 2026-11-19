@@ -21,7 +21,9 @@ const away = team("Away"), home = team("Home");
 
 const snaps = [], presentation = [], pitchesPer = [], inputsPer = [];
 let heatChecks = 0, heatMismatches = 0;
-let nonPrefix = 0; // prefix replays whose tail differs from the full run (bot lists a team/run extra after its pitch)
+let nonPrefix = 0; // prefix replays whose tail differs from the full run for a reason other than the Rally Breaker case below
+let breakerPrefix = 0; // expected: the full run has the bot's Rally Breaker at that slot, the prefix has not been given it yet, so the CPU acts there instead
+let fullReplayMismatch = 0; // real determinism check: the same seed + full input list must reproduce the match event for event
 const rejectedBot = {}; // inputs the bot logged that the classifier would not accept: should stay empty
 for (let seed = from; seed <= to; seed++) {
   const userSide = seed % 2 ? "away" : "home";
@@ -33,7 +35,10 @@ for (let seed = from; seed <= to; seed++) {
   t.startMatch(userSide);
   for (let k = 0; k <= inputs.length; k++) {
     const live = playInteractive({ away, home, seed, innings, rules: CURRENT_RULES, difficulty: cpu, userSide, inputs: inputs.slice(0, k) });
-    if (live.events.length <= g.events.length && live.events.slice(-3).some((e, i, a) => JSON.stringify(e) !== JSON.stringify(g.events[live.events.length - a.length + i]))) nonPrefix++;
+    if (live.events.length <= g.events.length) {
+      const bad = live.events.slice(-3).findIndex((e, i, a) => JSON.stringify(e) !== JSON.stringify(g.events[live.events.length - a.length + i]));
+      if (bad >= 0) (g.events[live.events.length - Math.min(3, live.events.length) + bad].type === "team" ? breakerPrefix++ : nonPrefix++);
+    }
     t.observeEvents(live.events);
     if (k < inputs.length) {
       if (inputs[k].ability) t.arm(inputs[k].ability.id);
@@ -41,6 +46,8 @@ for (let seed = from; seed <= to; seed++) {
       if (o !== "accepted") rejectedBot[o] = (rejectedBot[o] ?? 0) + 1;
     }
   }
+  const again = playInteractive({ away, home, seed, innings, rules: CURRENT_RULES, difficulty: cpu, userSide, inputs });
+  if (JSON.stringify(again.events) !== JSON.stringify(g.events)) fullReplayMismatch++;
   const s = t.snapshot();
   s.durationEstimateMs = { wall: g.events.reduce((n, e) => n + blockingBudgetMs(e), 0), basis: "presentation_budget_sum" };
   snaps.push(s); presentation.push(s.durationEstimateMs.wall);
@@ -55,7 +62,7 @@ const report = {
   samples: { matches: snaps.length, pitchEvents: pitchesPer.reduce((a, b) => a + b, 0), userInputs: inputsPer.reduce((a, b) => a + b, 0) },
   perMatch: { pitches: mean(pitchesPer), userInputs: mean(inputsPer), innings: agg.innings / snaps.length, durationEstimateMs: mean(presentation), durationBasis: "sum of presentation blocking budgets (not wall clock, not a device)" },
   botInputsNotAccepted: rejectedBot,
-  nonPrefixReplays: nonPrefix,
+  nonPrefixReplays: nonPrefix, breakerPrefixReplays: breakerPrefix, fullReplayMismatch,
   aggregate: agg,
   note: "user = the bot seat, cpu = the engine computer. Arm/cancel are client-only: here the bot arms every ability it submits, and never cancels.",
 };
