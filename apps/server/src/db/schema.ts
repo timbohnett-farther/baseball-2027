@@ -95,6 +95,20 @@ export const coinLedger = pgTable("coin_ledger", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("coin_ledger_user_idx").on(t.userId, t.id)]);
 
+/** The one custom (create-a-player) roster player a team may have. Lives outside user_team_players: it is not in the real player pool. */
+export const userCustomPlayers = pgTable("user_custom_players", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id").notNull().unique().references(() => userTeams.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  number: integer("number").notNull(),
+  position: text("position").notNull(),
+  bats: text("bats").notNull(),
+  look: jsonb("look").$type<{ skin: number; build: string; accent: number }>().notNull(),
+  ratings: jsonb("ratings").$type<Record<string, number>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const userTeamPlayers = pgTable("user_team_players", {
   teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),
   playerId: integer("player_id").notNull().references(() => players.id),

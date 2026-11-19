@@ -35,6 +35,8 @@ export interface Player {
   ratings: Omit<PlayerRatings, "id">;
   /** On your drafted players only: XP and level earned from games (ratings above already include the level). */
   progress?: PlayerProgress;
+  /** Set only on the team's own custom player (virtual: negative id, not in the player pool). */
+  custom?: { number: number; bats: string; look: { skin: number; build: string; accent: number } };
 }
 
 export interface TeamSummary extends MlbTeam {
@@ -65,6 +67,7 @@ export * from "./draft.ts";
 export * from "./api.ts";
 export * from "./chemistry.ts";
 export * from "./names.ts";
+export * from "./custom-player.ts";
 export * from "./items.ts";
 export * from "./season.ts";
 export * from "./progress.ts";

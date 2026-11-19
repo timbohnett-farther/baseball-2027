@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import type { SimTeam } from "@bb/sim";
 import { COSMETIC_BY_ID, resolveBatLook, type Cosmetics } from "@bb/shared";
-import { dress, disposeJerseys, makePlayer } from "./field.tsx";
+import { dress, disposeJerseys, makePlayer, paintCustom } from "./field.tsx";
+import type { CustomLookInfo } from "./customlook.ts";
 import { getQuality, QUALITY_PROFILE } from "./quality.ts";
 
 interface Look { color: string; superBat: string | null; cosmetics: Cosmetics }
@@ -13,9 +14,9 @@ const teamOf = (l: Look) => ({ abbr: "YOU", color: l.color, lineup: [], gear: { 
  * the way it will in play. Its own small canvas and renderer, drawn on demand (no loop), disposed on unmount. Without WebGL it
  * falls back to a flat swatch card.
  */
-export function TryOn({ look }: { look: Look }) {
+export function TryOn({ look, custom }: { look: Look; custom?: CustomLookInfo }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const draw = useRef<((l: Look, turn: number) => void) | null>(null);
+  const draw = useRef<((l: Look, turn: number, c?: CustomLookInfo) => void) | null>(null);
   const [turn, setTurn] = useState(0);
   const [flat, setFlat] = useState(false);
 
@@ -38,8 +39,10 @@ export function TryOn({ look }: { look: Look }) {
     cam.position.set(2.5, 1.35, 2.7); cam.lookAt(0, 0.95, 0.1);
     const figure = makePlayer(new THREE.Color("#2e9e5b"), true, 1);
     scene.add(figure);
-    draw.current = (l, t) => {
-      dress(figure, teamOf(l), null);
+    draw.current = (l, t, c) => {
+      const team = teamOf(l);
+      dress(figure, team, null);
+      paintCustom(figure, team, c);
       figure.rotation.y = t * (Math.PI / 2);
       r.render(scene, cam);
     };
@@ -55,7 +58,7 @@ export function TryOn({ look }: { look: Look }) {
     };
   }, []);
 
-  useEffect(() => { draw.current?.(look, turn); }, [look.color, look.superBat, look.cosmetics, turn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { draw.current?.(look, turn, custom); }, [look.color, look.superBat, look.cosmetics, turn, custom?.skin, custom?.build, custom?.accent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bat = resolveBatLook({ superBat: look.superBat, cosmetics: look.cosmetics });
   const worn = (slot: keyof Cosmetics) => COSMETIC_BY_ID[look.cosmetics[slot] ?? ""];

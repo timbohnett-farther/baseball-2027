@@ -89,7 +89,9 @@ export const isGlueGuy = (p: Player) => {
   return !!h && isHitterRole(p) && p.ratings.overall >= 72 && p.ratings.overall < 85 && h.contact >= 80 && h.fielding >= 80;
 };
 
-export function chemistry(team: Player[], season = new Date().getUTCFullYear()): ChemistryReport {
+export function chemistry(everyone: Player[], season = new Date().getUTCFullYear()): ChemistryReport {
+  // A custom player has no real-world ties, so chemistry ignores them (and they get no boosts).
+  const team = everyone.filter((p) => !p.custom);
   const effects: ChemistryEffect[] = [];
   const add = (e: Omit<ChemistryEffect, "playerIds"> & { playerIds?: number[] }) =>
     effects.push({ ...e, playerIds: e.playerIds ?? [...new Set(e.mods.map((m) => m.playerId))] });

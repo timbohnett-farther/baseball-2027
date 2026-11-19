@@ -191,6 +191,38 @@ function StoreShot({ moment }: { moment: string }) {
   return <div className="page">{moment === "my-team" ? <MyTeamView teams={[]} /> : <StoreView />}</div>;
 }
 
+/** W42 `/?shot=player-you|player-look|player-ratings|player-review|my-team-custom`: the real create-a-player flow over a stubbed fetch. */
+function CustomShot({ moment }: { moment: string }) {
+  useMemo(() => {
+    const input = { name: "Sparky", number: 7, position: "SS", bats: "R", look: { skin: 2, build: "regular", accent: 1 }, ratings: { contact: 70, power: 60, eye: 62, speed: 66, fielding: 67 } } as const;
+    const have = moment === "my-team-custom";
+    const mine = { id: -1, name: "Sparky", firstName: "Sparky", lastName: "Sparky", jersey: "7", position: "SS", bats: "R", throws: "R", age: null, birthDate: null, birthCountry: null, height: null, weight: null, mlbDebut: null, teamId: null, teamAbbr: null, status: "Custom",
+      ratings: { overall: 66, role: "H", hitting: { contact: 70, power: 60, eye: 62, speed: 66, fielding: 67 }, pitching: null, sample: { pa: 0, bf: 0 } }, custom: { number: 7, bats: "R", look: input.look } };
+    const team = { id: 1, name: "Ridgeback", color: "#c8322f", status: "drafting", players: have ? [mine] : [], draft: { size: have ? 1 : 0, counts: {}, problems: ["Pick 8 more players to fill your lineup."], ready: false }, chemistry: { effects: [], players: [], teamPower: 0, basePower: 0 } };
+    const state = { player: have ? input : null, overall: have ? 66 : null, points: { base: { hitter: 145, pitcher: 116 }, bonus: 4, stars: 25, cap: 80, floor: 40 }, nextBonus: { stars: 50, bonus: 6 } };
+    window.fetch = (async (url: string) => new Response(JSON.stringify(String(url).startsWith("/api/my-team/custom-player") ? state : String(url).startsWith("/api/my-team") ? team : {}), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+  }, [moment]);
+  useEffect(() => {
+    const want = { "player-you": 0, "player-look": 1, "player-ratings": 2, "player-review": 3 }[moment];
+    let clicks = 0;
+    const t = setInterval(() => {
+      if (moment === "my-team-custom") { if (!document.querySelector(".your-player .chip.yours")) return; }
+      else {
+        const make = [...document.querySelectorAll<HTMLButtonElement>(".your-player .primary")].find((b) => b.textContent === "Create a player");
+        if (make && !document.querySelector(".create-player")) { make.click(); return; }
+        const inp = document.querySelector<HTMLInputElement>(".create-player input[maxlength]");
+        if (inp && inp.value === "" && clicks === 0) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(inp, "Sparky"); inp.dispatchEvent(new Event("input", { bubbles: true })); return; }
+        if (!inp && !document.querySelector(".create-player")) return;
+        if (clicks < want!) { const n = document.querySelector<HTMLButtonElement>(".flow-actions .primary:not([disabled])"); if (n) { n.click(); clicks++; } return; }
+        if (moment === "player-look" && !document.querySelector(".tryon-canvas, .tryon-flat")) return;
+      }
+      clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; }, 400);
+    }, 120);
+    return () => clearInterval(t);
+  }, [moment]);
+  return <div className="page"><MyTeamView teams={[]} /></div>;
+}
+
 function HubShot({ moment }: { moment: string }) {
   useEffect(() => { const t = setTimeout(() => { (window as any).__shotReady = true; }, 300); return () => clearTimeout(t); }, []);
   const noop = () => {};
@@ -268,6 +300,7 @@ export function ShotView() {
   if (duel === "perf-soak") return <SoakView />;
   if (duel === "cadence-match") return <CadenceView seed={Number(q.get("seed") ?? 11)} />;
   if (duel === "store" || duel === "store-tryon" || duel === "store-confirm" || duel === "my-team") return <StoreShot moment={duel} />;
+  if (duel === "player-you" || duel === "player-look" || duel === "player-ratings" || duel === "player-review" || duel === "my-team-custom") return <CustomShot moment={duel} />;
   if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }

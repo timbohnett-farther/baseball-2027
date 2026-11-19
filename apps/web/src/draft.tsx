@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   canAdd, chemistry, LEVEL_XP, slotsFor, ROSTER_SIZE, TEAM_COLORS,
-  type ChemistryReport, type DraftPick, type MyTeam, type Player, type PlayerProgress, type TeamSummary,
+  type ChemistryReport, type CustomPlayerState, type DraftPick, type MyTeam, type Player, type PlayerProgress, type TeamSummary,
 } from "@bb/shared";
 import { api, ApiError } from "./api.ts";
 import { Ovr, PlayerBoard } from "./players.tsx";
-import { ErrorNote, Loading } from "./ui.tsx";
+import { ErrorNote, Loading, toast } from "./ui.tsx";
+import { CustomPlayerFlow, DropSheet } from "./customplayer.tsx";
+import { registerCustomLook } from "./customlook.ts";
 
 const toPick = (p: Player): DraftPick => ({ playerId: p.id, position: p.position, role: p.ratings.role });
 
@@ -58,10 +60,20 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
   const [team, setTeam] = useState<MyTeam | null | undefined>(undefined); // undefined = loading, null = none yet
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  const [cp, setCp] = useState<CustomPlayerState | null>(null);
+  const [flow, setFlow] = useState(false);
+  const [dropAsk, setDropAsk] = useState<Player | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     api<MyTeam>("/api/my-team").then(setTeam).catch((e) => (e instanceof ApiError && e.status === 404 ? setTeam(null) : setError(e.message)));
   }, []);
+  useEffect(() => { registerCustomLook(team ?? null); }, [team]);
+  const hasTeam = !!team;
+  const customKey = team?.players.find((x) => x.custom)?.name ?? "";
+  useEffect(() => {
+    if (hasTeam) api<CustomPlayerState>("/api/my-team/custom-player").then(setCp).catch(() => {});
+  }, [hasTeam, customKey]);
 
   const season = new Date().getUTCFullYear();
   const currentTotal = useMemo(() => (team ? totalEffective(chemistry(team.players, season)) : 0), [team, season]);
@@ -72,11 +84,12 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
     try { setTeam(await run()); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
   const add = (p: Player) => act(p.id, () => api<MyTeam>(`/api/my-team/players/${p.id}`, { method: "POST" }));
-  const drop = (p: Player) => act(p.id, () => api<MyTeam>(`/api/my-team/players/${p.id}`, { method: "DELETE" }));
+  const drop = (p: Player) => act(p.id, () => api<MyTeam>(p.custom ? "/api/my-team/custom-player" : `/api/my-team/players/${p.id}`, { method: "DELETE" })).then(() => setDropAsk(null));
   const finish = () => act(null, () => api<MyTeam>("/api/my-team/finish", { method: "POST" }));
 
   if (team === undefined) return error ? <section className="panel"><ErrorNote message={error} /></section> : <Loading label="Loading your team…" />;
   if (team === null) return <CreateTeam onCreated={setTeam} />;
+  if (flow && cp) return <CustomPlayerFlow state={cp} teamColor={team.color} onCancel={() => setFlow(false)} onSaved={(t) => { setTeam(t); setFlow(false); }} />;
 
   const picks = team.players.map(toPick);
   const onTeam = new Set(team.players.map((p) => p.id));
@@ -91,7 +104,29 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
           <h2>{team.name}</h2>
           <span className={`chip ${team.status}`}>{team.status === "ready" ? "Ready to play" : "Drafting"}</span>
           <span className="muted small">{team.draft.size}/{ROSTER_SIZE} players</span>
+          <button className="link" onClick={() => setEditing((e) => !e)} aria-expanded={editing}>{editing ? "Close" : "Rename or recolour"}</button>
         </div>
+        {editing && <TeamEdit team={team} onSaved={(t) => { setTeam(t); setEditing(false); toast("Team updated."); }} />}
+        {cp && (
+          <div className="your-player">
+            {(() => {
+              const mine = team.players.find((x) => x.custom);
+              return mine && cp.player ? (
+                <>
+                  <span className="chip yours">Yours</span>
+                  <span className="your-name">#{mine.custom!.number} {mine.name}</span>
+                  <span className="muted small">{cp.player.position} · Overall {mine.ratings.overall}</span>
+                  <button className="link" onClick={() => setFlow(true)}>Edit</button>
+                </>
+              ) : (
+                <>
+                  <span>Make a player of your own.</span>
+                  <button className="primary" onClick={() => setFlow(true)}>Create a player</button>
+                </>
+              );
+            })()}
+          </div>
+        )}
         <div className="power">
           <span className="power-num">{team.players.length ? teamPower.toFixed(1) : "–"}</span>
           <span className="power-label">Team power</span>
@@ -120,9 +155,9 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
                         <span className="slot-name" title={`${p.name} · ${p.teamAbbr ?? "Free agent"}`}>
                           {p.lastName || p.name}{twoWayEcho ? " (two-way)" : ""}
                         </span>
-                        <span className="muted small">{p.teamAbbr ?? "FA"}</span>
+                        {p.custom ? <span className="chip yours">Yours</span> : <span className="muted small">{p.teamAbbr ?? "FA"}</span>}
                         {p.progress && <Dev progress={p.progress} />}
-                        {!twoWayEcho && <button className="x" title="Remove" aria-label={`Remove ${p.name}`} disabled={busy === p.id} onClick={() => drop(p)}>×</button>}
+                        {!twoWayEcho && <button className="x" title="Remove" aria-label={`Remove ${p.name}`} disabled={busy === p.id} onClick={() => setDropAsk(p)}>×</button>}
                       </>
                     ) : <span className="muted small">empty</span>}
                   </div>
@@ -159,6 +194,11 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
         </div>
       </section>
 
+      {dropAsk && (
+        <DropSheet name={dropAsk.name} busy={busy === dropAsk.id} onCancel={() => setDropAsk(null)} onDrop={() => drop(dropAsk)}
+          note={dropAsk.custom ? "He leaves your team and his spot opens up. You can make a new player any time." : "He leaves your team and the spot opens up. You can draft him again later."} />
+      )}
+
       <PlayerBoard
         teams={teams}
         extraHeader={<h3>Draft players</h3>}
@@ -178,6 +218,33 @@ export function MyTeamView({ teams }: { teams: TeamSummary[] }) {
         }}
       />
     </>
+  );
+}
+
+/** Rename or recolour the team: the same server rules as creating it. */
+function TeamEdit({ team, onSaved }: { team: MyTeam; onSaved: (t: MyTeam) => void }) {
+  const [name, setName] = useState(team.name);
+  const [color, setColor] = useState<string>(team.color);
+  const [error, setError] = useState<string | null>(null);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try { onSaved(await api<MyTeam>("/api/my-team", { method: "PATCH", body: { name, color } })); } catch (err) { setError((err as Error).message); }
+  }
+  return (
+    <form className="form team-edit" onSubmit={submit}>
+      <label>Team name
+        <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={30} />
+      </label>
+      <div>
+        <span className="label">Team color</span>
+        <div className="colors">
+          {TEAM_COLORS.map((c) => <button type="button" key={c} className={`color ${c === color ? "on" : ""}`} style={{ background: c }} aria-label={c} aria-pressed={c === color} onClick={() => setColor(c)} />)}
+        </div>
+      </div>
+      <ErrorNote message={error} />
+      <button className="primary">Save team</button>
+    </form>
   );
 }
 

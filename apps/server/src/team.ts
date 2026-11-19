@@ -1,12 +1,15 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
-  canAdd, chemistry, developRatings, draftStatus, progressFor, TEAM_COLORS,
-  type CreateTeamRequest, type DraftPick, type Me, type MyTeam, type Player,
+  canAdd, chemistry, customOverall, developRatings, draftStatus, progressFor, STAR_BONUS_TABLE, starBonus, TEAM_COLORS, validateCustomPlayer,
+  CUSTOM_RATING_CAP, HITTER_BASE_POINTS, PITCHER_BASE_POINTS, RATING_FLOOR,
+  type CreateTeamRequest, type CustomPlayerInput, type CustomPlayerState, type DraftPick, type Me, type MyTeam, type Player,
 } from "@bb/shared";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
-import { playerRatings, players, userTeamPlayers, userTeams } from "./db/schema.ts";
+import { lifetimeStars } from "./arcade-season.ts";
+import { customInputOf, customPlayerId, customToPlayer } from "./custom-player.ts";
+import { playerRatings, players, userCustomPlayers, userTeamPlayers, userTeams } from "./db/schema.ts";
 import { findPlayer, pool } from "./store.ts";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -31,6 +34,9 @@ export async function playerFromDb(db: Db | Tx, id: number): Promise<Player | nu
 export async function teamPlayers(db: Db | Tx, teamId: number, develop = false): Promise<Player[]> {
   const rows = await db.select().from(userTeamPlayers).where(eq(userTeamPlayers.teamId, teamId)).orderBy(userTeamPlayers.addedAt);
   const out: Player[] = [];
+  // The team's custom player (if any) is listed first, as an ordinary roster player.
+  const [custom] = await db.select().from(userCustomPlayers).where(eq(userCustomPlayers.teamId, teamId));
+  if (custom) out.push(customToPlayer(custom));
   for (const r of rows) {
     const p = findPlayer(r.playerId) ?? (await playerFromDb(db, r.playerId));
     if (!p) continue;
@@ -79,6 +85,61 @@ export async function teamRoutes(app: FastifyInstance) {
     const db = getDb();
     await db.update(userTeams).set({ ...(name && { name }), ...(color && { color }), updatedAt: new Date() }).where(eq(userTeams.userId, req.user!.id));
     return (await myTeam(db, req.user!)) ?? reply.code(404).send({ error: "No team yet." });
+  });
+
+  const customState = async (db: Db | Tx, user: Me, teamId: number): Promise<CustomPlayerState> => {
+    const stars = await lifetimeStars(db as Db, user.id);
+    const [row] = await db.select().from(userCustomPlayers).where(eq(userCustomPlayers.teamId, teamId));
+    const bonus = starBonus(stars);
+    return {
+      player: row ? customInputOf(row) : null, overall: row ? customOverall(row.ratings, row.position) : null,
+      points: { base: { hitter: HITTER_BASE_POINTS, pitcher: PITCHER_BASE_POINTS }, bonus, stars, cap: CUSTOM_RATING_CAP, floor: RATING_FLOOR },
+      nextBonus: STAR_BONUS_TABLE.find((t) => t.stars > stars) ?? null,
+    };
+  };
+
+  app.get("/api/my-team/custom-player", { preHandler: requireUser }, async (req, reply) => {
+    const db = getDb();
+    const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, req.user!.id));
+    if (!team) return reply.code(404).send({ error: "Create your team first." });
+    return customState(db, req.user!, team.id);
+  });
+
+  // Create or edit. `create` = POST (needs a free roster spot); otherwise PATCH merges onto the saved player.
+  const saveCustom = (create: boolean) => async (req: { user?: Me | null; body?: unknown }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
+    const user = req.user!;
+    return getDb().transaction(async (tx) => {
+      const [team] = await tx.select().from(userTeams).where(eq(userTeams.userId, user.id)).for("update");
+      if (!team) return reply.code(404).send({ error: "Create your team first." });
+      const [existing] = await tx.select().from(userCustomPlayers).where(eq(userCustomPlayers.teamId, team.id));
+      if (create && existing) return reply.code(409).send({ error: "You already made your player. Edit them instead." });
+      if (!create && !existing) return reply.code(404).send({ error: "You haven't made a player yet." });
+      const body = (req.body ?? {}) as Partial<CustomPlayerInput>;
+      const merged = create ? body : { ...customInputOf(existing), ...body, look: { ...existing.look, ...(body.look ?? {}) } };
+      const { problems, value } = validateCustomPlayer(merged, await lifetimeStars(tx as unknown as Db, user.id));
+      if (!value) return reply.code(400).send({ error: problems.join(" ") });
+      // Roster rules: the custom player takes one of the 12 slots like anyone else.
+      const others = (await teamPlayers(tx, team.id)).filter((p) => !p.custom);
+      const pick = { playerId: customPlayerId(team.id), position: value.position === "SP" || value.position === "RP" ? "P" : value.position, role: (value.position === "SP" || value.position === "RP" ? value.position : "H") as DraftPick["role"] };
+      const problem = canAdd(others.map(toPick), pick);
+      if (problem) return reply.code(400).send({ error: `${problem} Drop a player first.` });
+      const row = { name: value.name, number: value.number, position: value.position, bats: value.bats, look: value.look, ratings: value.ratings };
+      if (existing) await tx.update(userCustomPlayers).set({ ...row, updatedAt: new Date() }).where(eq(userCustomPlayers.id, existing.id));
+      else await tx.insert(userCustomPlayers).values({ teamId: team.id, ...row });
+      await tx.update(userTeams).set({ status: "drafting", updatedAt: new Date() }).where(eq(userTeams.id, team.id));
+      return reply.code(create ? 201 : 200).send(await myTeam(tx, user));
+    });
+  };
+  app.post("/api/my-team/custom-player", { preHandler: requireUser }, saveCustom(true));
+  app.patch("/api/my-team/custom-player", { preHandler: requireUser }, saveCustom(false));
+
+  app.delete("/api/my-team/custom-player", { preHandler: requireUser }, async (req, reply) => {
+    const db = getDb();
+    const [team] = await db.select().from(userTeams).where(eq(userTeams.userId, req.user!.id));
+    if (!team) return reply.code(404).send({ error: "No team yet." });
+    await db.delete(userCustomPlayers).where(eq(userCustomPlayers.teamId, team.id));
+    await db.update(userTeams).set({ status: "drafting", updatedAt: new Date() }).where(eq(userTeams.id, team.id));
+    return myTeam(db, req.user!);
   });
 
   app.post<{ Params: { playerId: string } }>("/api/my-team/players/:playerId", { preHandler: requireUser }, async (req, reply) => {

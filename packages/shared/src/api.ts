@@ -36,4 +36,13 @@ export interface MyTeam {
   chemistry: ChemistryReport;
 }
 
+/** GET /api/my-team/custom-player: the saved player (or null) and the point budget for it right now. */
+export interface CustomPlayerState {
+  player: import("./custom-player.ts").CustomPlayerInput | null;
+  overall: number | null;
+  points: { base: { hitter: number; pitcher: number }; bonus: number; stars: number; cap: number; floor: number };
+  /** Next lifetime-star step that adds bonus points, if any. */
+  nextBonus: { stars: number; bonus: number } | null;
+}
+
 export interface ApiError { error: string }

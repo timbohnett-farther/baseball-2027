@@ -65,7 +65,7 @@ async function userGames(db: Db, seasonId: number): Promise<UserGame[]> {
   return rows.map(({ sg, g }) => ({ userSide: sg.userSide, gameNo: sg.gameNo, round: sg.round, opponentTeamId: sg.opponentTeamId, gameId: sg.gameId, result: sg.result, userScore: g?.userScore ?? null, opponentScore: g?.opponentScore ?? null, difficulty: g?.difficulty ?? null, stars: sg.stars }));
 }
 
-async function lifetimeStars(db: Db, userId: number): Promise<number> {
+export async function lifetimeStars(db: Db, userId: number): Promise<number> {
   const rows = await db.select({ stars: seasonGames.stars }).from(seasonGames)
     .innerJoin(seasons, eq(seasons.id, seasonGames.seasonId)).where(and(eq(seasons.userId, userId), eq(seasons.format, ARCADE_FORMAT)));
   return rows.reduce((n, r) => n + (r.stars?.earned?.length ?? 0), 0);

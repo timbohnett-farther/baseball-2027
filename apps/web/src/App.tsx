@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import type { HealthStatus, Me, TeamDetail, TeamSummary } from "@bb/shared";
+import type { HealthStatus, Me, MyTeam, TeamDetail, TeamSummary } from "@bb/shared";
 import { api } from "./api.ts";
 import { useMix, useSound, useVolume } from "./audio.ts";
 import { CueCaption, useCaptions } from "./captions.tsx";
@@ -14,6 +14,7 @@ import { flush, readOutbox } from "./outbox.ts";
 import { clearSnapshot, loadSnapshot, restore, type Restored } from "./resume.ts";
 import { AuthPanel } from "./auth.tsx";
 import { MyTeamView } from "./draft.tsx";
+import { registerCustomLook } from "./customlook.ts";
 import { PlayView } from "./game.tsx";
 import { Ovr, PlayerBoard, PlayerTable } from "./players.tsx";
 import { SeasonView } from "./season.tsx";
@@ -91,6 +92,7 @@ export function App() {
     loadTeams();
     api<Me>("/api/me").then((m) => { setMe(m); setView({ kind: "my-team" }); }).catch(() => setMe(null));
   }, []);
+  useEffect(() => { if (me) api<MyTeam>("/api/my-team").then(registerCustomLook).catch(() => {}); }, [me?.id]); // the rig dresses the custom player in games
 
   const openTeam = (id: number) => api<TeamDetail>(`/api/teams/${id}`).then((team) => setView({ kind: "team", team }));
   const signOut = async () => { await api("/api/auth/logout", { method: "POST" }); setMe(null); setView({ kind: "teams" }); };

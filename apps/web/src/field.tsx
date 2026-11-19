@@ -16,6 +16,7 @@ import { applyPose, handWorld, makeShotFigure, reachTo } from "./shotfigure.ts";
 import { shotModeActive } from "./shotmode.ts";
 import { limb, mergeByMaterial } from "./rigutil.ts";
 import { perfLog } from "./perftelemetry.ts";
+import { BUILD_SCALE, customLookOf, type CustomLookInfo } from "./customlook.ts";
 import { ABILITY_FX } from "./abilityfx.ts";
 import { reducedFlash } from "./comfort.ts";
 
@@ -162,7 +163,7 @@ const std = (color: string, roughness = 0.8) => new THREE.MeshStandardMaterial({
 /** Fielder slot -> lineup position label (FIELD_POS order). */
 const SLOT_POS = ["P", "C", "1B", "2B", "SS", "3B", "LF", "CF", "RF"];
 /** Jersey numbers aren't in the data; derive a stable one from the player id. */
-const jerseyNumber = (p: SimPlayer) => 2 + ((p.id * 37) % 97);
+const jerseyNumber = (p: SimPlayer) => customLookOf(p.id)?.number ?? 2 + ((Math.abs(p.id) * 37) % 97);
 
 const jerseys = new Map<string, THREE.CanvasTexture>();
 /** Release every cached jersey texture (1024x512 each): they belong to the park that dressed with them and would otherwise grow with every match and opponent. */
@@ -225,7 +226,7 @@ function drawJerseyStyle(g: CanvasRenderingContext2D, style: JerseyStyle, w: num
  */
 function jerseyTexture(team: SimTeam, player: SimPlayer | null): THREE.CanvasTexture {
   const style = COSMETIC_BY_ID[team.gear?.cosmetics?.jersey ?? ""]?.style;
-  const key = `${team.abbr}|${player?.id ?? ""}|${style ?? ""}`;
+  const key = `${team.abbr}|${player?.id ?? ""}|${style ?? ""}|${player ? customLookOf(player.id)?.number ?? "" : ""}`;
   const hit = jerseys.get(key);
   if (hit) return hit;
   const w = 1024, h = 512;
@@ -334,7 +335,7 @@ export function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = fals
   }
   mergeByMaterial(rig); // the bat group is not a Mesh, so it stays separate and keeps animating
   g.add(rig);
-  g.userData = { bodyMat, sleeveMat, capMat, cleatMat, helmetMat, gloveMat, skin: SKIN[seed % SKIN.length], bat };
+  g.userData = { bodyMat, sleeveMat, capMat, cleatMat, helmetMat, gloveMat, skinMat: skin, skin: SKIN[seed % SKIN.length], bat };
   g.scale.setScalar(PLAYER_SCALE);
   return g;
 }
@@ -343,7 +344,7 @@ export function makePlayer(color: THREE.Color, bat = false, seed = 0, ump = fals
 export function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
   const u = g.userData as {
     bodyMat: THREE.MeshStandardMaterial; sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial;
-    cleatMat: THREE.MeshStandardMaterial; helmetMat: THREE.MeshStandardMaterial; gloveMat: THREE.MeshStandardMaterial; skin: string; bat: boolean;
+    cleatMat: THREE.MeshStandardMaterial; helmetMat: THREE.MeshStandardMaterial; gloveMat: THREE.MeshStandardMaterial; skinMat?: THREE.MeshStandardMaterial; skin: string; bat: boolean;
   };
   u.bodyMat.map = jerseyTexture(team, player);
   u.bodyMat.color.set("#ffffff"); // colour lives in the texture now
@@ -362,6 +363,21 @@ export function dress(g: THREE.Group, team: SimTeam, player: SimPlayer | null) {
     u.gloveMat.color.set(look("gloves") ?? u.skin);
   }
   paintBat(g, resolveBatLook(team.gear && { superBat: team.gear.superBat?.id ?? null, cosmetics: team.gear.cosmetics }));
+  paintCustom(g, team, customLookOf(player?.id));
+}
+
+/** The team's own custom player: his chosen skin, build and uniform accent (cap and sleeves). With no look the figure resets to stock. */
+export function paintCustom(g: THREE.Group, team: SimTeam, mine: CustomLookInfo | undefined) {
+  const u = g.userData as { sleeveMat: THREE.MeshStandardMaterial; capMat: THREE.MeshStandardMaterial; helmetMat: THREE.MeshStandardMaterial; gloveMat: THREE.MeshStandardMaterial; skinMat?: THREE.MeshStandardMaterial; skin: string; bat: boolean };
+  const skinHex = mine ? SKIN[mine.skin % SKIN.length] : u.skin;
+  u.skinMat?.color.set(skinHex);
+  if (u.bat && !COSMETIC_BY_ID[team.gear?.cosmetics?.gloves ?? ""]) u.gloveMat.color.set(skinHex);
+  if (mine) {
+    u.sleeveMat.color.set(mine.accent); u.capMat.color.set(mine.accent);
+    if (u.bat && !COSMETIC_BY_ID[team.gear?.cosmetics?.helmet ?? ""]) u.helmetMat.color.set(mine.accent);
+  }
+  const w = BUILD_SCALE[mine?.build ?? "regular"];
+  g.getObjectByName("rig")?.scale.set(w, 1, w);
 }
 
 /** Pooled additive particles: dirt and chalk bursts at contact, plus a slow ambient drift. */
@@ -1065,7 +1081,7 @@ class Director {
   private figure(side: Side, id: number | null, bat: boolean, position: string | null = null, glove: 0 | 1 | null = 0): THREE.Group {
     const team = this.teams[side];
     const player = id === null ? (position ? team.lineup.find((p) => p.position === position) ?? null : null) : this.player(side, id);
-    const g = makeShotFigure(this.colors[side], SKIN[(player?.id ?? id ?? 0) % SKIN.length], bat, false, glove);
+    const g = makeShotFigure(this.colors[side], SKIN[Math.abs(player?.id ?? id ?? 0) % SKIN.length], bat, false, glove);
     dress(g, team, player);
     return g;
   }

@@ -44,7 +44,8 @@ export function userSimTeam(name: string, color: string, players: Player[], seas
     return [p.id, s];
   }));
   const roles = new Map(players.map((p) => [p.id, p.ratings.role]));
-  const overall = new Map(chem.players.map((b) => [b.playerId, b.effective]));
+  // Custom players sit outside chemistry, so fall back to their own overall.
+  const overall = new Map([...players.map((p) => [p.id, p.ratings.overall] as const), ...chem.players.map((b) => [b.playerId, b.effective] as const)]);
   const sb = gear?.superBat ? BAT_BY_ID[gear.superBat] : undefined;
   return {
     name, abbr: teamAbbreviation(name), color,
