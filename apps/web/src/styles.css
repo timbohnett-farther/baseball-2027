@@ -749,3 +749,20 @@ html[data-calm="1"] .cue-caption[data-on="1"] { transition: none; }
 .arc-q.bad { color: var(--bad); box-shadow: inset 0 0 0 1px var(--bad); }
 .arc-q.info { color: var(--text-2); box-shadow: inset 0 0 0 1px rgba(242, 227, 198, 0.2); }
 .arc-after { margin-top: 8px; }
+
+/* --- Store confirm sheet and coin ledger (W40) ---------------------------------------- */
+.sheet-back { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(11, 13, 18, 0.8); }
+.panel:has(.sheet-back) { backdrop-filter: none; } /* a backdrop-filter would make the panel the containing block of the fixed overlay */
+.sheet { width: min(100%, 360px); max-height: 100%; overflow-y: auto; padding: 16px; border-radius: 12px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--dust); }
+.sheet h3 { margin: 0 0 8px; }
+.sheet-rows { margin: 0 0 8px; }
+.sheet-rows div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.sheet-rows dt { color: var(--text-2); }
+.sheet-rows dd { margin: 0; font-weight: 700; }
+.sheet-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
+.sheet-actions button { min-height: 44px; min-width: 96px; }
+.ledger { list-style: none; margin: 0; padding: 0; }
+.ledger li { display: flex; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--dust); }
+.ledger li span { flex: 1; }
+.ledger .neg { color: var(--bad); }
+.ledger .pos { color: var(--good); }

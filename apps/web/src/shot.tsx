@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { CURRENT_RULES, tutorialSetup, playInteractive, simulateGame, type GameEvent, type PlayedGame, type SimPlayer, type SimTeam, type UserInput, type InteractiveSetup } from "@bb/sim";
-import { UNLOCKS, type ArcadeFixture, type ArcadeSeasonState, type ArcadeStanding, type BracketGame, type ClubStyle, type SuggestedDifficulty } from "@bb/shared";
+import { COSMETICS, SUPER_BATS, UNLOCKS, type StoreState, type ArcadeFixture, type ArcadeSeasonState, type ArcadeStanding, type BracketGame, type ClubStyle, type SuggestedDifficulty } from "@bb/shared";
 import { ArcadeHub, ArcadeOver, StarSummary } from "./arcade.tsx";
 import { FieldView } from "./field.tsx";
+import { StoreView } from "./store.tsx";
+import { MyTeamView } from "./draft.tsx";
 import { CATALOG, type ShotPlan } from "./actionshot.ts";
 import { DuelView } from "./duel.tsx";
 import { CueCaption, showCaption } from "./captions.tsx";
@@ -153,6 +155,34 @@ function arcadeFixture(kind: "hub" | "bracket"): ArcadeSeasonState {
   };
 }
 
+/** W40 `/?shot=store`, `store-confirm`, `my-team`: the real pages over a stubbed fetch (no server in the shot harness). */
+function StoreShot({ moment }: { moment: string }) {
+  const [ready, setReady] = useState(false);
+  useMemo(() => {
+    const store: StoreState = {
+      coins: 1200, owned: ["hornet"], wins: 16, gear: { wood: { wood: "ash", length: 33, weight: 31 }, superBat: null, cosmetics: {} },
+      bats: SUPER_BATS, cosmetics: COSMETICS,
+      ledger: [
+        { id: 3, delta: 230, kind: "game", itemId: null, balanceAfter: 1200, createdAt: "2027-01-03T12:00:00Z" },
+        { id: 2, delta: -800, kind: "purchase", itemId: "hornet", balanceAfter: 970, createdAt: "2027-01-02T12:00:00Z" },
+        { id: 1, delta: 1770, kind: "game", itemId: null, balanceAfter: 1770, createdAt: "2027-01-01T12:00:00Z" },
+      ],
+    };
+    const team = { id: 1, name: "Ridgeback", color: "#c8322f", status: "drafting", players: [], draft: { size: 0, counts: {}, problems: ["Pick 9 players to fill your lineup."], ready: false }, chemistry: { effects: [], players: [], teamPower: 0, basePower: 0 } };
+    window.fetch = (async (url: string) => new Response(JSON.stringify(String(url).startsWith("/api/store") ? store : String(url).startsWith("/api/my-team") ? team : {}), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+  }, []);
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (moment === "store-confirm") { const b = document.querySelector<HTMLButtonElement>(".bat-actions .primary:not([disabled])"); if (b && !document.querySelector(".sheet")) b.click(); if (!document.querySelector(".sheet")) return; }
+      else if (!document.querySelector(moment === "store" ? ".ledger, .store" : ".team-head")) return;
+      clearInterval(t); setTimeout(() => { (window as any).__shotReady = true; setReady(true); }, 200);
+    }, 100);
+    return () => clearInterval(t);
+  }, [moment]);
+  void ready;
+  return <div className="page">{moment === "my-team" ? <MyTeamView teams={[]} /> : <StoreView />}</div>;
+}
+
 function HubShot({ moment }: { moment: string }) {
   useEffect(() => { const t = setTimeout(() => { (window as any).__shotReady = true; }, 300); return () => clearTimeout(t); }, []);
   const noop = () => {};
@@ -229,6 +259,7 @@ export function ShotView() {
   const duel = q.get("shot");
   if (duel === "perf-soak") return <SoakView />;
   if (duel === "cadence-match") return <CadenceView seed={Number(q.get("seed") ?? 11)} />;
+  if (duel === "store" || duel === "store-confirm" || duel === "my-team") return <StoreShot moment={duel} />;
   if (duel === "season-hub" || duel === "season-bracket" || duel === "season-stars") return <HubShot moment={duel} />;
   if (duel === "duel-tutorial-pitch" || duel === "duel-tutorial-swing" || duel === "duel-hint") {
     if (duel === "duel-hint") { try { localStorage.removeItem("bb.coach"); } catch { /* shot runs clean */ } }

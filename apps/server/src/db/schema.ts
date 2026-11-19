@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import type { ArcadeLeague, Gear, HittingRatings, PitchingRatings, Role } from "@bb/shared";
 import type { SimTeam, UserInput } from "@bb/sim";
 
@@ -81,6 +81,19 @@ export const userItems = pgTable("user_items", {
   itemId: text("item_id").notNull(),
   acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.itemId] })]);
+
+/** Every coin change from a purchase or a game payout, written in the same transaction as the change itself. */
+export const coinLedger = pgTable("coin_ledger", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** Signed: positive earns, negative spends. */
+  delta: integer("delta").notNull(),
+  kind: text("kind").$type<"purchase" | "game">().notNull(),
+  itemId: text("item_id"),
+  gameId: integer("game_id"),
+  balanceAfter: integer("balance_after").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("coin_ledger_user_idx").on(t.userId, t.id)]);
 
 export const userTeamPlayers = pgTable("user_team_players", {
   teamId: integer("team_id").notNull().references(() => userTeams.id, { onDelete: "cascade" }),

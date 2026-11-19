@@ -44,7 +44,7 @@ function legalTeam(): Player[] {
 test("health reports the local database and a loaded pool", async () => {
   const res = await app.inject("/health");
   assert.equal(res.json().database, "local");
-  assert.equal(res.json().migrations, 14, "every migration in drizzle/ should be applied at boot");
+  assert.equal(res.json().migrations, 15, "every migration in drizzle/ should be applied at boot");
   assert.ok(pool().players.length > 1000);
 });
 
@@ -252,6 +252,14 @@ test("coins: games pay out, the store sells bats, gear equips", async () => {
   assert.equal(bought.statusCode, 200, bought.body);
   assert.equal(bought.json().coins, 200);
   assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "hornet" } })).statusCode, 400); // already owned
+  // Unlock-track items are earned, never sold.
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { batId: "comet-tail" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: "helmet-sunburst" } })).statusCode, 400);
+  // The ledger has the game payout and the purchase; the refused buys above wrote nothing.
+  const ledger = (await app.inject({ url: "/api/store", headers })).json().ledger;
+  assert.equal(ledger.length, 2, JSON.stringify(ledger));
+  assert.deepEqual([ledger[0].kind, ledger[0].delta, ledger[0].itemId, ledger[0].balanceAfter], ["purchase", -800, "hornet", 200]);
+  assert.deepEqual([ledger[1].kind, ledger[1].delta, ledger[1].balanceAfter], ["game", game.reward.total, game.reward.total]);
 
   const gear = await app.inject({ method: "POST", url: "/api/my-team/gear", headers, payload: { superBat: "hornet", wood: { wood: "maple", length: 34, weight: 32 } } });
   assert.equal(gear.statusCode, 200, gear.body);
@@ -370,6 +378,40 @@ test("player development: games earn XP, levels are a badge, only the server wri
   assert.equal(inSim.batting.contact, (chem.skills.contact ?? grown.ratings.hitting.contact) + woodDeltas(DEFAULT_WOOD).contact);
 });
 
+test("legendary drops: reaching or passing a milestone awards the bat once, and a late player catches up", async () => {
+  const { res: su, cookie } = await signup("veteran", undefined, "10.0.0.31");
+  assert.equal(su.statusCode, 201, su.body);
+  const headers = { cookie };
+  await app.inject({ method: "POST", url: "/api/my-team", headers, payload: { name: "Veterans", color: "#2e9e5b" } });
+  for (const p of legalTeam()) await app.inject({ method: "POST", url: `/api/my-team/players/${p.id}`, headers });
+  await app.inject({ method: "POST", url: "/api/my-team/finish", headers });
+  const opp = pool().teams[0];
+  const { getDb } = await import("./db/index.ts");
+  const { games, userItems, userTeams, users } = await import("./db/schema.ts");
+  const { and, eq } = await import("drizzle-orm");
+  const db = getDb();
+  const [u] = await db.select().from(users).where(eq(users.username, "veteran"));
+  const [t] = await db.select().from(userTeams).where(eq(userTeams.userId, u.id));
+  const addWins = (n: number) => db.insert(games).values(Array.from({ length: n }, () => ({
+    userId: u.id, teamId: t.id, opponentTeamId: opp.id, seed: 1, innings: 9, userSide: "home" as const, teams: {} as never, userScore: 1, opponentScore: 0, result: "W" as const,
+  })));
+  const has = async (id: string) => (await db.select().from(userItems).where(and(eq(userItems.userId, u.id), eq(userItems.itemId, id)))).length;
+  const play = async () => (await app.inject({ method: "POST", url: "/api/games", headers, payload: { opponentTeamId: opp.id } })).json();
+
+  await addWins(20); // already past the 15-win milestone before this payout
+  await play();
+  assert.equal(await has("ninth-wave"), 1, "past the milestone gets the bat on the next payout");
+  assert.equal(await has("midnight-sun"), 0);
+  const again = await play();
+  assert.equal(again.reward.drop, null);
+  assert.equal(await has("ninth-wave"), 1, "never awarded twice");
+
+  await addWins(10);
+  await play();
+  assert.equal(await has("midnight-sun"), 1);
+  assert.equal(await has("ninth-wave"), 1);
+});
+
 test("cosmetics: colourways buy with coins, equip per slot, ride into the sim team as looks only", async () => {
   const { res: su, cookie } = await signup("stylist", undefined, "10.0.0.13");
   assert.equal(su.statusCode, 201, su.body);
@@ -381,7 +423,7 @@ test("cosmetics: colourways buy with coins, equip per slot, ride into the sim te
   const store = (await app.inject({ url: "/api/store", headers })).json();
   assert.ok(store.cosmetics.length >= 12);
   const helmet = store.cosmetics.find((c: { slot: string }) => c.slot === "helmet");
-  const cleats = store.cosmetics.find((c: { slot: string; tier: string }) => c.slot === "cleats" && c.tier === "rare");
+  const cleats = store.cosmetics.find((c: { id: string }) => c.id === "cleats-gold"); // rare and for sale (Ice Blue is unlock-only)
 
   // Broke, unknown, and not-owned are all refused.
   assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } })).statusCode, 400);
@@ -395,6 +437,8 @@ test("cosmetics: colourways buy with coins, equip per slot, ride into the sim te
   const bought = await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } });
   assert.equal(bought.statusCode, 200, bought.body);
   assert.equal(bought.json().coins, 400 - helmet.price);
+  const stock = (await app.inject({ url: "/api/store", headers })).json();
+  assert.equal(stock.ledger.length, 1, "the refused buys wrote no ledger rows");
   assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: helmet.id } })).statusCode, 400); // owned
   assert.equal((await app.inject({ method: "POST", url: "/api/store/buy", headers, payload: { cosmeticId: cleats.id } })).statusCode, 400); // rare, too poor now
 

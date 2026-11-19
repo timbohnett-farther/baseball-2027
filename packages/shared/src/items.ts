@@ -132,6 +132,17 @@ export interface Gear {
   cosmetics?: Cosmetics;
 }
 
+/** One line of the coin ledger: signed coins and what the wallet held afterwards. */
+export interface CoinLedgerEntry {
+  id: number;
+  delta: number;
+  kind: "purchase" | "game";
+  /** The item bought, for purchases. */
+  itemId: string | null;
+  balanceAfter: number;
+  createdAt: string;
+}
+
 export interface StoreState {
   coins: number;
   owned: string[];
@@ -139,6 +150,8 @@ export interface StoreState {
   bats: SuperBat[];
   cosmetics: Cosmetic[];
   wins: number;
+  /** Newest first, about ten. */
+  ledger: CoinLedgerEntry[];
 }
 
 export interface BuyRequest { batId?: string; cosmeticId?: string }

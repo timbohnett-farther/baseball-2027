@@ -271,8 +271,10 @@ export const UNLOCKS: Unlock[] = [
   { stars: 18, kind: "item", label: "Comet Tail bat", itemId: "comet-tail" },
   { stars: 21, kind: "item", label: "Ice Blue cleats", itemId: "cleats-ice" },
   { stars: 24, kind: "item", label: "Hot Pink gloves", itemId: "gloves-pink" },
-  { stars: 27, kind: "item", label: "Champion crown helmet", itemId: "helmet-sunburst" },
+  { stars: 27, kind: "item", label: "Sunburst helmet", itemId: "helmet-sunburst" },
 ];
+/** Lifetime stars that award each unlock-track item; those items are never sold for coins. */
+export const UNLOCK_STARS_BY_ITEM: Record<string, number> = Object.fromEntries(UNLOCKS.filter((u) => u.itemId).map((u) => [u.itemId!, u.stars]));
 /** Past the last unlock, every three more stars pays this. */
 export const UNLOCK_REPEAT_COINS = 100;
 

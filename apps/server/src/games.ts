@@ -5,7 +5,7 @@ import { ARCADE_FORMAT, BAT_BY_ID, chemistry, cleanPace, coinsFor, DEFAULT_WOOD,
 import { ABILITIES, autoLineup, CURRENT_RULES, DEFAULT_INNINGS, INNINGS_OPTIONS, isDifficulty, playInteractive, simulateGame, type AbilityRequest, type Aim, type GameHistory, type GameResult, type InteractiveSetup, type PlayedGame, type RulesVersion, type SimPlayer, type SimTeam, type UserInput } from "@bb/sim";
 import { requireUser } from "./auth.ts";
 import { getDb, type Db } from "./db/index.ts";
-import { games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
+import { coinLedger, games, mlbTeams, userItems, userTeamPlayers, userTeams, users } from "./db/schema.ts";
 import { settleArcade } from "./arcade-season.ts";
 import { seasonMatch, settleSeason, type SeasonRow } from "./season.ts";
 import { pool } from "./store.ts";
@@ -61,7 +61,7 @@ export function userSimTeam(name: string, color: string, players: Player[], seas
  * Pay out a finished game: coins by the rules in @bb/shared, plus a Legendary bat at win milestones.
  * The only place coins are ever added; the client never sends a coin amount.
  */
-async function payout(db: Db, userId: number, result: GameResult, outcome: "W" | "L" | "T", me: "home" | "away" = "home"): Promise<NonNullable<PlayedGame["reward"]>> {
+async function payout(db: Db, userId: number, result: GameResult, outcome: "W" | "L" | "T", me: "home" | "away" = "home"): Promise<{ reward: NonNullable<PlayedGame["reward"]>; ledgerId: number }> {
   const history = await db.select({ result: games.result }).from(games).where(eq(games.userId, userId)).orderBy(desc(games.id));
   let streak = 0;
   for (const g of history) { if (g.result !== "W") break; streak++; }
@@ -73,16 +73,21 @@ async function payout(db: Db, userId: number, result: GameResult, outcome: "W" |
     result: outcome, shutout: result.final[opp] === 0, homers: result.box.batting[me].reduce((n, b) => n + b.hr, 0),
     comeback: trailedBy >= 2, streak,
   });
-  await db.update(users).set({ coins: sql`${users.coins} + ${c.total}` }).where(eq(users.id, userId));
-
-  let drop: NonNullable<PlayedGame["reward"]>["drop"] = null;
-  const milestone = LEGENDARY_MILESTONES.find((m) => m.wins === wins);
-  if (outcome === "W" && milestone) {
-    const inserted = await db.insert(userItems).values({ userId, itemId: milestone.batId }).onConflictDoNothing().returning();
-    if (inserted.length) drop = { id: milestone.batId, name: BAT_BY_ID[milestone.batId].name };
-  }
+  // Coins, any Legendary drops and the ledger line commit together or not at all.
+  // A bat is owed for every milestone the win count has reached or passed, so a player already past one gets it now.
+  let ledgerId = 0;
+  const drop = await db.transaction(async (tx) => {
+    const [paid] = await tx.update(users).set({ coins: sql`${users.coins} + ${c.total}` }).where(eq(users.id, userId)).returning({ coins: users.coins });
+    ledgerId = (await tx.insert(coinLedger).values({ userId, delta: c.total, kind: "game", balanceAfter: paid.coins }).returning({ id: coinLedger.id }))[0].id;
+    let first: NonNullable<PlayedGame["reward"]>["drop"] = null;
+    for (const m of LEGENDARY_MILESTONES.filter((m) => wins >= m.wins)) {
+      const inserted = await tx.insert(userItems).values({ userId, itemId: m.batId }).onConflictDoNothing().returning();
+      if (inserted.length && !first) first = { id: m.batId, name: BAT_BY_ID[m.batId].name };
+    }
+    return first;
+  });
   const { total, ...coins } = c;
-  return { total, coins, drop };
+  return { reward: { total, coins, drop }, ledgerId };
 }
 
 /**
@@ -289,11 +294,12 @@ export async function gameRoutes(app: FastifyInstance) {
       const pace = cleanPace(req.body?.pace);
       if (pace) req.log.info({ pace, seed }, "match pace");
       const outcome = result.winner === null ? "T" : result.winner === side ? "W" : "L";
-      const reward = await payout(db, req.user!.id, result, outcome, side);
+      const { reward, ledgerId } = await payout(db, req.user!.id, result, outcome, side);
       const [row] = await db.insert(games).values({
         userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed: seed!, innings: len.innings, rules, difficulty,
         userSide: side, teams, inputs, clientGameId, userScore: result.final[side], opponentScore: result.final[other], result: outcome, coins: reward.total,
       }).returning();
+      await db.update(coinLedger).set({ gameId: row.id }).where(eq(coinLedger.id, ledgerId));
       if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward, side);
       reward.levelUps = await awardXp(db, team.id, result, outcome, side);
       const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: side, teams, result, reward, rules: row.rules, difficulty: row.difficulty };
@@ -314,12 +320,13 @@ export async function gameRoutes(app: FastifyInstance) {
     const seed = randomInt(0, 2 ** 31 - 1);
     const result = simulateGame({ ...teams, seed, innings: len.innings, rules: CURRENT_RULES, facts: true });
     const outcome = result.winner === null ? "T" : result.winner === "home" ? "W" : "L";
-    const reward = await payout(db, req.user!.id, result, outcome);
+    const { reward, ledgerId } = await payout(db, req.user!.id, result, outcome);
 
     const [row] = await db.insert(games).values({
       userId: req.user!.id, teamId: team.id, opponentTeamId: Number(req.body!.opponentTeamId), seed, innings: len.innings, rules: CURRENT_RULES,
       userSide: "home", teams, userScore: result.final.home, opponentScore: result.final.away, result: outcome, coins: reward.total,
     }).returning();
+    await db.update(coinLedger).set({ gameId: row.id }).where(eq(coinLedger.id, ledgerId));
     if (season) await settleSeasonGame(db, season, row.id, outcome, result, reward);
     reward.levelUps = await awardXp(db, team.id, result, outcome);
     const body: PlayedGame = { id: row.id, createdAt: row.createdAt.toISOString(), opponent: { id: Number(req.body!.opponentTeamId), name: opponent.name, abbr: opponent.abbr }, userSide: "home", teams, result, reward, rules: row.rules };

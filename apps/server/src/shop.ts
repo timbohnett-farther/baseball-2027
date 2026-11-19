@@ -1,14 +1,15 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
-  BAT_BY_ID, COSMETIC_BY_ID, COSMETIC_SLOTS, COSMETICS, DEFAULT_WOOD, isWoodSpec, SUPER_BATS,
+  BAT_BY_ID, COSMETIC_BY_ID, COSMETIC_SLOTS, COSMETICS, DEFAULT_WOOD, isWoodSpec, SUPER_BATS, UNLOCK_STARS_BY_ITEM,
   type BuyRequest, type Cosmetics, type Gear, type GearRequest, type StoreState,
 } from "@bb/shared";
 import { requireUser } from "./auth.ts";
 import { getDb } from "./db/index.ts";
-import { games, userItems, userTeams, users } from "./db/schema.ts";
+import { coinLedger, games, userItems, userTeams, users } from "./db/schema.ts";
 
 const DEFAULT_GEAR: Gear = { wood: DEFAULT_WOOD, superBat: null };
+const LEDGER_SHOWN = 10;
 
 export async function shopRoutes(app: FastifyInstance) {
   app.get("/api/store", { preHandler: requireUser }, async (req): Promise<StoreState> => {
@@ -19,7 +20,9 @@ export async function shopRoutes(app: FastifyInstance) {
     const [team] = await db.select({ gear: userTeams.gear }).from(userTeams).where(eq(userTeams.userId, userId));
     const [{ wins }] = await db.select({ wins: sql<number>`count(*)::int` }).from(games)
       .where(and(eq(games.userId, userId), eq(games.result, "W")));
-    return { coins: me?.coins ?? 0, owned, gear: team?.gear ?? DEFAULT_GEAR, bats: SUPER_BATS, cosmetics: COSMETICS, wins };
+    const ledger = (await db.select().from(coinLedger).where(eq(coinLedger.userId, userId)).orderBy(desc(coinLedger.id)).limit(LEDGER_SHOWN))
+      .map((r) => ({ id: r.id, delta: r.delta, kind: r.kind, itemId: r.itemId, balanceAfter: r.balanceAfter, createdAt: r.createdAt.toISOString() }));
+    return { coins: me?.coins ?? 0, owned, gear: team?.gear ?? DEFAULT_GEAR, bats: SUPER_BATS, cosmetics: COSMETICS, wins, ledger };
   });
 
   app.post<{ Body: BuyRequest }>("/api/store/buy", { preHandler: requireUser }, async (req, reply) => {
@@ -35,6 +38,8 @@ export async function shopRoutes(app: FastifyInstance) {
       if (bat.tier === "legendary") return reply.code(400).send({ error: "Legendary bats can't be bought. Win games to earn one." });
       item = { ...bat, what: "bat" };
     }
+    const stars = UNLOCK_STARS_BY_ITEM[item.id];
+    if (stars !== undefined) return reply.code(400).send({ error: `${item.name} can't be bought. Earn ${stars} stars to unlock it.` });
     const result = await purchase(req.user!.id, item.id, item.price);
     if (result === "owned") return reply.code(400).send({ error: `You already own that ${item.what}.` });
     if (result === "poor") return reply.code(400).send({ error: `Not enough coins. ${item.name} costs ${item.price}.` });
@@ -88,6 +93,7 @@ async function purchase(userId: number, itemId: string, price: number): Promise<
       .where(and(eq(users.id, userId), sql`${users.coins} >= ${price}`)).returning({ coins: users.coins });
     if (!paid) return "poor" as const;
     await tx.insert(userItems).values({ userId, itemId });
+    await tx.insert(coinLedger).values({ userId, delta: -price, kind: "purchase", itemId, balanceAfter: paid.coins });
     return paid.coins;
   });
 }

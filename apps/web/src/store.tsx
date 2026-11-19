@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  COSMETIC_SLOTS, LEGENDARY_MILESTONES, woodDeltas,
+  COSMETIC_SLOTS, LEGENDARY_MILESTONES, UNLOCK_STARS_BY_ITEM, woodDeltas,
   type BatLength, type BatWeight, type Cosmetic, type CosmeticSlot, type Gear, type StoreState, type SuperBat, type Wood,
 } from "@bb/shared";
 import { StarSummary } from "./arcade.tsx";
@@ -20,11 +20,36 @@ const SLOT_LABEL: Record<CosmeticSlot, { title: string; note: string }> = {
   gloves: { title: "Batting gloves", note: "Looks only. Zero effect on ratings." },
 };
 
+type Ask = { id: string; name: string; price: number; bat: boolean };
+
+/** Nothing is bought on a single tap: this sheet shows the item, its price and what is left, then asks. */
+function ConfirmSheet({ ask, coins, busy, onCancel, onBuy }: { ask: Ask; coins: number; busy: boolean; onCancel: () => void; onBuy: () => void }) {
+  const short = ask.price - coins;
+  return (
+    <div className="sheet-back" onClick={onCancel}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={`Buy ${ask.name}`} onClick={(e) => e.stopPropagation()}>
+        <h3>Buy {ask.name}?</h3>
+        <dl className="sheet-rows">
+          <div><dt>Price</dt><dd>{ask.price.toLocaleString()} coins</dd></div>
+          <div><dt>You have</dt><dd>{coins.toLocaleString()} coins</dd></div>
+          <div><dt>After buying</dt><dd>{short > 0 ? "–" : `${(coins - ask.price).toLocaleString()} coins`}</dd></div>
+        </dl>
+        {short > 0 && <p className="muted" role="status">Need {short.toLocaleString()} more coins</p>}
+        <div className="sheet-actions">
+          <button className="link" onClick={onCancel}>Cancel</button>
+          <button className="primary" disabled={short > 0 || busy} onClick={onBuy}>Buy</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Coins, the wood bat you swing every day, and the Super Power Bats you can buy or earn. */
 export function StoreView() {
   const [store, setStore] = useState<StoreState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
 
   const load = () => api<StoreState>("/api/store").then(setStore, (e: Error) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -36,21 +61,15 @@ export function StoreView() {
       setStore((s) => s && { ...s, gear });
     } catch (e) { setError((e as Error).message); }
   };
-  const buy = async (bat: SuperBat) => {
-    setError(null); setBusy(bat.id);
+  const confirmBuy = async () => {
+    if (!ask) return;
+    setError(null); setBusy(ask.id);
     try {
-      const r = await api<{ coins: number; batId: string }>("/api/store/buy", { body: { batId: bat.id } });
-      setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.batId] });
-      toast(`${bat.name} is yours. ${r.coins.toLocaleString()} coins left.`);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
-  };
-  const buyLook = async (c: Cosmetic) => {
-    setError(null); setBusy(c.id);
-    try {
-      const r = await api<{ coins: number; itemId: string }>("/api/store/buy", { body: { cosmeticId: c.id } });
-      setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, r.itemId] });
-      toast(`${c.name} added to your locker.`);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+      const r = await api<{ coins: number; batId?: string; itemId?: string }>("/api/store/buy", { body: ask.bat ? { batId: ask.id } : { cosmeticId: ask.id } });
+      setStore((s) => s && { ...s, coins: r.coins, owned: [...s.owned, ask.id] });
+      toast(ask.bat ? `${ask.name} is yours. ${r.coins.toLocaleString()} coins left.` : `${ask.name} added to your locker.`);
+      load(); // the new purchase shows up in Recent coins
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); setAsk(null); }
   };
 
   if (error && !store) return <section className="panel"><ErrorNote message={error} onRetry={load} /></section>;
@@ -67,7 +86,7 @@ export function StoreView() {
         <div className="coins"><span className="coin" aria-hidden /> <b>{store.coins.toLocaleString()}</b> coins</div>
       </div>
       <p className="muted">Win games to earn coins. Every win pays, shutouts and homers pay extra, and a streak keeps adding up.</p>
-      <ErrorNote message={error} />
+      <ErrorNote message={error} onRetry={load} />
 
       <h3>Your wood bat</h3>
       <div className="wood">
@@ -98,13 +117,15 @@ export function StoreView() {
               {store.cosmetics.filter((c) => c.slot === slot).map((c) => {
                 const owned = store.owned.includes(c.id);
                 const on = worn === c.id;
+                const stars = UNLOCK_STARS_BY_ITEM[c.id];
+                const locked = !owned && stars !== undefined;
                 return (
                   <button key={c.id} className={`swatch tier-${c.tier} ${on ? "on" : ""}`} title={c.name}
-                    disabled={busy === c.id || (!owned && store.coins < c.price)}
-                    onClick={() => (on ? setGear({ cosmetics: { [slot]: null } }) : owned ? setGear({ cosmetics: { [slot]: c.id } }) : buyLook(c))}>
+                    disabled={busy === c.id || locked}
+                    onClick={() => (on ? setGear({ cosmetics: { [slot]: null } }) : owned ? setGear({ cosmetics: { [slot]: c.id } }) : setAsk({ id: c.id, name: c.name, price: c.price, bat: false }))}>
                     <span className="swatch-dot" style={{ background: c.color }} />
                     <span>{c.name}</span>
-                    <small>{on ? "Worn" : owned ? "Owned" : `${c.price}`}</small>
+                    <small>{on ? "Worn" : owned ? "Owned" : locked ? `Unlock at ${stars} stars` : `${c.price}`}</small>
                   </button>
                 );
               })}
@@ -136,19 +157,36 @@ export function StoreView() {
               <div className="bat-actions">
                 {equipped ? <button className="link" onClick={() => setGear({ superBat: null })}>Unequip</button>
                   : owned ? <button className="primary" onClick={() => setGear({ superBat: b.id })}>Equip</button>
-                  : milestone ? <span className="muted">Win {milestone} games to earn it · {store.wins}/{milestone}</span>
-                  : <button className="primary" disabled={busy === b.id || store.coins < b.price} onClick={() => buy(b)}>
+                  : milestone ? <span className="chip">Unlock at {milestone} wins · {store.wins}/{milestone}</span>
+                  : UNLOCK_STARS_BY_ITEM[b.id] !== undefined ? <span className="chip">Unlock at {UNLOCK_STARS_BY_ITEM[b.id]} stars</span>
+                  : <button className="primary" disabled={busy === b.id} onClick={() => setAsk({ id: b.id, name: b.name, price: b.price, bat: true })}>
                       Buy · {b.price.toLocaleString()}
                     </button>}
-                {equipped && <span className="chip ready">Equipped</span>}
+                {equipped ? <span className="chip ready">Equipped</span> : owned && <span className="chip">Owned</span>}
               </div>
             </article>
           );
         })}
       </div>
+
+      <h3>Recent coins</h3>
+      {store.ledger.length === 0 ? <p className="muted">Nothing yet. Win a game or buy something and it shows up here.</p> : (
+        <ul className="ledger">
+          {store.ledger.map((l) => (
+            <li key={l.id}>
+              <span>{l.kind === "game" ? "Game reward" : `Bought ${itemName(store, l.itemId)}`}</span>
+              <b className={l.delta < 0 ? "neg" : "pos"}>{l.delta > 0 ? "+" : ""}{l.delta.toLocaleString()}</b>
+              <small className="muted">{l.balanceAfter.toLocaleString()} left</small>
+            </li>
+          ))}
+        </ul>
+      )}
+      {ask && <ConfirmSheet ask={ask} coins={store.coins} busy={busy === ask.id} onCancel={() => setAsk(null)} onBuy={confirmBuy} />}
     </section>
   );
 }
+
+const itemName = (s: StoreState, id: string | null) => s.bats.find((b) => b.id === id)?.name ?? s.cosmetics.find((c) => c.id === id)?.name ?? "an item";
 
 function Pick<T extends string | number>({ label, options, value, onPick }: {
   label: string; options: { v: T; label: string; note: string }[]; value: T; onPick: (v: T) => void;
